@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Read by CPack once the actual generator has been selected. ZIP stays unchanged.
+if(CPACK_GENERATOR STREQUAL "DEB")
+ find_program(CHOSUTA_DPKG_SHLIBDEPS dpkg-shlibdeps REQUIRED)
+ find_program(CHOSUTA_DPKG dpkg REQUIRED)
+ if(NOT CPACK_PACKAGE_CONTACT)
+  message(FATAL_ERROR "Set CPACK_PACKAGE_CONTACT to the real maintainer's Name <email>.")
+ endif()
+ execute_process(COMMAND "${CHOSUTA_DPKG}" --print-architecture
+  OUTPUT_VARIABLE CPACK_DEBIAN_PACKAGE_ARCHITECTURE OUTPUT_STRIP_TRAILING_WHITESPACE
+  COMMAND_ERROR_IS_FATAL ANY)
+ set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
+ set(CPACK_DEBIAN_PACKAGE_NAME chosuta)
+ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+ set(CPACK_DEBIAN_PACKAGE_RELEASE 1)
+ set(CPACK_DEBIAN_PACKAGE_SECTION sound)
+ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+ # QPA is loaded at runtime, so ELF dependency scanning cannot find it.
+ set(CPACK_DEBIAN_PACKAGE_DEPENDS "qt6-qpa-plugins (>= 6.4)")
+ set(CPACK_DEBIAN_PACKAGE_RECOMMENDS ffmpeg)
+elseif(CPACK_GENERATOR STREQUAL "RPM")
+ find_program(CHOSUTA_RPMBUILD rpmbuild REQUIRED)
+ set(CPACK_PACKAGING_INSTALL_PREFIX /usr)
+ set(CPACK_RPM_PACKAGE_NAME chosuta)
+ set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+ set(CPACK_RPM_PACKAGE_RELEASE 1)
+ set(CPACK_RPM_PACKAGE_LICENSE GPL-3.0-or-later)
+ set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+ set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+ set(CPACK_RPM_PACKAGE_RELOCATABLE OFF)
+ # Loaded plugins need distro-specific metadata supplied by the packaging caller.
+ if(NOT CPACK_RPM_PACKAGE_REQUIRES)
+  message(FATAL_ERROR "Set CPACK_RPM_PACKAGE_REQUIRES to the target distro's Qt QPA plugin package(s).")
+ endif()
+endif()

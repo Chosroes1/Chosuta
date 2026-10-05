@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Local source recipe. Before AUR submission, set a real public project URL,
+# replace the local source with its public release URL and add a Maintainer line.
+pkgname=chosuta
+pkgver=@VERSION@
+pkgrel=2
+pkgdesc='Score-driven lip animation editor with SVP import'
+arch=('x86_64')
+license=('GPL-3.0-or-later')
+depends=('glibc' 'gcc-libs' 'qt6-base>=6.4' 'qt6-multimedia>=6.4' 'icu>=67')
+makedepends=('cmake>=3.24' 'ninja')
+checkdepends=('ffmpeg')
+optdepends=('ffmpeg: video export and attached audio duration detection')
+options=('!debug')
+source=("Chosuta-${pkgver}-source.zip")
+sha256sums=('@SHA256@')
+
+build() {
+ cmake -S "Chosuta-${pkgver}" -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_TESTING=ON
+ cmake --build build --parallel 4
+}
+
+check() {
+ ctest --test-dir build --output-on-failure
+}
+
+package() {
+ DESTDIR="$pkgdir" cmake --install build
+}

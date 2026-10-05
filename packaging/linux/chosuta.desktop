@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Chosuta
+Comment=Create lip animations from SVP scores
+Comment[zh_CN]=根据 SVP 乐谱制作口形动画
+Comment[ja]=SVP 楽譜から口パクアニメーションを作成
+Exec=chosuta %f
+TryExec=chosuta
+Icon=chosuta
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=SVP;animation;lip;
+StartupNotify=true

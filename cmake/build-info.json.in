@@ -1,0 +1,11 @@
+{
+  "chosutaVersion": "@PROJECT_VERSION@",
+  "systemName": "@CMAKE_SYSTEM_NAME@",
+  "pointerBytes": @CMAKE_SIZEOF_VOID_P@,
+  "compilerID": "@CMAKE_CXX_COMPILER_ID@",
+  "compilerArchitecture": "@CMAKE_CXX_COMPILER_ARCHITECTURE_ID@",
+  "compilerVersion": "@CMAKE_CXX_COMPILER_VERSION@",
+  "qtVersion": "@Qt6_VERSION@",
+  "icuVersion": "@ICU_VERSION@",
+  "cmakeVersion": "@CMAKE_VERSION@"
+}

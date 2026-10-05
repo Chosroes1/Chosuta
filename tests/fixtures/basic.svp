@@ -1,0 +1,68 @@
+{
+  "version": 196,
+  "time": {
+    "tempo": [
+      {
+        "position": 0,
+        "bpm": 120
+      }
+    ],
+    "meter": [
+      {
+        "index": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "name": "Original test",
+      "mainGroup": {
+        "uuid": "g",
+        "notes": [
+          {
+            "uuid": "n0",
+            "onset": 0,
+            "duration": 705600000,
+            "pitch": 60,
+            "lyrics": "い",
+            "phonemes": "a"
+          },
+          {
+            "uuid": "n1",
+            "onset": 705600000,
+            "duration": 705600000,
+            "pitch": 60,
+            "lyrics": "i",
+            "phonemes": "i"
+          },
+          {
+            "uuid": "n2",
+            "onset": 1411200000,
+            "duration": 705600000,
+            "pitch": 60,
+            "lyrics": "u",
+            "phonemes": "u"
+          },
+          {
+            "uuid": "n3",
+            "onset": 2116800000,
+            "duration": 705600000,
+            "pitch": 60,
+            "lyrics": "e",
+            "phonemes": "e"
+          }
+        ]
+      },
+      "mainRef": {
+        "uuid": "main",
+        "blickOffset": 0,
+        "database": {
+          "language": "japanese",
+          "phoneset": "romaji"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later; Copyright (C) 2026 Chosuta contributors. Original vector artwork. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+ <rect x="4" y="4" width="120" height="120" rx="26" fill="#25364b"/>
+ <path d="M25 55 Q64 30 103 55 L103 73 Q64 103 25 73Z" fill="#f4a6ac"/>
+ <ellipse cx="64" cy="64" rx="30" ry="12" fill="#25364b"/>
+ <path d="M41 58 H87 Q64 72 41 58" fill="#ffffff"/>
+</svg>
