@@ -32,7 +32,7 @@ Chosuta是一个导入虚拟歌姬音声合成软件工程与口型立绘后直�
 
 ### 直接下载
 
-在本 GitHub 仓库的 **Releases** 页面下载与操作系统和架构匹配的二进制包。
+在本 GitHub 仓库的 [Releases](https://github.com/Chosroes1/Chosuta/releases) 页面下载与操作系统和架构匹配的二进制包。
 
 ### 从源码构建：Linux
 
