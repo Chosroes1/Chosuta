@@ -39,7 +39,7 @@ namespace chosuta {
         QString path, code, message;
     };
     struct Note {
-        QString id, lyrics, phonemes, language="ja", phoneset;
+        QString id, lyrics, phonemes, language="ja", phoneset, groupInstance;
         qint64 onset=0, duration=0;
         int pitch=60;
         bool muted=false;
@@ -67,10 +67,29 @@ namespace chosuta {
         QString mode="shape", shape="closed";
         double holdSeconds=.12;
     };
+    constexpr qint64 DictionaryByteLimit=3000000;
+    struct DictionaryReading {
+        QString text;
+        bool phonemes=false;
+        bool operator==(const DictionaryReading &)const=default;
+    };
+    struct PronunciationOptions {
+        bool japaneseKanji=false;
+        QMap<QString,QMap<QString,DictionaryReading>> words;
+        bool operator==(const PronunciationOptions &)const=default;
+    };
+    QString dictionaryKey(const QString &word,const QString &language);
+    QJsonObject pronunciationOptionsJson(const PronunciationOptions &);
+    PronunciationOptions pronunciationOptionsRead(const QJsonValue &);
+    qint64 builtinDictionaryBytes();
+    qint64 pronunciationDictionaryBytes(const PronunciationOptions &);
+    void validatePronunciationOptions(const PronunciationOptions &);
     struct Rules {
         QString language="auto";
         bool harmonyTakeover=true;
         double consonantRatio=.18;
+        // A shared budget for each leading/trailing consonant group. Zero keeps legacy timing.
+        double consonantMaxSeconds=.08;
         QMap<QString,Policy> special {
             {
                 "rest", {
@@ -103,6 +122,7 @@ namespace chosuta {
         QMap<QString,QString> readings;
         // note source identity -> user pronunciation
         QString englishDictionary;
+        PronunciationOptions pronunciation;
     };
     struct Event {
         QString id, source, track, shape, provenance, text;
@@ -129,6 +149,35 @@ namespace chosuta {
         QString format="mp4",ffmpeg="ffmpeg";
         double duration=0,syncOffset=0,audioOffset=0;
     };
+    struct SubtitleStyle {
+        QString family, alignment="center";
+        QColor color=Qt::white;
+        double x=.5,y=.86,width=.85,fontHeight=.055;
+        bool bold=false,italic=false,outline=true;
+        bool operator==(const SubtitleStyle &)const=default;
+    };
+    struct SubtitleCue {
+        QString id,text,anchor="seconds",sourceTrack;
+        QStringList sourceNotes;
+        double start=0,end=2; // Last valid video interval; also orphan fallback.
+        qint64 startBlick=0,endBlick=0;
+        bool ownStyle=false;
+        SubtitleStyle style;
+        bool operator==(const SubtitleCue &)const=default;
+    };
+    struct SubtitleTrack {
+        QString id,name,sourceTrack;
+        bool enabled=true,alignLyrics=false;
+        SubtitleStyle style;
+        QVector<SubtitleCue> cues;
+        bool operator==(const SubtitleTrack &)const=default;
+    };
+    struct SubtitleInterval {double start=0,end=0;bool orphan=false;};
+    struct LyricSpan {
+        QString text,groupInstance;
+        QStringList notes;
+        qint64 start=0,end=0;
+    };
     struct Project {
         Score score;
         QStringList selected;
@@ -140,6 +189,8 @@ namespace chosuta {
         QString fallback="closed",audioPath;
         CanvasSettings canvas;
         ExportSettings output;
+        bool subtitlesEnabled=false;
+        QVector<SubtitleTrack> subtitles;
         double audioDuration=0,playbackReturnPosition=0;
         double duration() const;
         QVector<Event> effective() const;
@@ -150,16 +201,27 @@ namespace chosuta {
         void split(const Event &event,double position);
         void merge(const QVector<Event> &events);
     };
+    QSet<QString> subtitleSources(const Project &);
+    SubtitleInterval subtitleInterval(const Project &,const SubtitleCue &,const QSet<QString> *sources=nullptr);
+    QVector<LyricSpan> lyricSpans(const Project &,const QString &track);
+    void setSubtitleTime(const Project &,SubtitleCue &,double start,double end,bool beats=false);
+    void alignSubtitle(const Project &,SubtitleCue &,const QString &track,const LyricSpan &first,const LyricSpan &last);
+    void validateSubtitleStyle(const SubtitleStyle &);
+    void validateSubtitles(const Project &,bool checkOverlap=false);
+    QJsonObject subtitlesJson(const Project &);
+    void readSubtitles(Project &,const QJsonValue &);
     QVector<Event> generate(const Project &project,const std::atomic_bool *cancel=nullptr,Progress progress={});
     QVector<Event> resolveEvents(const QVector<Event> &events);
     const Event *eventAt(const QVector<Event> &events,double time,bool disjoint=false);
     QString shapeAt(const Project &project,const QVector<Event> &events,double time,bool disjoint=false);
+    enum class SegmentRole {Consonant,Vowel,Special};
     struct Pronunciation {
         QVector<QStringList> syllables;
+        QVector<QVector<SegmentRole>> roles;
         QString provenance;
         bool unknown=false;
     };
-    Pronunciation pronounce(const QString &text,const QString &language,bool explicitPhones=false,const QString &dictionary={});
+    Pronunciation pronounce(const QString &text,const QString &language,bool explicitPhones=false,const QString &dictionary={},const QString &phoneset={},const PronunciationOptions &options={});
     void saveProject(const Project &p,const QString &path);
     Project loadProject(const QString &path);
     // Providers propose a separate layer, never mutate a project or its edits.

@@ -6,7 +6,7 @@
 
 README.md 主体为中文，链接到 README.ja.md 和 README.en.md。作者填写项目的一句话简介及 1、2、5、9、10；系统要求、下载/源码安装、实现原理、结构、组件和 GPLv3 已按当前实现填写。英文/日文使用相同章节分工。作者补写中文后，应同步另两种语言或明确其更新状态。
 
-当前代码版本 0.2.2，Arch 包修订 2。Windows 原生构建、DEB/RPM 运行和 AUR 公开条目没有验证/发布，不应在 README 或 Release 中写成已完成。
+当前根目录源码版本 0.4.1；历史 Arch 二进制交付仍为 0.2.2、包修订 2。Windows 原生构建、DEB/RPM 运行和 AUR 公开条目没有验证/发布，不应在 README 或 Release 中写成已完成。
 
 ## 整理源码
 
@@ -15,6 +15,10 @@ README.md 主体为中文，链接到 README.ja.md 和 README.en.md。作者填�
 ```sh
 python3 scripts/prepare-github.py out/github/Chosuta --report out/github/source-audit.json
 ```
+
+输出目录已存在且含作者 README 或 Git 历史时，不直接运行上述“新建目录”命令覆盖它；按公开白名单逐文件更新已授权的源码/技术文档，保留作者 README 和 `.git`。README 要求不改时，不改写、删除或补写任何 README；英文/日文 README 是可选文件，缺少它们不影响 CMake 安装或源码 ZIP 的文件清单。若作者 README 仍有旧版本描述，由作者自行更新。
+
+更新已有 Git 仓库时，在目录之外建立仅含上传文件的验证镜像，对镜像执行敏感信息扫描和构建检查；Git 对象/配置不属于上传内容，不删除历史或把它复制进源码 ZIP。只更新本地目录，不提交/上传；不要覆盖以前的核验报告或 Release 附件。
 
 上传的是 `out/github/Chosuta/` 中的内容，包括隐藏文件 `.gitignore`，不是整个开发工作区，也不包括旁边的核验报告。共享白名单 `scripts/public_source.py` 同时用于源码 ZIP：包含应用、CMake、必要脚本、三语 README、公开文档、原创夹具与许可；不遍历用户工程/素材、构建和凭据目录。
 
@@ -31,12 +35,14 @@ python3 scripts/audit-public-source.py out/github/Chosuta --report out/github/so
 ## 二进制与对应源码
 
 ```sh
-python3 scripts/package-arch.py out/release/arch
+python3 scripts/package-arch.py out/release/arch-new
 ```
 
-脚本产生 `chosuta-0.2.2-2-x86_64.pkg.tar.zst`、`Chosuta-0.2.2-source.zip`、带实际 SHA-256 的 PKGBUILD 和 `.SRCINFO`。把前两个文件一起作为 Release 附件，可保留二进制的确切对应源码。脚本不安装工具或应用，输出目录存在即拒绝。
+这是另行构建新 Release 的示例，本次源码目录整理没有执行它。脚本按实际代码版本产生 Arch 安装包、`Chosuta-<代码版本>-source.zip`、带实际 SHA-256 的 PKGBUILD 和 `.SRCINFO`。把前两个文件一起作为 Release 附件，可保留二进制的确切对应源码。脚本不安装工具或应用，输出目录存在即拒绝。
 
 makepkg 默认的 `.BUILDINFO` 会记录开发者构建路径和本机全部已安装包。公开 Release 使用另存副本，移除这份本机信息并同步更新 `.MTREE`，保留应用及 `.PKGINFO` 不变；原始构建信息留在本地。不要把原始构建目录整体作为 Release 上传。
+
+以下是历史 0.2.2-2 交付的命令；新构建使用实际输出文件名及新目录，不覆盖旧附件：
 
 ```sh
 python3 scripts/sanitize-arch-package.py out/release/arch/chosuta-0.2.2-2-x86_64.pkg.tar.zst out/release/assets/chosuta-0.2.2-2-x86_64.pkg.tar.zst

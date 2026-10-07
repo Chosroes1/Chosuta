@@ -3,7 +3,7 @@
 from pathlib import Path
 
 ROOT_FILES = (
-    "CMakeLists.txt", "LICENSE", "README.md", "README.en.md", "README.ja.md",
+    "CMakeLists.txt", "LICENSE", "README.md",
     "THIRD_PARTY_NOTICES.md", ".gitignore",
 )
 DOC_FILES = (
@@ -14,10 +14,14 @@ DOC_FILES = (
 
 def public_files(root: Path) -> list[Path]:
     paths = [root / name for name in ROOT_FILES]
+    # Some published repositories keep only the author's main README.
+    # Never create or replace translations merely to prepare their source.
+    paths.extend(root / name for name in ("README.en.md", "README.ja.md")
+                 if (root / name).exists() or (root / name).is_symlink())
     paths.extend(root / "docs" / name for name in DOC_FILES)
     paths.extend(root / "tests" / name for name in ("core_test.cpp", "ui_test.cpp", "fixtures/basic.svp"))
     paths.extend(root / "resources" / name for name in (
-        "data.qrc", "english.tsv", "icons/chosuta.svg", "licenses/ICU.txt",
+        "data.qrc", "english.tsv", "japanese.tsv", "chinese.tsv", "icons/chosuta.svg", "licenses/ICU.txt",
         "licenses/Qt-GPL-3.0.txt", "licenses/Qt-LGPL-3.0.txt",
     ))
     for directory, suffixes in (

@@ -81,7 +81,10 @@ namespace chosuta {
         double d=0;
         for(const auto&t:score.tracks)for(const auto&n:t.notes)d=std::max(d,score.time.seconds(n.onset+n.duration));
         for(const auto&e:effective())d=std::max(d,e.end);
-        return output.duration>0?output.duration:std::max(.1,d+std::max(0.,output.syncOffset));
+        if(output.duration>0)return output.duration;
+        d=std::max(.1,d+std::max(0.,output.syncOffset));
+        if(subtitlesEnabled){const auto sources=subtitleSources(*this);for(const auto&t:subtitles)if(t.enabled)for(const auto&c:t.cues)d=std::max(d,subtitleInterval(*this,c,&sources).end);}
+        return d;
     }
     QVector<Event> Project::effective()const {
         QVector<Event> result;

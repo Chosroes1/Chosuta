@@ -33,14 +33,11 @@ namespace chosuta {
         if(!std::isfinite(d)||std::floor(d)!=d||std::abs(d)>MusicLimit)throw Failure("Invalid integer: "+k);
         return v.toInteger();
     }
-    static QString lang(const QJsonObject&ref) {
-        auto db=ref["database"].toObject();
-        QString s=db["languageOverride"].toString();
-        if(s.isEmpty())s=db["language"].toString();
+    static QString lang(const QString&s) {
         if(s=="english"||s=="en")return "en";
         if(s=="mandarin"||s=="chinese"||s=="zh")return "zh";
         if(s=="japanese"||s=="ja")return "ja";
-        return "auto";
+        return s.isEmpty()?"auto":s;
     }
     Score importSvp(const QString&path,const std::atomic_bool*cancel,Progress progress) {
         QFile f(path);
@@ -108,7 +105,20 @@ namespace chosuta {
                 auto notes=g["notes"].toArray();
                 qint64 offset=integer(r,"blickOffset"),pitchOffset=integer(r,"pitchOffset");
                 if(std::abs(pitchOffset)>127)throw Failure("Invalid pitch offset");
-                QString language=lang(r);
+                auto db=r["database"].toObject();
+                const auto trackDb=o["mainRef"].toObject()["database"].toObject();
+                // A reference without its own voice inherits the track voice.
+                auto inherited=[&](const QString&key) {
+                    auto value=db[key].toString();
+                    if(value.isEmpty()&&db["name"].toString().isEmpty())value=trackDb[key].toString();
+                    return value;
+                };
+                QString languageName=inherited("languageOverride");
+                if(languageName.isEmpty())languageName=inherited("language");
+                QString language=lang(languageName);
+                QString phoneset=inherited("phonesetOverride");
+                if(phoneset.isEmpty())phoneset=inherited("phoneset");
+                const QString instance=t.id+"/"+r["uuid"].toString("ref")+QString("@%1/").arg(ri)+g["uuid"].toString("group");
                 for(int ni=0;ni<notes.size();++ni) {
                     if(cancel&&cancel->load())throw Failure("Cancelled");
                     if(++total>200000)throw Failure("More than 200000 referenced notes");
@@ -123,17 +133,24 @@ namespace chosuta {
                         });
                         continue;
                     }
-                    note.id=t.id+"/"+r["uuid"].toString("ref")+QString("@%1/").arg(ri)+g["uuid"].toString("group")+"/"+n["uuid"].toString("note")+QString("@%1").arg(ni);
+                    note.groupInstance=instance;
+                    note.id=instance+"/"+n["uuid"].toString("note")+QString("@%1").arg(ni);
                     note.onset=onset+offset;
                     note.duration=duration;
                     if(pitch+pitchOffset<0||pitch+pitchOffset>127)throw Failure(p+": invalid MIDI pitch");
                     note.pitch=int(pitch+pitchOffset);
                     note.lyrics=n["lyrics"].toString();
                     note.phonemes=n["phonemes"].toString();
-                    note.language=language;
-                    auto db=r["database"].toObject();
-                    note.phoneset=db["phonesetOverride"].toString();
-                    if(note.phoneset.isEmpty())note.phoneset=db["phoneset"].toString();
+                    auto attributes=n["attributes"].toObject();
+                    QString overrideLanguage=attributes["languageOverride"].toString();
+                    if(overrideLanguage.isEmpty())overrideLanguage=n["languageOverride"].toString();
+                    note.language=overrideLanguage.isEmpty()?language:lang(overrideLanguage);
+                    note.phoneset=attributes["phonesetOverride"].toString();
+                    if(note.phoneset.isEmpty())note.phoneset=n["phonesetOverride"].toString();
+                    if(note.phoneset.isEmpty())note.phoneset=overrideLanguage.isEmpty()?phoneset:QString();
+                    if(!QStringList{"auto","ja","zh","en"}.contains(note.language))s.diagnostics.append({
+                        p,"language","Unsupported singing language preserved: "+note.language
+                    });
                     note.original=n;
                     note.muted=t.muted||r["mute"].toBool()||n["attributes"].toObject()["muted"].toBool();
                     auto attrs=n["attributes"].toObject()["phonemes"].toArray();

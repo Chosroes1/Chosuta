@@ -35,7 +35,10 @@ int main(int argc,char**argv) {
     };
     option("tracks","Comma-separated zero-based track indexes; default first track","indexes");
     option("language","auto | ja | zh | en","language");
-    option("dictionary","External CMU-format English dictionary","path");
+    option("dictionary","External CMU-format English dictionary (total dictionary data <= 3 MB)","path");
+    option("custom-dictionary","Chosuta custom pronunciation settings JSON","path");
+    parser.addOption({"japanese-kanji","Enable optional estimated Japanese kanji readings"});
+    parser.addOption({"no-japanese-kanji","Disable optional Japanese kanji readings"});
     option("assets","PNG directory: A.png, I.png, U.png, E.png, O.png, closed.png, etc.","directory");
     option("size","WIDTHxHEIGHT","resolution");
     option("fps","Integer or NUM/DEN","rate");
@@ -168,6 +171,15 @@ int main(int argc,char**argv) {
         }
         .contains(p.rules.language))throw Failure("Invalid language");
         if(parser.isSet("dictionary"))p.rules.englishDictionary=QFileInfo(parser.value("dictionary")).absoluteFilePath();
+        if(parser.isSet("custom-dictionary")) {
+            QFile file(parser.value("custom-dictionary"));
+            if(!file.open(QIODevice::ReadOnly))throw Failure(file.errorString());
+            if(file.size()>DictionaryByteLimit)throw Failure("Dictionary exceeds 3 MB");
+            p.rules.pronunciation=pronunciationOptionsRead(checkedJson(file.readAll()).object());
+        }
+        if(parser.isSet("japanese-kanji")&&parser.isSet("no-japanese-kanji"))throw Failure("Conflicting Japanese reading options");
+        if(parser.isSet("japanese-kanji"))p.rules.pronunciation.japaneseKanji=true;
+        if(parser.isSet("no-japanese-kanji"))p.rules.pronunciation.japaneseKanji=false;
         if(command=="inspect") {
             QJsonObject summary {
                 {
@@ -224,7 +236,7 @@ int main(int argc,char**argv) {
         }
         if(command!="generate"&&command!="export")throw Failure("Unknown command");
         if(args.size()!=3)throw Failure("Output path is required");
-        if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary"))p.regenerate();
+        if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary")||parser.isSet("custom-dictionary")||parser.isSet("japanese-kanji")||parser.isSet("no-japanese-kanji"))p.regenerate();
         if(parser.isSet("assets")) {
             QDir dir(parser.value("assets"));
             for(const auto&file:dir.entryList( {
@@ -288,6 +300,7 @@ int main(int argc,char**argv) {
             std::cerr<<"\r"<<n<<"%   "<<std::flush;
         },parser.isSet("force"));
         std::cerr<<'\n';
+        for(const auto&message:result.diagnostics)std::cerr<<"Chosuta: "<<message.toStdString()<<'\n';
         if(result.cancelled)return 130;
         if(!result.success)throw Failure(result.error);
         std::cout<<result.frames<<" frames: "<<args[2].toStdString()<<'\n';

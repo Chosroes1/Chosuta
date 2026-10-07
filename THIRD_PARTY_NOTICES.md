@@ -1,6 +1,6 @@
 # Chosuta 第三方组件与素材记录
 
-更新时间：2026-10-05。Chosuta 自有代码、常用英文词表、原创几何素材生成器和合成测试夹具采用 **GPL-3.0-or-later**；主许可见 [LICENSE](LICENSE)。除本文件记录的许可文本外，没有移植或复制第三方源码。下表区分运行时组件、构建工具和参考材料。
+更新时间：2026-10-07。Chosuta 自有代码、中英日轻量读音表、原创几何素材生成器和合成测试夹具采用 **GPL-3.0-or-later**；主许可见 [LICENSE](LICENSE)。除本文件记录的许可文本外，没有移植或复制第三方源码。下表区分运行时组件、构建工具和参考材料。
 
 | 组件 | 当前实际版本 / 来源 | 许可证与用途 | 修改与分发状态 |
 | --- | --- | --- | --- |
@@ -12,14 +12,21 @@
 | CMake 4.4.4 | 系统开发工具；[CMake](https://cmake.org/) | BSD-3-Clause；构建/安装/CPack | 不捆绑，不下载组件。 |
 | Ninja 1.13.2 | 系统开发工具；[Ninja](https://github.com/ninja-build/ninja) | Apache-2.0；构建 | 不捆绑。 |
 | Python 3 | 系统开发工具；[Python](https://www.python.org/) | PSF-2.0；打包辅助 / 构造开发夹具 | **不是应用运行依赖**，不捆绑。 |
-| 字体 / 图标 | 系统默认 Qt 字体；文本及代码绘制图形；resources/icons/chosuta.svg 为 Chosuta 原创矢量图标 | 原创 SVG 为 GPL-3.0-or-later；没有复制、嵌入或分发第三方字体或图标 | 不把用户系统字体许可假定为允许捆绑。 |
-| 英文词表 resources/english.tsv | Chosuta 原创，360 个常用词条（未标注重音） | GPL-3.0-or-later；有限词汇覆盖，保留明确未知状态 | 随资源嵌入应用；未取自 CMUdict，不宣称完整英文发音词典。 |
+| 字体 / 图标 | 系统已安装字体（字幕可选）；文本及代码绘制图形；resources/icons/chosuta.svg 为 Chosuta 原创矢量图标 | 原创 SVG 为 GPL-3.0-or-later；没有复制、嵌入或分发第三方字体或图标 | 不把用户系统字体许可假定为允许捆绑。 |
+| 英文词表 resources/english.tsv | Chosuta 原创，562 个常用词条；可选 | 音节分界（非声学边界） | GPL-3.0-or-later；有限词汇覆盖，保留明确未知状态 | 随资源嵌入应用；未取自 CMUdict，不宣称完整英文发音词典。 |
+| 日文可选读音表 resources/japanese.tsv / 中文词语表 resources/chinese.tsv | Chosuta 原创，192 条可选日文常见读音、50 条中文词语读音；与英文合计 13,796 字节 | GPL-3.0-or-later；有限估计覆盖，日文汉字自动估计默认关闭 | 本次用户允许原创轻量词典；没有复制 CMUdict/UniDic/CC-CEDICT/JMdict 或用户 SV 软件字典。三表由资源嵌入；自定义词条由用户提供，不能推定其再分发许可。 |
 | 用户 PNG / 自定义背景图片 / 音频 / svproject / maca_tachie | 用户本地提供 | 不推定可再分发；只读输入 | 不纳入公开夹具、源码包、应用包或上传。用户自行导出的作品也不会被上传。 |
+
+0.4.0 字幕使用已有 Qt Gui 的 QTextLayout/QPainter、QFont/QFontInfo 与 Widgets 的字体/颜色选择器，共享 Scene 合成；没有集成 libass、复制上游实现或增加运行依赖。字体仅从用户系统读取并保存字体族，不下载、嵌入或分发字体文件；缺字体使用 Qt 回退并诊断。新增字幕/交互/测试代码为 Chosuta 自有 GPL-3.0-or-later 代码，演示文字及几何图像为自造夹具。
+
+0.4.1 继续复用现有 Qt Widgets 的单个 QPlainTextEdit 和 QSplitter，提供块内文字光标/输入法与视图高度调整；辅音组预算及角色元数据为 Chosuta 原创规则代码。没有新增运行组件、移植代码、词典/字体数据或 DAW 引擎。交互研究参考 Ardour 官方播放控制说明，仅参考标尺点击定位方式，没有集成其源码。
 
 ## 参考材料与外部词典
 
 - SVP 字段依据项目已有受控样本研究，未复制 Synthesizer V 的声库、程序或缓存；未集成 UtaFormatix、OpenJTalk、模型或声学代码。
 - [CMUdict](https://github.com/cmusphinx/cmudict) 仅用于确认可选外部词典格式与许可候选，[上游 LICENSE](https://github.com/cmusphinx/cmudict/blob/master/LICENSE) 为保留版权/免责声明的两项再分发条件。当前完整数据下载因网络环境受阻，**未集成或分发其数据**，所以没有把词典候选写作已使用组件。加载用户另行提供的 CMU 格式文件仅作本地读取；若以后集成具体版本，需先记录提交、哈希及完整 LICENSE。
+
+本次语言规则完善参考 [SV2 发音说明](https://sv2.docs.dreamtonics.com/en/phonemes)、[SV2 轨道/声部与语言](https://sv2.docs.dreamtonics.com/en/voice-setup) 和 [官方 Note API](https://resource.dreamtonics.com/scripting/Note.html)，用于确认逐音符语言/音素集覆盖、空显式音素及均分音节字段；仅参考资料，没有复制声库、词典或声学实现。用户最新指令已允许原创轻量词典；0.3.0 扩展自有英文词表并增加自有中日表，提供自定义词典与 3 MB 合计上限，没有新增运行依赖。CMUdict 与 [JMdict 官方项目](https://www.edrdg.org/jmdict/j_jmdict.html) / [许可](https://www.edrdg.org/edrdg/licence.html) 只作外部数据候选；JMdict 日英部分的现行 CC-BY-SA-4.0 条款已查询，但未取得具体版本/数据，也未集成或据此宣称依赖许可交付完成。
 
 ## 本地包与后续分发边界
 

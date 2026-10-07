@@ -1,1 +1,1 @@
-<RCC><qresource prefix="/chosuta"><file alias="english.tsv">english.tsv</file></qresource></RCC>
+<RCC><qresource prefix="/chosuta"><file alias="english.tsv">english.tsv</file><file alias="japanese.tsv">japanese.tsv</file><file alias="chinese.tsv">chinese.tsv</file></qresource></RCC>

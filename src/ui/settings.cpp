@@ -1,7 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "window.h"
+#include <QInputMethod>
 #include <cmath>
+#include <algorithm>
 namespace chosuta {
+    class DictionaryChoiceDelegate:public QStyledItemDelegate {
+        QList<QPair<QString,QString>> choices;
+        public:
+        DictionaryChoiceDelegate(QList<QPair<QString,QString>> values,QObject *parent):QStyledItemDelegate(parent),choices(std::move(values)){}
+        QWidget *createEditor(QWidget *parent,const QStyleOptionViewItem&,const QModelIndex&)const override {
+            auto editor=new QComboBox(parent);for(const auto &choice:choices)editor->addItem(choice.first,choice.second);return editor;
+        }
+        void setEditorData(QWidget *widget,const QModelIndex &index)const override {
+            auto editor=qobject_cast<QComboBox*>(widget);editor->setCurrentIndex(editor->findData(index.data(Qt::UserRole)));
+        }
+        void setModelData(QWidget *widget,QAbstractItemModel *model,const QModelIndex &index)const override {
+            auto editor=qobject_cast<QComboBox*>(widget);model->setData(index,editor->currentText());model->setData(index,editor->currentData(),Qt::UserRole);
+        }
+    };
     bool Window::eventFilter(QObject *object,QEvent *event) {
         if(event->type()==QEvent::LocaleChange&&preferences.language=="auto") {
             const auto resolved=resolveUiLanguage("auto",QLocale::system().uiLanguages());
@@ -10,6 +26,15 @@ namespace chosuta {
             });
         }
         auto widget=qobject_cast<QWidget*>(object);
+        if(widget&&widget->window()==this&&event->type()==QEvent::MouseButtonPress&&timeline&&timeline->editingText()&&widget!=subtitleText&&!(subtitleText&&subtitleText->isAncestorOf(widget)))timeline->finishSubtitleEditing(false);
+        if(timelineSplitter&&event->type()==QEvent::MouseButtonRelease&&object==timelineSplitter->handle(1))saveViewPreferences();
+        if(widget==subtitleText&&(event->type()==QEvent::ShortcutOverride||event->type()==QEvent::KeyPress)){
+            auto key=static_cast<QKeyEvent*>(event);
+            if(key->matches(QKeySequence::Undo)||key->matches(QKeySequence::Redo)){
+                if(event->type()==QEvent::KeyPress){QGuiApplication::inputMethod()->commit();if(key->matches(QKeySequence::Undo))history.undo();else history.redo();}
+                event->accept();return true;
+            }
+        }
         if(widget&&widget->window()==this&&(event->type()==QEvent::ShortcutOverride||event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease)) {
             auto key=static_cast<QKeyEvent*>(event);
             bool textEditor=qobject_cast<QTextEdit*>(widget)||qobject_cast<QPlainTextEdit*>(widget);
@@ -66,9 +91,9 @@ namespace chosuta {
         connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);
         connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
         if(dialog.exec()!=QDialog::Accepted)return;
-        Preferences next {
-            choice->currentData().toString(),mode->currentData().toBool()
-        };
+        Preferences next=preferences;
+        next.language=choice->currentData().toString();
+        next.returnOnPause=mode->currentData().toBool();
         try {
             savePreferences(next);
         }catch(const Failure&e) {
@@ -90,6 +115,113 @@ namespace chosuta {
             timeline->selectIds(selected);
             followCursor(true);
         }
+    }
+    void Window::showAdvancedSettings() {
+        if(busy)return;
+        stopPlayback();
+        QDialog dialog(this);
+        dialog.setObjectName("advancedSettingsDialog");
+        dialog.setWindowTitle(trText("Advanced settings"));dialog.resize(840,560);
+        auto layout=new QVBoxLayout(&dialog);
+        auto pages=new QTabWidget;pages->setObjectName("advancedSettingsTabs");layout->addWidget(pages);
+        auto dictionaryPage=new QWidget;auto dictionaryLayout=new QVBoxLayout(dictionaryPage);
+        auto hint=new QLabel(trText("Custom readings override built-in readings. Note corrections and explicit SVP phonemes keep priority. Regenerate to apply."));
+        hint->setWordWrap(true);dictionaryLayout->addWidget(hint);
+        auto table=new QTableWidget(0,4);table->setObjectName("dictionaryTable");
+        table->setHorizontalHeaderLabels({trText("Language"),trText("Word / phrase"),trText("Notation"),trText("Reading / phonemes")});
+        table->horizontalHeader()->setSectionResizeMode(3,QHeaderView::Stretch);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);dictionaryLayout->addWidget(table);
+        table->setItemDelegateForColumn(0,new DictionaryChoiceDelegate({{"English","en"},{"中文","zh"},{"日本語","ja"}},table));
+        table->setItemDelegateForColumn(2,new DictionaryChoiceDelegate({{trText("Kana / pinyin / word"),"reading"},{trText("Phonemes"),"phonemes"}},table));
+        table->horizontalHeader()->setSectionResizeMode(0,QHeaderView::ResizeToContents);
+        table->horizontalHeader()->setSectionResizeMode(2,QHeaderView::ResizeToContents);
+        auto appendRow=[&](const QString&language,const QString&word,const DictionaryReading&reading) {
+            QSignalBlocker block(table);
+            const int row=table->rowCount();table->insertRow(row);
+            auto languageItem=new QTableWidgetItem(language=="en"?"English":language=="zh"?"中文":"日本語");
+            languageItem->setData(Qt::UserRole,language);table->setItem(row,0,languageItem);
+            table->setItem(row,1,new QTableWidgetItem(word));
+            auto notationItem=new QTableWidgetItem(trText(reading.phonemes?"Phonemes":"Kana / pinyin / word"));
+            notationItem->setData(Qt::UserRole,reading.phonemes?"phonemes":"reading");table->setItem(row,2,notationItem);
+            table->setItem(row,3,new QTableWidgetItem(reading.text));
+        };
+        auto fill=[&](const PronunciationOptions &options) {
+            table->setRowCount(0);
+            for(auto language=options.words.cbegin();language!=options.words.cend();++language)
+                for(auto word=language->cbegin();word!=language->cend();++word)appendRow(language.key(),word.key(),word.value());
+        };
+        fill(project.rules.pronunciation);
+        auto rowButtons=new QHBoxLayout;
+        auto add=new QPushButton(trText("Add word"));add->setObjectName("dictionaryAdd");
+        auto remove=new QPushButton(trText("Remove selected"));remove->setObjectName("dictionaryRemove");
+        auto import=new QPushButton(trText("Import dictionary"));auto exportButton=new QPushButton(trText("Export dictionary"));
+        for(auto button:{add,remove,import,exportButton})rowButtons->addWidget(button);
+        dictionaryLayout->addLayout(rowButtons);pages->addTab(dictionaryPage,trText("Pronunciation dictionary"));
+        auto japanesePage=new QWidget;auto japaneseLayout=new QVBoxLayout(japanesePage);
+        auto kanji=new QCheckBox(trText("Estimate Japanese kanji readings (optional)"));kanji->setObjectName("japaneseKanji");
+        kanji->setChecked(project.rules.pronunciation.japaneseKanji);japaneseLayout->addWidget(kanji);
+        auto kanjiHint=new QLabel(trText("Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off."));
+        kanjiHint->setWordWrap(true);japaneseLayout->addWidget(kanjiHint);japaneseLayout->addStretch();pages->addTab(japanesePage,trText("Japanese"));
+        auto defaults=new QCheckBox(trText("Also save as defaults for new SVP imports"));defaults->setObjectName("dictionaryDefaults");defaults->setChecked(true);layout->addWidget(defaults);
+        auto status=new QLabel;status->setObjectName("dictionaryStatus");status->setWordWrap(true);layout->addWidget(status);
+        auto rawOptions=[&] {
+            QJsonArray entries;
+            for(int row=0;row<table->rowCount();++row) {
+                auto language=table->item(row,0)->data(Qt::UserRole).toString();
+                const auto word=table->item(row,1)->text().trimmed(),reading=table->item(row,3)->text().trimmed();
+                if(word.isEmpty()&&reading.isEmpty())continue;
+                entries.append(QJsonObject{{"language",language},{"word",word},{"reading",reading},
+                    {"notation",table->item(row,2)->data(Qt::UserRole).toString()}});
+            }
+            return QJsonObject{{"version",1},{"japaneseKanji",kanji->isChecked()},{"entries",entries}};
+        };
+        auto updateSize=[&] {
+            const auto bytes=builtinDictionaryBytes()+QJsonDocument(rawOptions()).toJson(QJsonDocument::Compact).size();
+            status->setText(trText("Dictionary data: %1 / 3,000,000 bytes").arg(bytes));
+        };
+        connect(table,&QTableWidget::itemChanged,&dialog,[&]{updateSize();});
+        connect(add,&QPushButton::clicked,&dialog,[&] {
+            if(table->rowCount()>=20000) {status->setText(trText("Dictionary exceeds 20000 entries"));return;}
+            appendRow("en",{},{{},true});table->setCurrentCell(table->rowCount()-1,1);updateSize();
+        });
+        connect(remove,&QPushButton::clicked,&dialog,[&] {
+            QSet<int>selected;for(const auto&index:table->selectionModel()->selectedRows())selected.insert(index.row());
+            for(int row=table->rowCount()-1;row>=0;--row)if(selected.contains(row))table->removeRow(row);
+            updateSize();
+        });
+        connect(import,&QPushButton::clicked,&dialog,[&] {
+            const auto path=QFileDialog::getOpenFileName(&dialog,trText("Import dictionary"),{},"JSON (*.json)");if(path.isEmpty())return;
+            try {
+                QFile file(path);if(!file.open(QIODevice::ReadOnly))throw Failure(file.errorString());
+                if(file.size()>DictionaryByteLimit)throw Failure("Dictionary exceeds 3 MB");
+                const auto options=pronunciationOptionsRead(checkedJson(file.readAll()).object());
+                QSignalBlocker block(table);fill(options);kanji->setChecked(options.japaneseKanji);updateSize();
+            }catch(const Failure&e){status->setText(QString::fromUtf8(e.what()));}
+        });
+        connect(exportButton,&QPushButton::clicked,&dialog,[&] {
+            try {
+                const auto options=pronunciationOptionsRead(rawOptions());
+                const auto path=QFileDialog::getSaveFileName(&dialog,trText("Export dictionary"),{},"JSON (*.json)");if(path.isEmpty())return;
+                QSaveFile file(path);if(!file.open(QIODevice::WriteOnly))throw Failure(file.errorString());
+                const auto bytes=QJsonDocument(pronunciationOptionsJson(options)).toJson(QJsonDocument::Compact);
+                if(file.write(bytes)!=bytes.size()||!file.commit())throw Failure(file.errorString());
+            }catch(const Failure&e){status->setText(QString::fromUtf8(e.what()));}
+        });
+        auto buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel);buttons->setObjectName("advancedSettingsButtons");layout->addWidget(buttons);
+        buttons->button(QDialogButtonBox::Save)->setText(trText("Save"));
+        buttons->button(QDialogButtonBox::Cancel)->setText(trText("Cancel"));
+        connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+        connect(buttons,&QDialogButtonBox::accepted,&dialog,[&] {
+            try {
+                const auto options=pronunciationOptionsRead(rawOptions());
+                if(!project.rules.englishDictionary.isEmpty()&&QFileInfo(project.rules.englishDictionary).size()+pronunciationDictionaryBytes(options)>DictionaryByteLimit)
+                    throw Failure("Pronunciation dictionaries exceed 3 MB");
+                if(defaults->isChecked()) {auto next=preferences;next.pronunciation=options;savePreferences(next);preferences=next;}
+                if(project.rules.pronunciation!=options)change(trText("Advanced settings"),[options](Project&p){p.rules.pronunciation=options;});
+                dialog.accept();
+            }catch(const Failure&e){status->setText(QString::fromUtf8(e.what()));}
+        });
+        updateSize();dialog.exec();
     }
     QWidget *Window::buildCanvasPanel() {
         auto scroll=new QScrollArea;

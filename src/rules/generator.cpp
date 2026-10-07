@@ -5,6 +5,10 @@
 #include <set>
 namespace chosuta {
     QVector<Event> generate(const Project&p,const std::atomic_bool*cancel,Progress progress) {
+        validatePronunciationOptions(p.rules.pronunciation);
+        if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8||!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant timing settings");
+        if(!p.rules.englishDictionary.isEmpty()&&QFileInfo(p.rules.englishDictionary).size()+pronunciationDictionaryBytes(p.rules.pronunciation)>DictionaryByteLimit)
+            throw Failure("Pronunciation dictionaries exceed 3 MB");
         struct Candidate {
             Event event;
             int priority=0,order=0;
@@ -13,14 +17,31 @@ namespace chosuta {
         for(int ti=0;ti<p.score.tracks.size();++ti) {
             const auto&t=p.score.tracks[ti];
             if(!p.selected.contains(t.id)||t.muted)continue;
-            QString previous="closed";
-            Pronunciation word;
-            int continuation=0;
+            struct Context {QString previous="closed",vowel;Pronunciation word;int continuation=0;};
+            QMap<QString,Context>contexts;
+            auto normalized=[](const Note&note) {return note.lyrics.normalized(QString::NormalizationForm_KC).trimmed();};
+            // Count continuation notes in each reference instance in linear time.
+            // Notes from another group must not consume this group's syllables.
+            QVector<int>following(t.notes.size());
+            QMap<QString,int>remaining;
+            for(int i=int(t.notes.size())-1;i>=0;--i) {
+                const auto &note=t.notes[i];
+                following[i]=remaining.value(note.groupInstance);
+                const auto lyric=normalized(note);
+                if(note.muted)continue;
+                if(!p.rules.readings.value(note.id).isEmpty()||!note.phonemes.trimmed().isEmpty())remaining[note.groupInstance]=0;
+                else if(lyric=="+")++remaining[note.groupInstance];
+                else if(lyric!="-"&&lyric!="ー")remaining[note.groupInstance]=0;
+            }
             for(int ni=0;ni<t.notes.size();++ni) {
                 if(cancel&&cancel->load())throw Failure("Cancelled");
                 if(progress&&ni%128==0)progress((ti*100+ni*100/std::max(1,int(t.notes.size())))*80/std::max(1,int(p.score.tracks.size()))/100);
                 const auto&n=t.notes[ni];
                 if(n.muted)continue;
+                auto &context=contexts[n.groupInstance];
+                auto &previous=context.previous;
+                auto &word=context.word;
+                auto &continuation=context.continuation;
                 double start=p.score.time.seconds(n.onset),end=p.score.time.seconds(n.onset+n.duration);
                 auto emitPart=[&](QString shape,double a,double b,int part,QString provenance,bool unknown=false) {
                     if(b<=a)return;
@@ -39,8 +60,9 @@ namespace chosuta {
                         e,p.priorities.value(t.id,ti),ti
                     });
                     previous=shape;
+                    if(QStringList{"A","I","U","E","O"}.contains(shape))context.vowel=shape;
                 };
-                QString text=n.lyrics.trimmed(),special;
+                QString text=normalized(n),special;
                 auto reading=p.rules.readings.value(n.id);
                 bool explicitPhone=!reading.isEmpty()||!n.phonemes.trimmed().isEmpty();
                 QString phones=reading.isEmpty()?n.phonemes:reading;
@@ -52,7 +74,8 @@ namespace chosuta {
                 }
                 if(!special.isEmpty()) {
                     auto policy=p.rules.special.value(special);
-                    QString hold=previous;
+                    QString hold=special=="extend"&&!context.vowel.isEmpty()?context.vowel:previous;
+                    if(special!="extend") {word={};continuation=0;context.vowel.clear();}
                     if(policy.mode=="hold")emitPart(hold,start,end,0,"special/"+special+"/estimated");
                     else if(policy.mode=="timed") {
                         double cut=std::min(end,start+policy.holdSeconds);
@@ -69,9 +92,10 @@ namespace chosuta {
                         result.provenance="unresolved-continuation/estimated";
                     }
                     else {
-                        result.syllables= {
-                            word.syllables[continuation++]
-                        };
+                        const int take=following[ni]>0?1:int(word.syllables.size())-continuation;
+                        result.syllables=word.syllables.mid(continuation,take);
+                        result.roles=word.roles.mid(continuation,take);
+                        continuation+=take;
                         result.provenance=word.provenance+"/continuation";
                     }
                 }
@@ -83,15 +107,12 @@ namespace chosuta {
                         else if(language=="en"&&reading==reading.toLower())phoneNotation=false;
                         else if(language=="zh"&&reading.split(' ').value(0).size()>1)phoneNotation=false;
                     }
-                    result=pronounce(explicitPhone?phones:text,language,phoneNotation,p.rules.englishDictionary);
-                    if(!explicitPhone) {
+                    result=pronounce(explicitPhone?phones:text,language,phoneNotation,p.rules.englishDictionary,reading.isEmpty()?n.phoneset:QString(),reading.isEmpty()?p.rules.pronunciation:PronunciationOptions{});
+                    {
                         word=result;
-                        continuation=1;
-                        int count=0;
-                        for(int j=ni+1;j<t.notes.size()&&t.notes[j].lyrics.trimmed()=="+"&&t.notes[j].phonemes.trimmed().isEmpty();++j)++count;
-                        if(count>0&&!result.syllables.isEmpty())result.syllables= {
-                            result.syllables.front()
-                        };
+                        continuation=following[ni]>0?1:int(result.syllables.size());
+                        if(following[ni]>0&&!result.syllables.isEmpty()){result.syllables={result.syllables.front()};result.roles={result.roles.front()};}
+                        context.vowel.clear();
                     }
                 }
                 if(result.unknown||result.syllables.isEmpty()) {
@@ -107,6 +128,18 @@ namespace chosuta {
                     while(cons<shapes.size()&&(shapes[cons]=="closed"||shapes[cons]=="open"))++cons;
                     double prefix=cons==shapes.size()?1.:std::clamp(p.rules.consonantRatio,0.,.8);
                     int vowels=shapes.size()-cons;
+                    int leading=0,trailing=0;
+                    double onset=0,coda=0;
+                    const auto roles=result.roles.value(si);
+                    const bool bounded=p.rules.consonantMaxSeconds>0&&roles.contains(SegmentRole::Vowel)&&!(roles.front()==SegmentRole::Special&&shapes.front()=="closed");
+                    if(bounded) {
+                        while(leading<roles.size()&&roles[leading]==SegmentRole::Consonant)++leading;
+                        while(trailing<roles.size()-leading&&roles[roles.size()-1-trailing]==SegmentRole::Consonant)++trailing;
+                        const double budget=std::min((b-a)*p.rules.consonantRatio,p.rules.consonantMaxSeconds);
+                        onset=leading?budget:0;coda=trailing?budget:0;
+                        // Both groups together must leave at least 20% for the vowel/special body.
+                        if(onset+coda>(b-a)*.8){double factor=(b-a)*.8/(onset+coda);onset*=factor;coda*=factor;}
+                    }
                     for(int j=0;j<shapes.size();++j) {
                         double x,y;
                         if(j<cons) {
@@ -120,6 +153,11 @@ namespace chosuta {
                                 x=a+(b-a)*j/shapes.size();
                                 y=a+(b-a)*(j+1)/shapes.size();
                             }
+                        }
+                        if(bounded) {
+                            if(j<leading){x=a+onset*j/leading;y=a+onset*(j+1)/leading;}
+                            else if(j>=shapes.size()-trailing){int k=j-(shapes.size()-trailing);x=b-coda+coda*k/trailing;y=b-coda+coda*(k+1)/trailing;}
+                            else {int count=shapes.size()-leading-trailing,k=j-leading;double body=b-a-onset-coda;x=a+onset+body*k/count;y=a+onset+body*(k+1)/count;}
                         }
                         QString shape=shapes[j];
                         if(shape=="open"){

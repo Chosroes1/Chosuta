@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "window.h"
+#include <QInputMethod>
 #include "core/executable.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <cmath>
@@ -23,6 +24,70 @@ namespace chosuta {
             const char*ja;
         };
         static const Entry entries[]= {
+            {"Edit subtitle text","编辑字幕文字","字幕の文字を編集"},
+            {"Subtitle text limit is 4096 characters.","单条字幕文字上限为 4096 字符，已拒绝本次超限输入。","字幕の文字数は最大 4096 です。上限を超える入力は適用されません。"},
+            {"Subtitle ends after the animation. Extend the duration to include it.","字幕超过动画末尾，可延长动画时长以完整显示。","字幕がアニメーションの終わりを超えています。全体を表示するには時間を延長してください。"},
+            {"Some subtitles exceed the fixed duration. Extend before exporting? No exports only the chosen duration.","部分字幕超过固定动画时长。导出前是否延长？选择“否”只导出当前指定时长。","一部の字幕が指定時間を超えています。書き出す前に延長しますか？「いいえ」では指定した時間だけを書き出します。"},
+            {"Scene diagnostics","画布与字幕诊断","画面と字幕の診断"},
+            {"Subtitles","字幕","字幕"},
+            {"Add subtitles","添加字幕","字幕を追加"},
+            {"Subtitle track","字幕轴","字幕トラック"},
+            {"New subtitle track","新增字幕轴","字幕トラックを追加"},
+            {"Delete subtitle track","删除字幕轴","字幕トラックを削除"},
+            {"Enable this track","启用此轴","このトラックを有効化"},
+            {"Align to lyrics","对齐歌词","歌詞に合わせる"},
+            {"Lyric source track","歌词来源轨道","歌詞の参照トラック"},
+            {"Choose a lyric source","选择歌词来源","歌詞の参照先を選択"},
+            {"Double-click an empty subtitle lane to enter text. Apply confirms style and timing. Lyric alignment uses score timing.","双击字幕轴空白处输入文字；样式和时间修改后点击应用。歌词对齐依据谱面时间。","字幕トラックの空白をダブルクリックして文字を入力します。スタイルと時間は適用ボタンで確定します。歌詞との同期は譜面時間に基づきます。"},
+            {"Enter subtitle text","输入字幕文字","字幕の文字を入力"},
+            {"Text","文字","文字"},
+            {"Name","名称","名前"},
+            {"First lyric","起始歌词","開始歌詞"},
+            {"Last lyric","结束歌词","終了歌詞"},
+            {"Use lyric range","使用歌词范围","歌詞の範囲を使用"},
+            {"Override style for this subtitle","仅此字幕覆盖样式","この字幕のスタイルを上書き"},
+            {"Delete subtitle","删除字幕","字幕を削除"},
+            {"Font","字体","フォント"},
+            {"Edit text in subtitle block","在字幕块中编辑文字","字幕ブロック内で文字を編集"},
+            {"Restore timeline heights","恢复轴高度","トラックの高さをリセット"},
+            {"Consonant limit (ms; 0 = legacy)","辅音组时长上限（毫秒；0 为旧规则）","子音群の時間上限（ms、0 は従来規則）"},
+            {"Font height (% of canvas)","字号（画布高度 %）","文字サイズ（画面高さ %）"},
+            {"Center X (%)","中心 X（%）","中心 X（%）"},
+            {"Center Y (%)","中心 Y（%）","中心 Y（%）"},
+            {"Text width (%)","文字框宽度（%）","テキスト幅（%）"},
+            {"Text color","文字颜色","文字色"},
+            {"Bold","粗体","太字"},
+            {"Italic","斜体","斜体"},
+            {"Outline","描边","縁取り"},
+            {"Left","左对齐","左揃え"},
+            {"Center","居中","中央"},
+            {"Right","右对齐","右揃え"},
+            {"Text alignment","文字对齐","文字揃え"},
+            {"Apply subtitles","应用字幕与样式","字幕とスタイルを適用"},
+            {"Extend to subtitle end","延长至字幕末尾","字幕の終わりまで延長"},
+            {"Move character","拖动立绘布局","立ち絵の配置をドラッグ"},
+            {"Move subtitles","拖动字幕布局","字幕の配置をドラッグ"},
+            {"Lyric source missing; subtitle text and timing were retained.","歌词来源缺失；已保留字幕文字及时间。","参照歌詞がありません。字幕の文字と時間は保持されています。"},
+            {"No nearby lyric; kept the manual interval.","附近无可对齐歌词；保留手动区间。","近くに対応する歌詞がありません。手動の区間を保持します。"},
+            {"Advanced settings","高级设置","詳細設定"},
+            {"Language","语言","言語"},
+            {"Word / phrase","词 / 词组","単語 / 語句"},
+            {"Notation","读音格式","読みの形式"},
+            {"Reading / phonemes","读音 / 音素","読み / 音素"},
+            {"Kana / pinyin / word","假名 / 拼音 / 单词","仮名 / ピンイン / 単語"},
+            {"Phonemes","音素","音素"},
+            {"Add word","添加词条","語句を追加"},
+            {"Remove selected","删除所选词条","選択した語句を削除"},
+            {"Import dictionary","导入词典","辞書を読み込む"},
+            {"Export dictionary","导出词典","辞書を書き出す"},
+            {"Pronunciation dictionary","读音词典","発音辞書"},
+            {"Japanese","日文","日本語"},
+            {"Estimate Japanese kanji readings (optional)","估计日文汉字读音（可选）","日本語の漢字の読みを推定（任意）"},
+            {"Also save as defaults for new SVP imports","同时保存为新导入 SVP 的默认设置","新しい SVP の既定設定としても保存"},
+            {"Dictionary data: %1 / 3,000,000 bytes","词典数据：%1 / 3,000,000 字节","辞書データ：%1 / 3,000,000 バイト"},
+            {"Dictionary exceeds 20000 entries","词典超过 20,000 个词条","辞書が 20,000 語を超えています"},
+            {"Custom readings override built-in readings. Note corrections and explicit SVP phonemes keep priority. Regenerate to apply.","自定义读音优先于内置读音。逐音符人工修正和 SVP 显式音素保持优先。保存后重新生成口形即可应用。","独自の読みは内蔵の読みより優先されます。ノートの修正と SVP の明示音素は最優先です。保存後に再生成してください。"},
+            {"Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off.","日文默认以假名为准。小型词表不能保证汉字读音准确；未知词仍需修正。关闭此选项也可以使用您明确添加的自定义读音。","日本語は仮名を基本とします。小さな語彙表では漢字の読みの正確さを保証できません。未知の語は修正が必要です。無効でも登録した独自の読みを使えます。"},
             {"Settings","设置","設定"},
             {"Preferences","偏好设置","環境設定"},
             {"System language","跟随系统","システム言語"},
@@ -281,6 +346,7 @@ namespace chosuta {
     }
     Window::Window() {
         preferences=loadPreferences();
+        project.rules.pronunciation=preferences.pronunciation;
         uiLanguage=resolveUiLanguage(preferences.language,QLocale::system().uiLanguages());
         qApp->installEventFilter(this);
         setWindowTitle("Chosuta");
@@ -322,7 +388,7 @@ namespace chosuta {
             setBusy(false);
             if(result.cancelled)statusBar()->showMessage(trText("Cancelled"));
             else if(!result.success)error(result.error);
-            else statusBar()->showMessage(trText("Export complete")+": "+activePath);
+            else statusBar()->showMessage(trText("Export complete")+": "+activePath+(result.diagnostics.isEmpty()?QString{}:" — "+result.diagnostics.join("; ")));
         });
         connect(&audioWatcher,&QFutureWatcher<AudioInfo>::finished,this,[this]{
             auto r=audioWatcher.result();setBusy(false);
@@ -350,8 +416,10 @@ namespace chosuta {
         refresh();
     }
     void Window::buildUi() {
+        if(timeline)timeline->finishSubtitleEditing(false);
         auto old=takeCentralWidget();
         delete old;
+        subtitlePage=nullptr;subtitleCuePanel=nullptr;subtitleText=nullptr;timeline=nullptr;preview=nullptr;
         for(auto action:menuBar()->actions())if(action->menu())delete action->menu();
         menuBar()->clear();
         auto file=menuBar()->addMenu(trText("File"));
@@ -395,6 +463,7 @@ namespace chosuta {
             resetOverrides();
         });
         action(settings,"Preferences",[this]{showPreferences();})->setObjectName("preferencesAction");
+        action(settings,"Advanced settings",[this]{showAdvancedSettings();})->setObjectName("advancedSettingsAction");
         action(settings,"Canvas",[this]{tabs->setCurrentWidget(canvasPage);});
         action(help,"Guide",[this] {
             QMessageBox::information(this,trText("Guide"),trText("Open an SVP, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings."));
@@ -406,8 +475,8 @@ namespace chosuta {
         auto canvasButton=new QPushButton(trText("Canvas"));canvasButton->setObjectName("canvasButton");canvasBanner->addWidget(canvasButton);
         canvasLabel=new QLabel;canvasBanner->addWidget(canvasLabel);canvasBanner->addStretch();
         connect(canvasButton,&QPushButton::clicked,this,[this]{tabs->setCurrentWidget(canvasPage);});
-        auto horizontal=new QSplitter;
-        root->addWidget(horizontal,1);
+        timelineSplitter=new QSplitter(Qt::Vertical);timelineSplitter->setObjectName("timelineSplitter");root->addWidget(timelineSplitter,1);
+        auto horizontal=new QSplitter;timelineSplitter->addWidget(horizontal);
         tabs=new QTabWidget;
         tabs->setMinimumWidth(300);
         horizontal->addWidget(tabs);
@@ -513,6 +582,7 @@ namespace chosuta {
         consonant->setRange(0,.8);
         consonant->setSingleStep(.01);
         form->addRow(trText("Consonant fraction"),consonant);
+        consonantLimit=new QDoubleSpinBox;consonantLimit->setObjectName("consonantLimit");consonantLimit->setRange(0,1000);consonantLimit->setDecimals(1);consonantLimit->setSingleStep(10);form->addRow(trText("Consonant limit (ms; 0 = legacy)"),consonantLimit);
         special=new QTableWidget(6,4);
         special->setHorizontalHeaderLabels( {
             trText("Special"),trText("Mode"),trText("Shape"),trText("Hold (seconds)")
@@ -579,12 +649,11 @@ namespace chosuta {
         auto right=new QWidget;
         auto rightLayout=new QVBoxLayout(right);
         horizontal->addWidget(right);
-        preview=new QLabel;
-        preview->setObjectName("preview");
-        preview->setMinimumSize(320,210);
-        preview->setAlignment(Qt::AlignCenter);
-        preview->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);
+        layoutTarget=new QComboBox;layoutTarget->setObjectName("layoutTarget");layoutTarget->addItem(trText("Move character"),QString{});rightLayout->addWidget(layoutTarget);
+        preview=new PreviewCanvas;
         rightLayout->addWidget(preview,1);
+        connect(layoutTarget,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)updateLayoutTarget();});
+        connect(preview,&PreviewCanvas::layoutEdited,this,[this](Project p){changeSubtitles(trText("Canvas"),[p](Project&next){next.canvas=p.canvas;next.subtitles=p.subtitles;});});
         auto playerRow=new QHBoxLayout;
         rightLayout->addLayout(playerRow);
         playButton=button(playerRow,"Play / Pause",[this] {
@@ -614,6 +683,7 @@ namespace chosuta {
             if(!refreshing)seek(t);
         });
         selectionLabel=new QLabel(trText("Selection"));
+        selectionLabel->setObjectName("selectionLabel");
         rightLayout->addWidget(selectionLabel);
         auto properties=new QHBoxLayout;
         rightLayout->addLayout(properties);
@@ -664,10 +734,7 @@ namespace chosuta {
             },[this] {
                 correctReading();
             },[this] {
-                auto ids=timeline->selectedIds();
-                change(trText("Delete selection"),[ids](Project&p) {
-                    for(const auto&e:p.effective())if(ids.contains(e.id))p.erase(e);
-                });
+                deleteSelection();
             }
         };
         for(int i=0;i<buttons.size();++i) {
@@ -680,7 +747,7 @@ namespace chosuta {
             390,810
         });
         auto timelineRow=new QHBoxLayout;
-        root->addLayout(timelineRow);
+        auto timelinePanel=new QWidget;auto timelineLayout=new QVBoxLayout(timelinePanel);timelineLayout->setContentsMargins(0,0,0,0);timelineLayout->addLayout(timelineRow);timelineSplitter->addWidget(timelinePanel);timelineSplitter->setStretchFactor(0,1);timelineSplitter->setStretchFactor(1,0);
         auto units=new QComboBox;
         units->addItems( {
             trText("Seconds"),trText("Bars / Beats")
@@ -692,6 +759,9 @@ namespace chosuta {
         zoom->setValue(120);
         zoom->setMaximumWidth(200);
         timelineRow->addWidget(zoom);
+        subtitleEnabled=new QCheckBox(trText("Add subtitles"));subtitleEnabled->setObjectName("subtitlesEnabled");timelineRow->addWidget(subtitleEnabled);
+        connect(subtitleEnabled,&QCheckBox::toggled,this,[this](bool enabled){if(refreshing||busy)return;changeSubtitles(trText("Subtitles"),[this,enabled](Project&p){p.subtitlesEnabled=enabled;if(enabled&&p.subtitles.isEmpty()){SubtitleTrack t;t.id=QUuid::createUuid().toString(QUuid::Id128);t.name=trText("Subtitle track")+" 1";if(p.score.tracks.size()==1)t.sourceTrack=p.score.tracks[0].id;p.subtitles.append(t);}});if(enabled&&subtitlePage)tabs->setCurrentWidget(subtitlePage);});
+        auto resetHeights=new QPushButton(trText("Restore timeline heights"));resetHeights->setObjectName("resetTimelineHeights");timelineRow->addWidget(resetHeights);connect(resetHeights,&QPushButton::clicked,this,[this]{timeline->resetLaneHeights();preferences.timelineHeight=250;timelineSplitter->setSizes({600,290});saveViewPreferences();});
         timelineRow->addStretch();
         button(timelineRow,"Export Settings",[this] {
             showExportSettings();
@@ -705,9 +775,17 @@ namespace chosuta {
         scroll->setWidgetResizable(false);
         scroll->setMinimumHeight(185);
         timeline=new Timeline;
-        timeline->setFixedHeight(170);
         scroll->setWidget(timeline);
-        root->addWidget(scroll);
+        timelineLayout->addWidget(scroll);
+        timeline->setLaneHeights(preferences.mouthLaneHeight,preferences.subtitleLaneHeight);
+        timelineSplitter->setSizes({600,preferences.timelineHeight+40});
+        connect(timelineSplitter,&QSplitter::splitterMoved,this,[this]{preferences.timelineHeight=std::clamp(timelineScroll->height(),180,900);});
+        connect(timeline,&Timeline::laneHeightChanged,this,[this](const QString&id,int h){if(id.isEmpty())preferences.mouthLaneHeight=h;else preferences.subtitleLaneHeight=h;timelineScroll->setMinimumHeight(qRound(timeline->mouthLaneRect().height())+32+(project.subtitlesEnabled?72:16));saveViewPreferences();});
+        connect(timeline,&Timeline::textEditingFinished,this,[this]{++subtitleTextSession;});
+        connect(timeline,&Timeline::deleteRequested,this,&Window::deleteSelection);
+        connect(timeline,&Timeline::blankClicked,this,&Window::clearObjectSelection);
+        connect(preview,&PreviewCanvas::deleteRequested,this,&Window::deleteSelection);
+        connect(preview,&PreviewCanvas::blankClicked,this,&Window::clearObjectSelection);
         connect(units,&QComboBox::currentIndexChanged,this,[this](int i) {
             timeline->setBeats(i==1);
         });
@@ -715,8 +793,14 @@ namespace chosuta {
             timeline->setZoom(z);
         });
         connect(timeline,&Timeline::selectionChanged,this,[this] {
+            subtitleCueId.clear();if(subtitlePage){bool old=refreshing;refreshing=true;refreshSubtitles();refreshing=old;}
             refreshSelection();
         });
+        connect(timeline,&Timeline::subtitleCreated,this,&Window::addSubtitle);
+        connect(timeline,&Timeline::subtitleSelected,this,&Window::selectSubtitle);
+        connect(timeline,&Timeline::subtitleEdited,this,[this](QString id,SubtitleCue cue){changeSubtitles(trText("Subtitles"),[id,cue](Project&p){for(auto&t:p.subtitles)if(t.id==id)for(auto&c:t.cues)if(c.id==cue.id)c=cue;});});
+        connect(timeline,&Timeline::editRejected,this,[this](const QString&m){statusBar()->showMessage(m,7000);});
+        connect(scroll->verticalScrollBar(),&QScrollBar::valueChanged,timeline,qOverload<>(&QWidget::update));
         connect(timeline,&Timeline::seek,this,[this](double t) {
             seek(t);
         });
@@ -773,6 +857,7 @@ namespace chosuta {
         language->setCurrentIndex(language->findData(project.rules.language));
         takeover->setChecked(project.rules.harmonyTakeover);
         consonant->setValue(project.rules.consonantRatio);
+        consonantLimit->setValue(project.rules.consonantMaxSeconds*1000);
         for(int i=0;i<special->rowCount();++i) {
             auto policy=project.rules.special.value(special->item(i,0)->data(Qt::UserRole).toString());
             auto mode=qobject_cast<QComboBox*>(special->cellWidget(i,1));
@@ -785,7 +870,7 @@ namespace chosuta {
             trText("Estimated timing")
         };
         for(const auto&d:project.score.diagnostics)messages<<d.path+"\n"+d.code+": "+d.message;
-        if(!scene->diagnostics.isEmpty())messages<<trText("Missing assets")+": "+scene->diagnostics.join("; ");
+        if(!scene->diagnostics.isEmpty())messages<<trText("Scene diagnostics")+": "+scene->diagnostics.join("; ");
         auto orphans=project.orphanOverrides();
         if(!orphans.isEmpty())messages<<trText("Orphan manual edits")+"\n"+orphans.join('\n');
         int unknown=0;
@@ -797,6 +882,7 @@ namespace chosuta {
         if(!project.audioPath.isEmpty())messages<<trText("Audio")+": "+project.audioPath;
         diagnostics->setPlainText(messages.join("\n\n"));
         refreshCanvas();
+        refreshSubtitles();
         timeline->setProject(project);
         timeline->setReturnPosition(project.playbackReturnPosition);
         refreshing=false;
@@ -805,13 +891,8 @@ namespace chosuta {
     }
     void Window::refreshPreview() {
         if(!scene)return;
-        QSize size=preview->size();
-        size.setWidth(std::max(16,size.width()));
-        size.setHeight(std::max(16,size.height()));
-        QSize canvas(project.canvas.width,project.canvas.height);
-        if(canvas.width()<16||canvas.height()<16)canvas=QSize(1280,720);
-        canvas.scale(size,Qt::KeepAspectRatio);
-        preview->setPixmap(QPixmap::fromImage(scene->frame(playTime,canvas)));
+        preview->setState(project,scene.get(),playTime,!playing&&!busy);
+        timeline->setEditable(!playing&&!busy);
         timeline->setCursor(playTime);
         bool old=refreshing;
         refreshing=true;
@@ -838,6 +919,7 @@ namespace chosuta {
         p.rules.language=language->currentData().toString();
         p.rules.harmonyTakeover=takeover->isChecked();
         p.rules.consonantRatio=consonant->value();
+        p.rules.consonantMaxSeconds=consonantLimit->value()/1000;
         for(int i=0;i<special->rowCount();++i)p.rules.special[special->item(i,0)->data(Qt::UserRole).toString()]= {
             qobject_cast<QComboBox*>(special->cellWidget(i,1))->currentData().toString(),qobject_cast<QComboBox*>(special->cellWidget(i,2))->currentText(),qobject_cast<QDoubleSpinBox*>(special->cellWidget(i,3))->value()
         };
@@ -854,6 +936,7 @@ namespace chosuta {
         }
     }
     void Window::setBusy(bool value) {
+        if(value&&timeline)timeline->finishSubtitleEditing(false);
         busy=value;
         centralWidget()->setEnabled(!value);
         menuBar()->setEnabled(!value);
@@ -870,11 +953,13 @@ namespace chosuta {
         QMessageBox::warning(this,trText("Error"),message);
     }
     bool Window::confirmDiscard() {
+        if(timeline)timeline->finishSubtitleEditing(false);
         if(history.isClean())return true;
         auto result=QMessageBox::question(this,trText("Unsaved changes"),trText("Save before closing?"),QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel);
         return result==QMessageBox::Discard||(result==QMessageBox::Save&&save());
     }
     bool Window::save(bool choosePath) {
+        if(timeline&&timeline->editingText())QGuiApplication::inputMethod()->commit();
         if(project.score.raw.isEmpty())return false;
         auto path=projectPath;
         if(path.isEmpty()||choosePath)path=QFileDialog::getSaveFileName(this,trText("Save As"),projectPath,"Chosuta (*.chosuta)");
@@ -909,11 +994,12 @@ namespace chosuta {
                 progress->setValue(n);
             },Qt::QueuedConnection);
         };
-        loadWatcher.setFuture(QtConcurrent::run([path,token,report] {
+        loadWatcher.setFuture(QtConcurrent::run([path,token,report,defaults=preferences.pronunciation] {
             LoadResult r;
             try {
                 if(path.endsWith(".chosuta",Qt::CaseInsensitive))r.project=loadProject(path);
                 else {
+                    r.project.rules.pronunciation=defaults;
                     r.project.score=importSvp(path,token.get(),report);
                     if(!r.project.score.tracks.isEmpty())r.project.selected= {
                         r.project.score.tracks[0].id
@@ -1122,18 +1208,21 @@ namespace chosuta {
             return;
         }
         if(playTime>=project.duration())playTime=0;
+        timeline->finishSubtitleEditing(false);
         playing=true;
         playOrigin=playTime;
         playbackClock.restart();
         audioStarted=false;
         syncAudio();
         playbackTimer.start();
+        refreshPreview();
     }
     void Window::stopPlayback() {
         playing=false;
         playbackTimer.stop();
         if(player)player->pause();
         audioStarted=false;
+        if(preview&&scene)refreshPreview();
     }
     void Window::ensureAudio() {
         if(player)return;
@@ -1264,6 +1353,14 @@ namespace chosuta {
     }
     void Window::startExport() {
         if(busy)return;
+        if(project.subtitlesEnabled&&project.output.duration>0){
+            double end=project.output.duration;const auto sources=subtitleSources(project);
+            for(const auto&t:project.subtitles)if(t.enabled)for(const auto&c:t.cues)end=std::max(end,subtitleInterval(project,c,&sources).end);
+            if(end>project.output.duration){auto answer=QMessageBox::question(this,trText("Subtitles"),trText("Some subtitles exceed the fixed duration. Extend before exporting? No exports only the chosen duration."),QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel);
+                if(answer==QMessageBox::Cancel)return;
+                if(answer==QMessageBox::Yes)changeSubtitles(trText("Animation duration"),[end](Project&p){p.output.duration=end;});
+            }
+        }
         try {
             validateExport(project);
         }

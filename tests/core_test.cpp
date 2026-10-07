@@ -147,12 +147,169 @@ class CoreTest:public QObject {
         QVERIFY(!pronounce("ni3 hao3","zh").unknown);
         QCOMPARE(pronounce("a","ja",true).syllables[0][0],QString("A"));
     }
+    void sourceLanguageOverrides() {
+        auto root=checkedJson(fixture()).object();
+        auto track=root["tracks"].toArray()[0].toObject();
+        auto group=track["mainGroup"].toObject();auto notes=group["notes"].toArray();
+        auto note=notes[0].toObject();
+        note["phonemes"]="ay";
+        note["attributes"]=QJsonObject{{"languageOverride","english"},{"phonesetOverride","arpabet"}};
+        notes[0]=note;
+        note=notes[1].toObject();note["attributes"]=QJsonObject{{"languageOverride","korean"}};notes[1]=note;
+        group["notes"]=notes;track["mainGroup"]=group;
+        root["tracks"]=QJsonArray{track};
+        Project p;p.score=parseSvp(QJsonDocument(root).toJson());p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.tracks[0].notes[0].language,QString("en"));
+        QCOMPARE(p.score.tracks[0].notes[0].phoneset,QString("arpabet"));
+        QCOMPARE(shapeAt(p,p.effective(),.1),QString("A"));
+        QCOMPARE(shapeAt(p,p.effective(),.4),QString("I"));
+        QCOMPARE(shapeAt(p,p.effective(),.6),QString("unknown"));
+        QVERIFY(std::any_of(p.score.diagnostics.begin(),p.score.diagnostics.end(),[](const auto&d){return d.code=="language";}));
+        QTemporaryDir dir;saveProject(p,dir.filePath("language.chosuta"));auto restored=loadProject(dir.filePath("language.chosuta"));
+        QCOMPARE(restored.score.tracks[0].notes[0].language,QString("en"));
+        restored.regenerate();QCOMPARE(shapeAt(restored,restored.effective(),.4),QString("I"));
+        auto incompatible=pronounce("ay","en",true,{},"romaji");QVERIFY(incompatible.unknown);
+        QVERIFY(pronounce("a","en",true).unknown);
+        QVERIFY(!pronounce("hh ax l ow","en",true,{},"arpabet").unknown);
+        QVERIFY(!pronounce("hh ah ll ow","auto",true).unknown);
+        QCOMPARE(pronounce("sh i","auto",true).syllables,pronounce("sh i","ja",true).syllables);
+        QCOMPARE(pronounce("N","auto",true).syllables,(QVector<QStringList>{{"nasal"}}));
+        // An unvoiced library reference inherits the track's language/phoneset.
+        track["mainGroup"]=QJsonObject{};track["groups"]=QJsonArray{QJsonObject{{"groupID",group["uuid"]}}};
+        root["tracks"]=QJsonArray{track};root["library"]=QJsonArray{group};
+        const auto inherited=parseSvp(QJsonDocument(root).toJson());
+        QCOMPARE(inherited.tracks[0].notes[2].language,QString("ja"));
+        QCOMPARE(inherited.tracks[0].notes[2].phoneset,QString("romaji"));
+    }
+    void normalizedReadings() {
+        QCOMPARE(pronounce("ｷｮｰ","ja").syllables,pronounce("きょー","ja").syllables);
+        QCOMPARE(pronounce("きょー","ja").syllables.size(),2);
+        QCOMPARE(pronounce("shin'ya","ja").syllables.size(),3);
+        QCOMPARE(pronounce("shin'ya","ja").syllables[1],QStringList{"nasal"});
+        QVERIFY(pronounce("っゃ","ja").unknown);
+        QVERIFY(pronounce("未登録語","ja").unknown);
+        for(const auto &reading:QStringList{"nüè","nu:e4","nve4","lüè","jue2","yuan2","yun2","ni3hao3"})
+            QVERIFY2(!pronounce(reading,"zh").unknown,qPrintable(reading));
+        QCOMPARE(pronounce("ni3hao3","zh").syllables.size(),2);
+        QCOMPARE(pronounce("nüè","zh").syllables[0],(QStringList{"open","U","E"}));
+        QVERIFY(!pronounce("ＨＥＬＬＯ","en").unknown);
+        QCOMPARE(pronounce("hello","auto").syllables,pronounce("hello","en").syllables);
+    }
+    void continuationInstances() {
+        auto p=basic();auto &notes=p.score.tracks[0].notes;
+        for(auto &note:notes){note.phonemes.clear();note.language="en";note.phoneset="arpabet";}
+        notes[0].lyrics="beautiful";notes[1].lyrics="＋";notes[2].lyrics="－";notes[3].lyrics="＋";
+        p.regenerate();
+        for(const auto &event:p.generated)QVERIFY(!event.unknown);
+        // A final continuation receives the remaining syllables, not a lost tail.
+        notes[0].lyrics="yesterday";notes[2].lyrics="hello";notes[3].lyrics="-";p.regenerate();
+        QCOMPARE(shapeAt(p,p.effective(),.95),QString("I"));
+        for(const auto &event:p.generated)QVERIFY(event.shape!="open");
+        // Each instance keeps its own word and extension state.
+        notes[0].lyrics="hello";notes[0].groupInstance="first";
+        notes[1].lyrics="-";notes[1].groupInstance="second";
+        notes[2].lyrics="+";notes[2].groupInstance="first";
+        notes[3].lyrics="+";notes[3].groupInstance="second";
+        p.regenerate();
+        QCOMPARE(shapeAt(p,p.effective(),.25),QString("E"));
+        QCOMPARE(shapeAt(p,p.effective(),.75),QString("closed"));
+        QCOMPARE(shapeAt(p,p.effective(),1.4),QString("U"));
+        QCOMPARE(shapeAt(p,p.effective(),1.75),QString("unknown"));
+        // Extending a syllable ending in a stop holds the vowel, not the stop.
+        notes[0].phonemes="aa t";notes[1].groupInstance="first";notes[2].lyrics="cl";notes[3].lyrics="br";
+        p.regenerate();QCOMPARE(shapeAt(p,p.effective(),.75),QString("A"));
+    }
+    void smallDictionaries() {
+        QVERIFY(builtinDictionaryBytes()<DictionaryByteLimit);
+        PronunciationOptions optional;optional.japaneseKanji=true;
+        for(const auto &pair:QList<QPair<QString,QString>>{{"en","english.tsv"},{"zh","chinese.tsv"},{"ja","japanese.tsv"}}) {
+            QFile file(":/chosuta/"+pair.second);QVERIFY(file.open(QIODevice::ReadOnly));
+            QSet<QString>seen;
+            while(!file.atEnd()) {
+                const auto row=QString::fromUtf8(file.readLine()).trimmed();if(row.startsWith('#')||row.isEmpty())continue;
+                const auto fields=row.split('\t');QCOMPARE(fields.size(),2);QVERIFY(!seen.contains(fields[0]));seen.insert(fields[0]);
+                const auto result=pronounce(fields[0],pair.first,false,{},{},optional);
+                QVERIFY2(!result.unknown,qPrintable(pair.first+": "+fields[0]));QVERIFY(!result.syllables.isEmpty());
+            }
+        }
+        QVERIFY(pronounce("今日","ja").unknown);
+        QVERIFY(!pronounce("今日","ja",false,{},{},optional).unknown);
+        QVERIFY(pronounce("未登録語","ja",false,{},{},optional).unknown);
+        QCOMPARE(pronounce("かなカナ","ja").syllables,pronounce("かなカナ","ja",false,{},{},optional).syllables);
+        QCOMPARE(pronounce("golden","en").syllables.size(),2);
+        const auto golden=pronounce("golden","en");QCOMPARE(golden.syllables[0].last(),QString("open"));
+        QCOMPARE(golden.syllables[1].first(),QString("closed"));
+        QVERIFY(!pronounce("age","en").unknown);
+        QCOMPARE(pronounce("银行","zh").syllables[1][1],QString("A"));
+    }
+    void customDictionaryPersistence() {
+        PronunciationOptions options;
+        options.words["en"]["hello"]={"UW",true};
+        options.words["zh"]["行"]={"hang2",false};
+        options.words["ja"]["銀河"]={"ぎんが",false};
+        validatePronunciationOptions(options);
+        QCOMPARE(pronounce("HELLO","en",false,{},{},options).syllables,(QVector<QStringList>{{"U"}}));
+        QCOMPARE(pronounce("AA","en",true,{},{},options).syllables,(QVector<QStringList>{{"A"}}));
+        QVERIFY(!pronounce("銀河","ja",false,{},{},options).unknown);
+        QCOMPARE(pronounce("行","zh",false,{},{},options).syllables[0][1],QString("A"));
+        QCOMPARE(pronounce("行走","zh",false,{},{},options).syllables[0][1],QString("A"));
+        QCOMPARE(pronunciationOptionsRead(pronunciationOptionsJson(options)),options);
+        auto p=basic();p.rules.pronunciation=options;
+        auto &note=p.score.tracks[0].notes[0];note.phonemes.clear();note.lyrics="hello";note.language="en";note.phoneset="arpabet";p.regenerate();
+        QCOMPARE(shapeAt(p,p.effective(),.25),QString("U"));
+        p.rules.readings[note.id]="AA";p.regenerate();QCOMPARE(shapeAt(p,p.effective(),.25),QString("A"));
+        auto edit=p.generated[0];edit.shape="O";p.edit(edit,true);
+        p.rules.pronunciation.words["en"]["hello"]={"IY",true};p.regenerate();QCOMPARE(shapeAt(p,p.effective(),.25),QString("O"));
+        // Save real embedded source: custom source modifications above are deliberately not serialized as the original fixture.
+        p=basic();p.rules.pronunciation=options;
+        QTemporaryDir dir;const auto path=dir.filePath("辞書.chosuta");saveProject(p,path);auto restored=loadProject(path);
+        QCOMPARE(restored.rules.pronunciation,options);
+        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();
+        QCOMPARE(root["schema"].toInt(),4);
+        root["schema"]=2;auto rules=root["rules"].toObject();rules.remove("pronunciation");root["rules"]=rules;
+        QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();
+        restored=loadProject(path);QCOMPARE(restored.rules.pronunciation,PronunciationOptions{});
+    }
+    void dictionaryValidation() {
+        PronunciationOptions oversized;
+        for(int i=0;i<1200;++i)oversized.words["en"][QString("word%1").arg(i)]={QString("AA ").repeated(1024),true};
+        QVERIFY(pronunciationDictionaryBytes(oversized)>DictionaryByteLimit);
+        QVERIFY_EXCEPTION_THROWN(validatePronunciationOptions(oversized),Failure);
+        QJsonObject row{{"language","en"},{"word","X"},{"reading","AA"},{"notation","phonemes"}};
+        auto duplicate=row;duplicate["word"]="x";
+        const QJsonObject object{{"version",1},{"japaneseKanji",false},{"entries",QJsonArray{row,duplicate}}};
+        QVERIFY_EXCEPTION_THROWN(pronunciationOptionsRead(object),Failure);
+        auto invalid=object;invalid["entries"]=QJsonArray{QJsonObject{{"language","en"},{"word","x"},{"reading","not-a-phone"},{"notation","phonemes"}}};
+        QVERIFY_EXCEPTION_THROWN(pronunciationOptionsRead(invalid),Failure);
+        QTemporaryDir dir;QFile file(dir.filePath("oversized.dict"));QVERIFY(file.open(QIODevice::WriteOnly));QVERIFY(file.resize(DictionaryByteLimit+1));file.close();
+        auto p=basic();p.rules.englishDictionary=file.fileName();QVERIFY_EXCEPTION_THROWN(p.regenerate(),Failure);
+    }
+    void boundedConsonantTiming() {
+        auto sequence=[](const QString &phones,double seconds,double ratio=.18){auto p=basic();auto root=checkedJson(p.score.raw).object();auto track=root["tracks"].toArray()[0].toObject();auto group=track["mainGroup"].toObject();auto n=group["notes"].toArray()[0].toObject();n["phonemes"]=phones;n["duration"]=double(p.score.time.blicks(seconds));group["notes"]=QJsonArray{n};track["mainGroup"]=group;auto ref=track["mainRef"].toObject();ref["database"]=QJsonObject{{"language","english"},{"phoneset","arpabet"}};track["mainRef"]=ref;root["tracks"]=QJsonArray{track};p.score=parseSvp(QJsonDocument(root).toJson());p.selected={p.score.tracks[0].id};p.rules.consonantRatio=ratio;p.regenerate();return p;};
+        auto longNote=sequence("P AA T",4);QCOMPARE(longNote.generated.size(),3);QVERIFY(std::abs(longNote.generated[0].end-.08)<1e-9);QVERIFY(std::abs(longNote.generated[2].start-3.92)<1e-9);QCOMPARE(longNote.generated[2].end,4.);
+        auto shortNote=sequence("P AA T",.05);QVERIFY(std::abs(shortNote.generated[0].end-.009)<1e-9);QVERIFY(std::abs(shortNote.generated[2].start-.041)<1e-9);
+        auto veryShort=sequence("P AA T",.01,.8);QVERIFY(std::abs(veryShort.generated[0].end-.004)<1e-9);QVERIFY(std::abs(veryShort.generated[2].start-.006)<1e-9);
+        auto cluster=sequence("P R AA",4);QVERIFY(std::abs(cluster.generated[0].end-.04)<1e-9);QVERIFY(std::abs(cluster.generated[1].end-.08)<1e-9);
+        auto coda=sequence("AA T",2);QVERIFY(std::abs(coda.generated.last().start-1.92)<1e-9);
+        auto multiple=sequence("P AA P IY",4);QCOMPARE(multiple.generated.size(),4);QVERIFY(std::abs(multiple.generated[2].end-2.08)<1e-9);
+        for(auto phone:QStringList{"AA","P","cl","br","nasal"}){auto p=sequence(phone,2);QCOMPARE(p.generated.size(),1);QCOMPARE(p.generated[0].start,0.);QCOMPARE(p.generated[0].end,2.);}
+        auto special=sequence("cl AA",2);QVERIFY(std::abs(special.generated[0].end-1.)<1e-9); // Explicit closure keeps its separate semantics.
+        auto roles=pronounce("P AA T","en",true);QVERIFY(roles.roles[0]==QVector<SegmentRole>({SegmentRole::Consonant,SegmentRole::Vowel,SegmentRole::Consonant}));
+        QVERIFY(pronounce("cl AA","en",true).roles[0][0]==SegmentRole::Special);
+        auto varied=sequence("P AA T",1.5);varied.score.time.tempos={{0,120},{Blick,60}};varied.score.time.validate();varied.regenerate();QCOMPARE(varied.generated.last().end,2.5);QVERIFY(std::abs(varied.generated.last().start-2.42)<1e-9);
+        auto legacy=sequence("P AA T",2);legacy.rules.consonantMaxSeconds=0;legacy.regenerate();QVERIFY(std::abs(legacy.generated[0].end-.36)<1e-9);QVERIFY(std::abs(legacy.generated.last().start-1.18)<1e-9);
+        QTemporaryDir dir;auto path=dir.filePath("timing.chosuta");saveProject(legacy,path);QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();auto rules=root["rules"].toObject();rules.remove("consonantMaxSeconds");root["rules"]=rules;
+        auto write=[&]{if(!file.open(QIODevice::WriteOnly))return false;file.write(QJsonDocument(root).toJson());file.close();return true;};QVERIFY(write());auto old=loadProject(path);QCOMPARE(old.rules.consonantMaxSeconds,0.);QVERIFY(std::abs(old.generated[0].end-.36)<1e-9);old.regenerate();QVERIFY(std::abs(old.generated[0].end-.36)<1e-9);
+        auto locked=old.generated[0];locked.shape="E";locked.start=.01;locked.end=.02;old.edit(locked);old.rules.consonantMaxSeconds=.08;old.regenerate();QCOMPARE(shapeAt(old,old.effective(),.015),QString("E"));QCOMPARE(old.overrides[locked.id].event.end,.02);QVERIFY(std::abs(old.generated[0].end-.08)<1e-9);saveProject(old,path);QCOMPARE(loadProject(path).rules.consonantMaxSeconds,.08);
+        rules["consonantMaxSeconds"]="80";root["rules"]=rules;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);rules["consonantMaxSeconds"]=1.1;root["rules"]=rules;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
+        old.rules.consonantMaxSeconds=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(old.regenerate(),Failure);QVERIFY_EXCEPTION_THROWN(saveProject(old,path),Failure);
+    }
     void consonantDefaults() {
         for(const auto &phone:QStringList{"B","P","M","T","D","K","G","CH","JH"})
             QCOMPARE(pronounce(phone+" AA","en",true).syllables[0][0],QString("closed"));
         for(const auto &phone:QStringList{"F","V","S","Z","SH","ZH","TH","DH","HH","R","L","W","Y","N","NG"}){
             QCOMPARE(pronounce(phone+" AA","en",true).syllables[0][0],QString("open"));
-            auto p=basic();p.score.tracks[0].notes[0].language="en";p.score.tracks[0].notes[0].phonemes=phone+" AA";p.regenerate();
+            auto p=basic();p.score.tracks[0].notes[0].language="en";p.score.tracks[0].notes[0].phoneset="arpabet";p.score.tracks[0].notes[0].phonemes=phone+" AA";p.regenerate();
             QCOMPARE(shapeAt(p,p.effective(),.02),QString("A"));
             for(const auto&e:p.generated)QVERIFY(e.shape!="open");
         }
@@ -162,6 +319,55 @@ class CoreTest:public QObject {
         for(const auto &lyric:QStringList{"shi","hao","ri","li"})QCOMPARE(pronounce(lyric,"zh").syllables[0][0],QString("open"));
         auto p=basic();p.score.tracks[0].notes[0].phonemes="a s i";p.regenerate();
         const auto segments=p.generated;QVERIFY(segments.size()>4);QCOMPARE(segments[1].shape,QString("I"));
+    }
+    void subtitleTimingAndSources() {
+        auto p=basic();p.output.syncOffset=.25;p.output.audioOffset=7;
+        auto id=p.score.tracks[0].id;auto spans=lyricSpans(p,id);QCOMPARE(spans.size(),4);
+        SubtitleCue cue;cue.id="cue";cue.text="手动字幕";alignSubtitle(p,cue,id,spans[0],spans[2]);
+        auto v=subtitleInterval(p,cue);QCOMPARE(v.start,.25);QCOMPARE(v.end,1.75);QCOMPARE(cue.startBlick,qint64(0));QCOMPARE(cue.endBlick,3*Blick);
+        p.score.time.tempos={{0,120},{Blick,60}};p.score.time.validate();v=subtitleInterval(p,cue);QCOMPARE(v.start,.25);QCOMPARE(v.end,2.75);
+        SubtitleTrack track;track.id="t";track.cues={cue};p.subtitles={track};p.subtitlesEnabled=true;
+        auto preserved=p.subtitles;p.regenerate();auto e=p.generated[0];p.split(e,(e.start+e.end)/2);p.regenerate();QCOMPARE(p.subtitles,preserved);
+        p.score.tracks[0].notes.removeAt(0);v=subtitleInterval(p,cue);QVERIFY(v.orphan);QCOMPARE(v.start,.25);QCOMPARE(v.end,1.75);QCOMPARE(cue.text,QString("手动字幕"));
+        setSubtitleTime(p,cue,3,8,false);QCOMPARE(subtitleInterval(p,cue).start,3.);p.output.syncOffset=10;QCOMPARE(subtitleInterval(p,cue).start,3.);
+        p=basic();auto&notes=p.score.tracks[0].notes;notes[1].lyrics="+";notes[2].lyrics="ー";spans=lyricSpans(p,p.score.tracks[0].id);QCOMPARE(spans.size(),2);QCOMPARE(spans[0].end,3*Blick);QCOMPARE(spans[0].notes.size(),3);
+        notes[1].groupInstance="other";spans=lyricSpans(p,p.score.tracks[0].id);QCOMPARE(spans[0].end,Blick); // A different instance cannot continue the word.
+        notes[1].groupInstance=notes[0].groupInstance;notes[1].muted=true;spans=lyricSpans(p,p.score.tracks[0].id);QCOMPARE(spans[0].end,Blick);
+        notes[1].muted=false;notes[1].lyrics="br";spans=lyricSpans(p,p.score.tracks[0].id);QCOMPARE(spans[0].end,Blick);
+    }
+    void subtitlePersistenceAndValidation() {
+        auto p=basic();QTemporaryDir dir;SubtitleTrack t;t.id="sub-track";t.name="訳 / Translation";t.style.color=QColor(12,180,220,190);t.style.x=.3;t.style.fontHeight=.07;t.alignLyrics=true;t.sourceTrack=p.score.tracks[0].id;
+        SubtitleCue c;c.id="sub-cue";c.text="<literal> 中文\nかな English";auto spans=lyricSpans(p,t.sourceTrack);alignSubtitle(p,c,t.sourceTrack,spans[1],spans[2]);c.ownStyle=true;c.style.x=.7;c.style.bold=true;t.cues={c};p.subtitles={t};p.subtitlesEnabled=true;
+        auto path=dir.filePath("字幕.chosuta");saveProject(p,path);auto q=loadProject(path);QVERIFY(q.subtitlesEnabled);QCOMPARE(q.subtitles,p.subtitles);q.regenerate();QCOMPARE(q.subtitles,p.subtitles);
+        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),4);
+        root["schema"]=3;root.remove("subtitles");QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();q=loadProject(path);QVERIFY(!q.subtitlesEnabled);QVERIFY(q.subtitles.isEmpty());
+        p.subtitles[0].cues.append(c);QVERIFY_EXCEPTION_THROWN(validateSubtitles(p),Failure);p.subtitles[0].cues.last().id="another";QVERIFY_EXCEPTION_THROWN(validateSubtitles(p,true),Failure);
+        p.subtitles[0].cues.removeLast();p.subtitles[0].cues[0].text=QString(4097,'x');QVERIFY_EXCEPTION_THROWN(validateSubtitles(p),Failure);p.subtitles[0].cues[0]=c;
+        p.subtitles[0].style.fontHeight=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(validateSubtitles(p),Failure);p.subtitles[0].style=t.style;
+        auto data=subtitlesJson(p);auto tracks=data["tracks"].toArray();auto row=tracks[0].toObject();auto cues=row["cues"].toArray();auto invalid=cues[0].toObject();invalid["startBlick"]="-9223372036854775808";cues[0]=invalid;row["cues"]=cues;tracks[0]=row;data["tracks"]=tracks;
+        q=basic();QVERIFY_EXCEPTION_THROWN(readSubtitles(q,data),Failure);
+        data=subtitlesJson(p);data["enabled"]="false";q=basic();QVERIFY_EXCEPTION_THROWN(readSubtitles(q,data),Failure);
+        p.subtitles[0].cues[0]=c;p.subtitles[0].cues[0].anchor="seconds";p.subtitles[0].cues[0].start=3;p.subtitles[0].cues[0].end=5;QCOMPARE(p.duration(),5.);p.output.duration=2;QCOMPARE(p.duration(),2.);p.output.duration=0;p.subtitlesEnabled=false;QCOMPARE(p.duration(),2.);
+    }
+    void subtitleRenderingAndExport() {
+        auto p=basic();p.canvas.width=320;p.canvas.height=180;p.canvas.transparent=true;p.output.format="mov";p.output.fpsNum=4;p.output.duration=1;
+        SubtitleTrack t;t.id="text";t.name="Original text";t.style.color=Qt::green;t.style.outline=false;t.style.fontHeight=.13;t.style.y=.35;t.style.width=.8;
+        SubtitleCue c;c.id="caption";c.text="Hello 中文\nかな";c.start=.25;c.end=.75;t.cues={c};p.subtitles={t};p.subtitlesEnabled=true;
+        Scene scene(p);auto empty=scene.frame(0),visible=scene.frame(.25);QVERIFY(visible!=empty);QCOMPARE(scene.frame(.75),empty);QCOMPARE(scene.frame(.749),visible);
+        auto box=scene.subtitleRect(t.style,c.text);auto single=scene.subtitleRect(t.style,"Hello 中文 かな");QVERIFY(box.height()>single.height());
+        bool green=false;for(int y=0;y<visible.height();++y)for(int x=0;x<visible.width();++x){auto pixel=visible.pixelColor(x,y);if(pixel.alpha()>0&&pixel.green()>pixel.red())green=true;}QVERIFY(green);
+        auto q=p;q.subtitlesEnabled=false;QCOMPARE(Scene(q).frame(.25),empty);q=p;q.subtitles[0].enabled=false;QCOMPARE(Scene(q).frame(.25),empty);
+        auto second=t;second.id="translation";second.style.y=.8;second.style.color=Qt::red;second.cues[0].id="translated";second.cues[0].text="Translation";p.subtitles.append(second);QVERIFY(Scene(p).frame(.25)!=visible);
+        q=p;q.subtitles[0].style.family="Chosuta absent font 6a71";QVERIFY(Scene(q).diagnostics.join('\n').contains("font substituted"));
+        q=p;q.subtitles[0].style.color=QColor(0,255,0,0);q.subtitles[0].style.outline=true;q.subtitles[1].enabled=false;QCOMPARE(Scene(q).frame(.25),empty);
+        q=p;q.output.duration=.5;QVERIFY(Scene(q).diagnostics.join('\n').contains("fixed animation duration"));
+        q=p;auto collision=q.subtitles[0].cues[0];collision.id="overlapping";collision.text="Overlap retained";q.subtitles[0].cues.append(collision);Scene overlapping(q);QVERIFY(overlapping.diagnostics.join('\n').contains("Subtitle overlap"));QVERIFY(overlapping.frame(.25)!=Scene(p).frame(.25));
+        QTemporaryDir dir;QImage transparent(32,32,QImage::Format_RGBA8888);transparent.fill(Qt::transparent);auto asset=dir.filePath("closed.png");QVERIFY(transparent.save(asset));p.assets[p.fallback]=asset;
+        if(QStandardPaths::findExecutable("ffmpeg").isEmpty())QSKIP("FFmpeg absent");
+        std::atomic_bool cancel=false;auto movie=dir.filePath("original-subtitle.mov");auto result=exportVideo(p,movie,cancel);QVERIFY2(result.success,qPrintable(result.error));QCOMPARE(result.frames,4);
+        QProcess decode;decode.start("ffmpeg",{"-v","error","-i",movie,"-f","rawvideo","-pix_fmt","rgba","pipe:1"});QVERIFY(decode.waitForFinished());QCOMPARE(decode.exitCode(),0);auto rgba=decode.readAllStandardOutput();QCOMPARE(rgba.size(),320*180*4*4);
+        Scene expected(p);for(int i=0;i<4;++i){auto image=expected.frame(i/4.);QCOMPARE(rgba.mid(i*320*180*4,320*180*4),QByteArray(reinterpret_cast<const char*>(image.constBits()),image.sizeInBytes()));}
+        if(qEnvironmentVariableIsSet("CHOSUTA_SUBTITLE_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_SUBTITLE_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(transparent.save(out.filePath("closed.png")));p.assets[p.fallback]=out.filePath("closed.png");saveProject(p,out.filePath("original-subtitle.chosuta"));QVERIFY(expected.frame(.25).save(out.filePath("subtitle-frame.png")));QFile source(movie);QVERIFY(source.open(QIODevice::ReadOnly));QSaveFile destination(out.filePath("original-subtitle.mov"));QVERIFY(destination.open(QIODevice::WriteOnly));auto bytes=source.readAll();QCOMPARE(destination.write(bytes),bytes.size());QVERIFY(destination.commit());}
     }
     void canvasAndMigration() {
         QTemporaryDir dir;auto p=basic();
@@ -175,7 +381,7 @@ class CoreTest:public QObject {
         p.canvas.backgroundFit="stretch";Scene stretch(p);QCOMPARE(stretch.frame(0).pixelColor(0,0),QColor(Qt::yellow));
         auto path=dir.filePath("画布.chosuta");saveProject(p,path);auto restored=loadProject(path);
         QCOMPARE(restored.canvas.backgroundImage,p.canvas.backgroundImage);QCOMPARE(restored.canvas.characterScale,.25);QCOMPARE(restored.canvas.characterX,.75);QCOMPARE(restored.canvas.backgroundFit,QString("stretch"));QCOMPARE(restored.duration(),3.);QCOMPARE(restored.audioDuration,4.);QCOMPARE(restored.playbackReturnPosition,.25);
-        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),2);
+        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),4);
         auto legacy=root["output"].toObject();auto canvas=root["canvas"].toObject();for(auto key:QStringList{"width","height","background","transparent"})legacy[key]=canvas[key];
         root["schema"]=1;root["output"]=legacy;root.remove("canvas");root.remove("audioDuration");root.remove("playbackReturnPosition");
         QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();restored=loadProject(path);

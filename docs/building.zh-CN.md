@@ -21,7 +21,7 @@ ctest --test-dir build --output-on-failure
 QT_QPA_PLATFORM=offscreen ./build/chosuta --smoke-test
 ```
 
-该入口自动使用原创夹具验证替换/撤销/保存重开/重生成/导出/三语切换，若 FFmpeg 不在 PATH 中则跳过导出部分。CTest 的 `core`、`ui-workflow` 与 `gui-smoke` 都指定离屏平台；core 的 FFmpeg 集成测试在工具缺失时明确跳过。离屏结果不是实际桌面/高 DPI/声卡验收。
+工作区 0.4.1 的 ui-workflow 还覆盖默认隐藏的多字幕轴、对齐、布局手柄、撤销、导出尾部选择及保存重开，core 覆盖 schema 4 兼容、字幕时间/来源/文字合成与短片解码，以及有界前导/尾辅音预算和旧规则/锁定覆盖兼容。ui-workflow 新增焦点与删除键、原生块内光标/输入法事件、独立标尺/留白不定位/贯穿红线、行高与区域分隔调整、多轴滚动及保存点撤销。该入口自动使用原创夹具验证替换/撤销/保存重开/重生成/导出/三语切换，若 FFmpeg 不在 PATH 中则跳过导出部分。CTest 的 `core`、`ui-workflow` 与 `gui-smoke` 都指定离屏平台；core 的 FFmpeg 集成测试在工具缺失时明确跳过。离屏结果不是实际桌面/高 DPI/声卡验收。
 
 ## Windows（完整构建/部署入口，原生执行待验证）
 
@@ -40,7 +40,7 @@ QT_QPA_PLATFORM=offscreen ./build/chosuta --smoke-test
 bash scripts/package-linux.sh
 ```
 
-脚本在 `build-release/` 构建、测试并用 CPack 输出 `out/linux/Chosuta-0.2.2-Linux.zip`；相邻 `Chosuta-0.2.2-source.zip` 是 Chosuta 对应源码，`runtime-dependencies.txt` 为本机直接动态库记录。源码归档使用明确白名单，排除用户原始材料、调研样本、build/out、Git/凭据目录；Python 只用于此开发辅助。旧版 0.2.1 交付包保留，不覆盖。
+脚本在 `build-release/` 构建、测试并用 CPack 输出 `out/linux/Chosuta-<当前代码版本>-Linux.zip`；相邻 `Chosuta-<当前代码版本>-source.zip` 是 Chosuta 对应源码，`runtime-dependencies.txt` 为本机直接动态库记录。源码归档使用明确白名单，排除用户原始材料、调研样本、build/out、Git/凭据目录；Python 只用于此开发辅助。旧版 0.2.1 交付包保留，不覆盖。
 
 发行版安装包、AUR 配方和目标环境要求见 [Linux 发行版打包](packaging.zh-CN.md)。Linux 安装增加标准桌面菜单项和原创 SVG 图标；Windows 安装布局仍为 bin 与 share。
 

@@ -9,6 +9,7 @@
 #include "timeline.h"
 #include "preferences.h"
 #include "render/audio.h"
+#include "preview.h"
 namespace chosuta {
     struct LoadResult {
         Project project;
@@ -34,6 +35,7 @@ namespace chosuta {
         QString projectPath,uiLanguage;
         Preferences preferences;
         QScrollArea *timelineScroll=nullptr;
+        QSplitter *timelineSplitter=nullptr;
         QWidget *canvasPage=nullptr;
         QLabel *canvasLabel=nullptr;
         QSpinBox *canvasWidth=nullptr,*canvasHeight=nullptr;
@@ -46,10 +48,24 @@ namespace chosuta {
         Timeline *timeline=nullptr;
         QTableWidget *tracks=nullptr,*assets=nullptr,*special=nullptr;
         QTabWidget *tabs=nullptr;
-        QLabel *preview=nullptr,*timeLabel=nullptr,*selectionLabel=nullptr;
+        PreviewCanvas *preview=nullptr;
+        QLabel *timeLabel=nullptr,*selectionLabel=nullptr;
+        QCheckBox *subtitleEnabled=nullptr,*subtitleTrackEnabled=nullptr,*subtitleAlign=nullptr,*subtitleBold=nullptr,*subtitleItalic=nullptr,*subtitleOutline=nullptr,*subtitleOwnStyle=nullptr;
+        QWidget *subtitlePage=nullptr,*subtitleCuePanel=nullptr;
+        QComboBox *subtitleTrackChoice=nullptr,*subtitleSource=nullptr,*subtitleAnchor=nullptr,*subtitleFirst=nullptr,*subtitleLast=nullptr,*layoutTarget=nullptr;
+        QFontComboBox *subtitleFont=nullptr;
+        QLineEdit *subtitleName=nullptr;
+        QPlainTextEdit *subtitleText=nullptr;
+        QDoubleSpinBox *subtitleStart=nullptr,*subtitleEnd=nullptr,*subtitleX=nullptr,*subtitleY=nullptr,*subtitleSize=nullptr,*subtitleWidth=nullptr;
+        QComboBox *subtitleTextAlign=nullptr;
+        QPushButton *subtitleColor=nullptr;
+        QLabel *subtitleHint=nullptr;
+        QColor selectedSubtitleColor=Qt::white;
+        QString subtitleTrackId,subtitleCueId;
+        int subtitleTextSession=0;
         QComboBox *language=nullptr,*fallback=nullptr,*shape=nullptr,*anchor=nullptr;
         QCheckBox *takeover=nullptr,*lock=nullptr;
-        QDoubleSpinBox *start=nullptr,*end=nullptr,*consonant=nullptr,*position=nullptr;
+        QDoubleSpinBox *start=nullptr,*end=nullptr,*consonant=nullptr,*consonantLimit=nullptr,*position=nullptr;
         QPlainTextEdit *diagnostics=nullptr;
         QPushButton *playButton=nullptr,*cancelButton=nullptr;
         QProgressBar *progress=nullptr;
@@ -86,6 +102,10 @@ namespace chosuta {
         void addCustom();
         void attachAudio();
         void editSelection();
+        void deleteSelection();
+        void deleteSubtitleCue();
+        void clearObjectSelection();
+        void saveViewPreferences();
         void splitSelection();
         void mergeSelection();
         void offsetSelection();
@@ -93,8 +113,19 @@ namespace chosuta {
         void resetOverrides();
         void showExportSettings();
         void showPreferences();
+        void showAdvancedSettings();
         QWidget *buildCanvasPanel();
         void refreshCanvas();
+        QWidget *buildSubtitlePanel();
+        void refreshSubtitles();
+        void selectSubtitle(const QString &,const QString &,bool editText=false);
+        void addSubtitleTrack();
+        void addSubtitle(int track,double time);
+        void applySubtitleProperties();
+        void writeSubtitleText(const QString &track,const QString &cue,const QString &text);
+        void alignSubtitleRange();
+        void changeSubtitles(const QString &,const std::function<void(Project &)> &);
+        void updateLayoutTarget();
         void followCursor(bool force=false);
         void startExport();
         void seek(double time);
@@ -103,5 +134,6 @@ namespace chosuta {
         void syncAudio();
         void ensureAudio();
         friend class ProjectCommand;
+        friend class SubtitleTextCommand;
     };
 }

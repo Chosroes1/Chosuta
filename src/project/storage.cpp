@@ -47,12 +47,15 @@ namespace chosuta {
         return path.isEmpty()?QString{}:QDir::cleanPath(base.absoluteFilePath(path));
     }
     void saveProject(const Project&p,const QString&path) {
+        if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8||!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant timing settings");
+        validatePronunciationOptions(p.rules.pronunciation);
+        validateSubtitles(p);
         QDir base=QFileInfo(path).absoluteDir();
         QJsonObject root {
             {
                 "format","Chosuta"
             }, {
-                "schema",2
+                "schema",4
             }, {
                 "sourceBase64",QString::fromLatin1(p.score.raw.toBase64())
             }, {
@@ -75,6 +78,8 @@ namespace chosuta {
             }, {
                 "consonantRatio",p.rules.consonantRatio
             }, {
+                "consonantMaxSeconds",p.rules.consonantMaxSeconds
+            }, {
                 "englishDictionary",relative(base,p.rules.englishDictionary)
             }
         };
@@ -88,6 +93,7 @@ namespace chosuta {
                 "holdSeconds",it.value().holdSeconds
             }
         };
+        rules["pronunciation"]=pronunciationOptionsJson(p.rules.pronunciation);
         rules["special"]=special;
         QJsonObject readings;
         for(auto it=p.rules.readings.begin();it!=p.rules.readings.end();++it)readings[it.key()]=it.value();
@@ -134,6 +140,7 @@ namespace chosuta {
         root["playbackReturnPosition"]=p.playbackReturnPosition;
         const auto&s=p.output;
         root["output"]=QJsonObject{{"fpsNum",s.fpsNum},{"fpsDen",s.fpsDen},{"format",s.format},{"crf",s.crf},{"bitrateKbps",s.bitrateKbps},{"ffmpeg",s.ffmpeg},{"duration",s.duration},{"syncOffset",s.syncOffset},{"audioOffset",s.audioOffset}};
+        root["subtitles"]=subtitlesJson(p);
         auto bytes=QJsonDocument(root).toJson();
         if(bytes.size()>64*1024*1024)throw Failure("Saved project exceeds 64 MiB");
         QSaveFile file(path);
@@ -143,7 +150,7 @@ namespace chosuta {
         QFile file(path);
         if(!file.open(QIODevice::ReadOnly)||file.size()>64*1024*1024)throw Failure("Cannot read project (limit 64 MiB): "+file.errorString());
         auto root=checkedJson(file.readAll()).object();
-        if(root["format"]!="Chosuta"||(root["schema"].toInt()!=1&&root["schema"].toInt()!=2))throw Failure("Unsupported project format/schema");
+        if(root["format"]!="Chosuta"||root["schema"].toInt()<1||root["schema"].toInt()>4)throw Failure("Unsupported project format/schema");
         auto decoded=QByteArray::fromBase64Encoding(root["sourceBase64"].toString().toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
         if(!decoded)throw Failure("Invalid embedded source");
         Project p;
@@ -168,7 +175,12 @@ namespace chosuta {
         p.rules.harmonyTakeover=rules["harmonyTakeover"].toBool(true);
         p.rules.consonantRatio=rules["consonantRatio"].toDouble(.18);
         if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8)throw Failure("Invalid consonant ratio");
+        const auto cap=rules.value("consonantMaxSeconds");
+        if(!cap.isUndefined()&&!cap.isDouble())throw Failure("Invalid consonant duration limit");
+        p.rules.consonantMaxSeconds=cap.isUndefined()?0:cap.toDouble();
+        if(!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant duration limit");
         p.rules.englishDictionary=absolute(base,rules["englishDictionary"]);
+        p.rules.pronunciation=pronunciationOptionsRead(rules.value("pronunciation"));
         auto special=rules["special"].toObject();
         for(auto it=special.begin();it!=special.end();++it) {
             auto v=it.value().toObject();
@@ -238,6 +250,7 @@ namespace chosuta {
         validateCanvas(c);
         p.audioDuration=root["audioDuration"].toDouble();p.playbackReturnPosition=root["playbackReturnPosition"].toDouble();
         if(!std::isfinite(p.audioDuration)||p.audioDuration<0||p.audioDuration>864000||!std::isfinite(p.playbackReturnPosition)||p.playbackReturnPosition<0||p.playbackReturnPosition>21600)throw Failure("Invalid audio duration/return position");
+        if(root["schema"].toInt()==4)readSubtitles(p,root.value("subtitles"));
         return p;
     }
 }
