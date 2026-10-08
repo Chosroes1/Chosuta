@@ -7,6 +7,7 @@
 #include <QTextCharFormat>
 #include <cmath>
 namespace chosuta {
+    void Scene::setTiming(const Project &p){project=p;events=resolveEvents(p.effective());}
     Scene::Scene(const Project&p):project(p),events(resolveEvents(p.effective())) {
         QImageReader::setAllocationLimit(256);
         qint64 bytes=0;

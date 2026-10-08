@@ -7,7 +7,7 @@
 | Qt Core / Gui / Widgets / Concurrent / Multimedia；传递 Qt Network | 本机 Qt 6.11.2；构建最低 Qt 6.4；[Qt 源码](https://code.qt.io/cgit/qt/) | 本项目按 LGPL-3.0-only 选项动态链接；JSON、Unicode、图像、GUI、任务及可选播放。[官方许可说明](https://doc.qt.io/qt-6.11/licensing.html) | 未修改 Qt。当前本地应用包不包含 Qt 库或平台/媒体插件；对应 Qt 包由系统提供。完整 GPL/LGPL 文本已保留于 resources/licenses。 |
 | Qt Test、moc、rcc | 同上；仅开发/测试 | Qt Test 属于 Qt Base；工具的 GPL-3.0 与 Qt GPL exception 选项见 [工具许可](https://doc.qt.io/qt-6.11/licensing.html)。测试/元对象/资源编译 | 不包含在应用运行包；生成的元对象/资源代码由应用构建产生。 |
 | ICU4C / ICU 数据 | 本机 78.3；最低 67；[上游](https://github.com/unicode-org/icu)、[变换文档](https://unicode-org.github.io/icu/userguide/transforms/general/) | Unicode-3.0 及 ICU LICENSE 所列附带条款（含历史 ICU、BSD、NAIST-2003 等）；直接链接 i18n/uc/data。Han-Latin 默认汉字读音与音调规范化 | 未修改、未复制字典数据。当前包不捆绑 ICU 动态库；本机完整 ICU LICENSE 原样保留为 resources/licenses/ICU.txt。默认读音不承诺上下文消歧。 |
-| FFmpeg / ffprobe | 本机 9.0.2；[上游源码](https://ffmpeg.org/download.html)、[许可与构建组合](https://ffmpeg.org/legal.html) | 独立外部进程。实际本机构建 `-L` 声明 GPL-3.0-or-later，配置含 enable-gpl、enable-version3、libx264/libvpx/libopus，不含 enable-nonfree。编码 / 可选音频时长元数据探测 / 测试探测 | 未修改、不捆绑。程序检查具体编码器而不根据扩展名宣称支持。Qt Multimedia 自身的 FFmpeg 后端属于实际 Qt 部署依赖，也需在以后捆绑时核查。 |
+| FFmpeg / ffprobe | 本机 9.0.2；[上游源码](https://ffmpeg.org/download.html)、[许可与构建组合](https://ffmpeg.org/legal.html) | 独立外部进程。实际本机构建 `-L` 声明 GPL-3.0-or-later，配置含 enable-gpl、enable-version3、libx264/libvpx/libopus，不含 enable-nonfree。编码 / 可选音频元数据探测 / 波形 PCM 解码 / 测试探测 | 未修改、不捆绑。程序检查具体编码器而不根据扩展名宣称支持。Qt Multimedia 自身的 FFmpeg 后端属于实际 Qt 部署依赖，也需在以后捆绑时核查。 |
 | GCC 16.2.1 | 系统开发工具；[GCC](https://gcc.gnu.org/) | GPL-3.0-or-later，运行时按 GCC Runtime Library Exception 3.1 等实际条款；C++20 编译 | 不捆绑编译器；本机动态 libstdc++ 属于系统运行依赖。 |
 | CMake 4.4.4 | 系统开发工具；[CMake](https://cmake.org/) | BSD-3-Clause；构建/安装/CPack | 不捆绑，不下载组件。 |
 | Ninja 1.13.2 | 系统开发工具；[Ninja](https://github.com/ninja-build/ninja) | Apache-2.0；构建 | 不捆绑。 |
@@ -22,6 +22,9 @@
 0.4.1 继续复用现有 Qt Widgets 的单个 QPlainTextEdit 和 QSplitter，提供块内文字光标/输入法与视图高度调整；辅音组预算及角色元数据为 Chosuta 原创规则代码。没有新增运行组件、移植代码、词典/字体数据或 DAW 引擎。交互研究参考 Ardour 官方播放控制说明，仅参考标尺点击定位方式，没有集成其源码。
 
 ## 参考材料与外部词典
+
+0.5.0 的可选波形显示与有界时间校正为 Chosuta 原创 GPL-3.0-or-later 代码，复用已有 Qt Core/Concurrent/Gui/Widgets、QProcess/QPainter 和独立 FFmpeg。FFmpeg 新用途为流式解码单声道 16 kHz PCM，波形/能量摘要与校正由自有 C++ 代码计算；不捆绑新库、模型、音素字典或声部分离工具，不新增 Python 产品运行依赖。FFmpeg/Qt 的现有许可与捆绑边界继续适用。MFA、WhisperX、wav2vec2、Demucs 与歌唱对齐论文只用于本地早期方案比较，未复制源码、下载模型或集成依赖；不把候选代码许可当作模型/数据再分发授权。测试音频与纯色 PNG 自行构造，用户工程/歌曲/立绘仍不分发。
+
 
 - SVP 字段依据项目已有受控样本研究，未复制 Synthesizer V 的声库、程序或缓存；未集成 UtaFormatix、OpenJTalk、模型或声学代码。
 - [CMUdict](https://github.com/cmusphinx/cmudict) 仅用于确认可选外部词典格式与许可候选，[上游 LICENSE](https://github.com/cmusphinx/cmudict/blob/master/LICENSE) 为保留版权/免责声明的两项再分发条件。当前完整数据下载因网络环境受阻，**未集成或分发其数据**，所以没有把词典候选写作已使用组件。加载用户另行提供的 CMU 格式文件仅作本地读取；若以后集成具体版本，需先记录提交、哈希及完整 LICENSE。

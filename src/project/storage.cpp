@@ -55,7 +55,7 @@ namespace chosuta {
             {
                 "format","Chosuta"
             }, {
-                "schema",4
+                "schema",5
             }, {
                 "sourceBase64",QString::fromLatin1(p.score.raw.toBase64())
             }, {
@@ -141,6 +141,7 @@ namespace chosuta {
         const auto&s=p.output;
         root["output"]=QJsonObject{{"fpsNum",s.fpsNum},{"fpsDen",s.fpsDen},{"format",s.format},{"crf",s.crf},{"bitrateKbps",s.bitrateKbps},{"ffmpeg",s.ffmpeg},{"duration",s.duration},{"syncOffset",s.syncOffset},{"audioOffset",s.audioOffset}};
         root["subtitles"]=subtitlesJson(p);
+        root["timingCorrection"]=timingCorrectionJson(p);
         auto bytes=QJsonDocument(root).toJson();
         if(bytes.size()>64*1024*1024)throw Failure("Saved project exceeds 64 MiB");
         QSaveFile file(path);
@@ -150,7 +151,7 @@ namespace chosuta {
         QFile file(path);
         if(!file.open(QIODevice::ReadOnly)||file.size()>64*1024*1024)throw Failure("Cannot read project (limit 64 MiB): "+file.errorString());
         auto root=checkedJson(file.readAll()).object();
-        if(root["format"]!="Chosuta"||root["schema"].toInt()<1||root["schema"].toInt()>4)throw Failure("Unsupported project format/schema");
+        if(root["format"]!="Chosuta"||root["schema"].toInt()<1||root["schema"].toInt()>5)throw Failure("Unsupported project format/schema");
         auto decoded=QByteArray::fromBase64Encoding(root["sourceBase64"].toString().toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
         if(!decoded)throw Failure("Invalid embedded source");
         Project p;
@@ -250,7 +251,8 @@ namespace chosuta {
         validateCanvas(c);
         p.audioDuration=root["audioDuration"].toDouble();p.playbackReturnPosition=root["playbackReturnPosition"].toDouble();
         if(!std::isfinite(p.audioDuration)||p.audioDuration<0||p.audioDuration>864000||!std::isfinite(p.playbackReturnPosition)||p.playbackReturnPosition<0||p.playbackReturnPosition>21600)throw Failure("Invalid audio duration/return position");
-        if(root["schema"].toInt()==4)readSubtitles(p,root.value("subtitles"));
+        if(root["schema"].toInt()>=4)readSubtitles(p,root.value("subtitles"));
+        if(root["schema"].toInt()>=5)readTimingCorrection(p,root.value("timingCorrection"));
         return p;
     }
 }

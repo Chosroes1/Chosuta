@@ -178,6 +178,16 @@ namespace chosuta {
         QStringList notes;
         qint64 start=0,end=0;
     };
+    struct SourceTiming {
+        double originalStart=0,originalEnd=0,start=0,end=0;
+    };
+    struct TimingCorrection {
+        double maxShift=.1,maxDurationChange=.25;
+        bool enabled=false;
+        QString basisHash,audioHash;
+        qint64 audioBytes=-1,audioModified=0;
+        QMap<QString,SourceTiming> sources;
+    };
     struct Project {
         Score score;
         QStringList selected;
@@ -185,8 +195,10 @@ namespace chosuta {
         Rules rules;
         QVector<Event> generated;
         QMap<QString,Override> overrides;
+        TimingCorrection timing;
         QMap<QString,QString> assets;
         QString fallback="closed",audioPath;
+        QString audioContentHash; // Runtime verification cache; never serialized.
         CanvasSettings canvas;
         ExportSettings output;
         bool subtitlesEnabled=false;
@@ -239,4 +251,10 @@ namespace chosuta {
         virtual QVector<TimingProposal> propose(const TimingRequest &,const std::atomic_bool &) const=0;
     };
     QVector<Event> applyTimingProposals(const Project &,const QVector<TimingProposal> &,const QString &inputHash);
+    QString timingBasisHash(const Project &,const std::atomic_bool *cancel=nullptr);
+    bool timingCorrectionCurrent(const Project &);
+    bool verifyTimingAudio(Project &,const std::atomic_bool &);
+    void validateTimingCorrection(const Project &);
+    QJsonObject timingCorrectionJson(const Project &);
+    void readTimingCorrection(Project &,const QJsonValue &);
 }

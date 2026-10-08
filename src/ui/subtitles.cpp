@@ -110,7 +110,7 @@ void Window::refreshSubtitles() {
     else if(cue&&project.output.duration>0&&subtitleInterval(project,*cue).end>project.output.duration)subtitleHint->setText(trText("Subtitle ends after the animation. Extend the duration to include it."));
     else subtitleHint->setText(trText("Double-click an empty subtitle lane to enter text. Apply confirms style and timing. Lyric alignment uses score timing."));
     updateLayoutTarget();
-    if(timelineScroll)timelineScroll->setMinimumHeight(qRound(timeline->mouthLaneRect().height())+32+(project.subtitlesEnabled?72:16));
+    updateTimelineMinimum();
 }
 void Window::updateLayoutTarget() {
     if(!preview)return;auto id=layoutTarget->currentData().toString();

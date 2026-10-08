@@ -30,7 +30,7 @@ namespace chosuta {
         }
     };
     Timeline::Timeline(QWidget*parent):QWidget(parent) {
-        setMinimumHeight(170);
+        setMinimumHeight(baseHeight());
         setMouseTracking(true);
         setObjectName("timeline");
         setFocusPolicy(Qt::ClickFocus);
@@ -84,21 +84,26 @@ namespace chosuta {
     int Timeline::stickyTop()const{return std::max(0,-pos().y());}
     int Timeline::subtitleHeight(int row)const {return laneHeights.value(project.subtitles[row].id,defaultSubtitleHeight);}
     QRectF Timeline::rulerRect()const {return {0.,double(stickyTop()),double(width()),double(RulerHeight)};}
-    QRectF Timeline::mouthLaneRect()const {return {0.,double(stickyTop()+RulerHeight),double(width()),double(mouthHeight)};}
+    QRectF Timeline::mouthLaneRect()const {return {0.,double(stickyTop()+RulerHeight+waveHeight()),double(width()),double(mouthHeight)};}
+    QRectF Timeline::mouthContentRect()const {return mouthLaneRect().adjusted(0,6,0,-24);}
+    QRectF Timeline::waveformLaneRect()const {return {0.,double(stickyTop()+RulerHeight),double(width()),double(waveHeight())};}
+    void Timeline::setWaveform(std::shared_ptr<const Waveform> wave,const QString &status){waveform=std::move(wave);waveformStatus=status;update();}
+    void Timeline::setWaveformHeight(int height){waveformHeight=std::clamp(height,40,200);updateExtent();positionEditor();update();}
     QRectF Timeline::subtitleLaneRect(int row)const {double y=baseHeight()+4;for(int i=0;i<row;++i)y+=subtitleHeight(i);return {0.,y,double(width()),double(subtitleHeight(row))};}
     void Timeline::setLaneHeights(int mouth,int subtitles){mouthHeight=std::clamp(mouth,96,360);defaultSubtitleHeight=std::clamp(subtitles,48,240);updateExtent();positionEditor();update();}
-    void Timeline::resetLaneHeights(){laneHeights.clear();setLaneHeights(138,60);emit laneHeightChanged({},138);emit laneHeightChanged("*",60);}
+    void Timeline::resetLaneHeights(){laneHeights.clear();setLaneHeights(96,60);setWaveformHeight(80);emit laneHeightChanged({},96);emit laneHeightChanged("*",60);emit laneHeightChanged("@waveform",80);}
     int Timeline::subtitleRow(double y)const {
         if(!project.subtitlesEnabled||y<stickyTop()+baseHeight())return -1;
         for(int row=0;row<project.subtitles.size();++row)if(subtitleLaneRect(row).contains(QPointF(1,y)))return row;
         return -1;
     }
     int Timeline::resizeHit(double y)const {
+        if(waveHeight()&&std::abs(y-waveformLaneRect().bottom()+2)<=3)return -3;
         if(std::abs(y-(stickyTop()+baseHeight()-2))<=3)return -2;
         if(project.subtitlesEnabled)for(int row=0;row<project.subtitles.size();++row){auto r=subtitleLaneRect(row);if(r.bottom()>stickyTop()+baseHeight()+3&&std::abs(y-(r.bottom()-3))<=3)return row;}
         return -1;
     }
-    void Timeline::cancelLaneResize(){if(resizeRow==-1)return;if(resizeRow==-2)mouthHeight=resizeBefore;else if(resizeRow<project.subtitles.size())laneHeights[project.subtitles[resizeRow].id]=resizeBefore;resizeRow=-1;updateExtent();}
+    void Timeline::cancelLaneResize(){if(resizeRow==-1)return;if(resizeRow==-2)mouthHeight=resizeBefore;else if(resizeRow==-3)waveformHeight=resizeBefore;else if(resizeRow<project.subtitles.size())laneHeights[project.subtitles[resizeRow].id]=resizeBefore;resizeRow=-1;updateExtent();}
     QPlainTextEdit *Timeline::textEditor(){if(!editor){editor=new SubtitleEditor(this);editor->setObjectName("subtitleText");editor->setUndoRedoEnabled(false);editor->setTabChangesFocus(true);editor->installEventFilter(this);editor->hide();}return editor;}
     void Timeline::beginSubtitleEditing(const QString &track,const QString &cue){
         if(!editable||!project.subtitlesEnabled)return;
@@ -150,6 +155,7 @@ namespace chosuta {
     void Timeline::updateExtent() {
         double end=std::max(project.duration(),cursor);
         for(const auto&e:events)end=std::max(end,e.end+project.output.syncOffset);
+        if(!project.audioPath.isEmpty())end=std::max(end,(waveform?waveform->duration():project.audioDuration)+project.output.audioOffset);
         if(project.subtitlesEnabled)for(auto v:intervals)end=std::max(end,v.end);
         double width=xAtTime(end+10);
         // QWidget has a finite maximum size. Reduce zoom for long animations
@@ -159,7 +165,7 @@ namespace chosuta {
         int h=baseHeight();if(project.subtitlesEnabled){h+=4;for(int row=0;row<project.subtitles.size();++row)h+=subtitleHeight(row);}setFixedHeight(h);positionEditor();
     }
     int Timeline::hit(double x,double y)const {
-        y-=stickyTop();if(y<RulerHeight+14||y>baseHeight()-50)return -1;
+        const auto content=mouthContentRect();if(y<content.top()||y>content.bottom())return -1;
         for(int i=events.size()-1;i>=0;--i) {
             auto&e=events[i];
             if(x>=xAtTime(e.start+project.output.syncOffset)&&x<xAtTime(e.end+project.output.syncOffset))return i;
@@ -196,6 +202,19 @@ namespace chosuta {
             QString label=beats?project.score.time.beatLabel(qRound64(unit*Blick)):QString::number(unit,'f',unit==std::floor(unit)?0:1)+"s";
             painter.drawText(QRectF(x+3,top+3,130,22),label);
         }
+        if(waveHeight()){
+            auto lane=waveformLaneRect();painter.save();painter.setClipRect(lane.adjusted(0,1,0,-4));
+            double middle=lane.center().y(),amplitude=(lane.height()-12)/2;
+            painter.setPen(palette().mid().color());painter.drawLine(QPointF(left,middle),QPointF(right,middle));
+            if(waveform&&waveform->path==project.audioPath){
+                painter.setPen(QPen(QColor("#4686a5"),1));
+                for(int x=std::max(0,int(left));x<=right;++x){double a=timeAtX(x)-project.output.audioOffset,b=timeAtX(x+1)-project.output.audioOffset;
+                    if(b<=0||a>=waveform->duration())continue;auto peak=waveform->peaks(a,b);
+                    painter.drawLine(QPointF(x,middle-peak.high*amplitude),QPointF(x,middle-peak.low*amplitude));
+                }
+            }else {painter.setPen(palette().text().color());painter.drawText(QRectF(left+6,lane.top()+3,std::max(100.,right-left-12),lane.height()-8),Qt::AlignLeft|Qt::AlignTop|Qt::TextWordWrap,waveformStatus);}
+            painter.restore();painter.setPen(palette().mid().color());painter.drawLine(QPointF(left,lane.bottom()-2),QPointF(right,lane.bottom()-2));
+        }
         QMap<QString,QColor>colors {
             {
                 "A",QColor("#ed7373")
@@ -214,7 +233,8 @@ namespace chosuta {
         for(const auto&e:events) {
             double x=xAtTime(e.start+project.output.syncOffset),end=xAtTime(e.end+project.output.syncOffset);
             if(end<left||x>right)continue;
-            QRectF box(x,top+RulerHeight+14,std::max(1.,end-x),mouthHeight-64);
+            const auto content=mouthContentRect();
+            QRectF box(x,content.top(),std::max(1.,end-x),content.height());
             painter.setPen(QPen(selected.contains(e.id)?palette().highlight().color():palette().mid().color(),selected.contains(e.id)?3:1));
             painter.setBrush(colors.value(e.shape,QColor("#afbac8")));
             painter.drawRoundedRect(box.adjusted(1,1,-1,-1),3,3);
@@ -227,7 +247,7 @@ namespace chosuta {
         }
         painter.setPen(QPen(QColor("#3874cb"),1,Qt::DashLine));
         double marker=xAtTime(returnPosition);painter.drawLine(QPointF(marker,28),QPointF(marker,height()));
-        painter.drawText(QRectF(marker+3,top+baseHeight()-45,120,20),QStringLiteral("↩"));
+        painter.drawText(QRectF(marker+3,top+baseHeight()-23,120,20),QStringLiteral("↩"));
         painter.setPen(QPen(QColor("#d74242"),2));
         double x=xAtTime(cursor);
         painter.drawLine(QPointF(x,0),QPointF(x,height()));
@@ -236,7 +256,7 @@ namespace chosuta {
         if(e->button()!=Qt::LeftButton)return;
         finishSubtitleEditing(false);setFocus();pressPoint=e->position();dragActive=false;
         if(rulerRect().contains(e->position())){rulerDragging=true;emit seek(std::clamp(timeAtX(e->position().x()),0.,21600.));return;}
-        resizeRow=resizeHit(e->position().y());if(resizeRow!=-1){resizeBefore=resizeRow==-2?mouthHeight:subtitleHeight(resizeRow);QWidget::setCursor(Qt::SizeVerCursor);return;}
+        resizeRow=resizeHit(e->position().y());if(resizeRow!=-1){resizeBefore=resizeRow==-2?mouthHeight:resizeRow==-3?waveformHeight:subtitleHeight(resizeRow);QWidget::setCursor(Qt::SizeVerCursor);return;}
         int row=subtitleRow(e->position().y());
         if(row>=0){int i=subtitleHit(row,e->position().x(),e->position().y());auto&t=project.subtitles[row];selected.clear();subtitleTrack=t.id;subtitleCue=i>=0?t.cues[i].id:QString{};
             if(i>=0&&editable){beforeSubtitle=t.cues[i];auto v=intervals.value(subtitleCue);dragOrigin=timeAtX(e->position().x());dragMode=std::abs(e->position().x()-xAtTime(v.start))<6?1:std::abs(e->position().x()-xAtTime(v.end))<6?2:3;}
@@ -274,7 +294,7 @@ namespace chosuta {
     }
     void Timeline::mouseMoveEvent(QMouseEvent*e) {
         if(rulerDragging){emit seek(std::clamp(timeAtX(e->position().x()),0.,21600.));return;}
-        if(resizeRow!=-1){int h=resizeBefore+qRound(e->position().y()-pressPoint.y());if(resizeRow==-2)mouthHeight=std::clamp(h,96,360);else laneHeights[project.subtitles[resizeRow].id]=std::clamp(h,48,240);updateExtent();positionEditor();update();return;}
+        if(resizeRow!=-1){int h=resizeBefore+qRound(e->position().y()-pressPoint.y());if(resizeRow==-2)mouthHeight=std::clamp(h,96,360);else if(resizeRow==-3)waveformHeight=std::clamp(h,40,200);else laneHeights[project.subtitles[resizeRow].id]=std::clamp(h,48,240);updateExtent();positionEditor();update();return;}
         if(beforeSubtitle||!dragging.isEmpty()){if(!dragActive&&dragMode==3&&QLineF(pressPoint,e->position()).length()<QApplication::startDragDistance())return;dragActive=true;}
         else QWidget::setCursor(resizeHit(e->position().y())!=-1?Qt::SizeVerCursor:Qt::ArrowCursor);
         if(beforeSubtitle){
@@ -311,7 +331,7 @@ namespace chosuta {
     }
     void Timeline::mouseReleaseEvent(QMouseEvent*e) {
         if(e->button()==Qt::LeftButton&&rulerDragging){rulerDragging=false;return;}
-        if(e->button()==Qt::LeftButton&&resizeRow!=-1){auto id=resizeRow==-2?QString{}:project.subtitles[resizeRow].id;int h=resizeRow==-2?mouthHeight:subtitleHeight(resizeRow);resizeRow=-1;unsetCursor();emit laneHeightChanged(id,h);return;}
+        if(e->button()==Qt::LeftButton&&resizeRow!=-1){auto id=resizeRow==-2?QString{}:resizeRow==-3?QString("@waveform"):project.subtitles[resizeRow].id;int h=resizeRow==-2?mouthHeight:resizeRow==-3?waveformHeight:subtitleHeight(resizeRow);resizeRow=-1;unsetCursor();emit laneHeightChanged(id,h);return;}
         if(e->button()==Qt::LeftButton&&beforeSubtitle){SubtitleCue original=*beforeSubtitle;beforeSubtitle.reset();
             for(auto&t:project.subtitles)if(t.id==subtitleTrack)for(auto&c:t.cues)if(c.id==subtitleCue){if(c!=original){try{Project check=project;check.subtitles={t};validateSubtitles(check,true);emit subtitleEdited(t.id,c);}catch(const std::exception&ex){c=original;intervals[c.id]=subtitleInterval(project,c,&availableSources);emit editRejected(QString::fromUtf8(ex.what()));update();}}return;}
         }

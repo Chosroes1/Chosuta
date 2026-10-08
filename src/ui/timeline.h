@@ -2,6 +2,7 @@
 #pragma once
 #include <QWidget>
 #include "core/model.h"
+#include "render/waveform.h"
 class QPlainTextEdit;
 namespace chosuta {
     class Timeline:public QWidget {
@@ -15,6 +16,9 @@ namespace chosuta {
         void setReturnPosition(double time);
         QRectF rulerRect()const;
         QRectF mouthLaneRect()const;
+        QRectF waveformLaneRect()const;
+        void setWaveform(std::shared_ptr<const Waveform> wave,const QString &status);
+        void setWaveformHeight(int height);
         QRectF subtitleLaneRect(int row)const;
         void setLaneHeights(int mouth,int subtitles);
         void resetLaneHeights();
@@ -76,11 +80,16 @@ namespace chosuta {
         bool editable=true,rulerDragging=false,dragActive=false;
         QPointF pressPoint;
         static constexpr int RulerHeight=32;
-        int mouthHeight=138,defaultSubtitleHeight=60,resizeRow=-1,resizeBefore=0;
+        int mouthHeight=96,defaultSubtitleHeight=60,resizeRow=-1,resizeBefore=0;
+        int waveformHeight=80;
+        std::shared_ptr<const Waveform> waveform;
+        QString waveformStatus;
         QMap<QString,int> laneHeights;
         QPlainTextEdit *editor=nullptr;
         QString editingTrack,editingCue;
-        int baseHeight()const {return RulerHeight+mouthHeight;}
+        int waveHeight()const {return project.audioPath.isEmpty()?0:waveformHeight;}
+        int baseHeight()const {return RulerHeight+waveHeight()+mouthHeight;}
+        QRectF mouthContentRect()const;
         int subtitleHeight(int row)const;
         int resizeHit(double y)const;
         void positionEditor();

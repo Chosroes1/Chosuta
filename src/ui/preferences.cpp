@@ -23,9 +23,10 @@ namespace chosuta {
             "auto","zh","en","ja"
         }.contains(p.language))p.language="auto";
         p.returnOnPause=s.value("playback/returnOnPause",false).toBool();
-        p.mouthLaneHeight=std::clamp(s.value("timeline/mouthHeight",138).toInt(),96,360);
+        p.mouthLaneHeight=std::clamp(s.value("timeline/mouthHeight",p.mouthLaneHeight).toInt(),96,360);
         p.subtitleLaneHeight=std::clamp(s.value("timeline/subtitleHeight",60).toInt(),48,240);
         p.timelineHeight=std::clamp(s.value("timeline/viewportHeight",250).toInt(),180,900);
+        p.waveformLaneHeight=std::clamp(s.value("timeline/waveformHeight",80).toInt(),40,200);
         const auto data=s.value("pronunciation/settings").toByteArray();
         if(!data.isEmpty()) {
             if(data.size()>DictionaryByteLimit)throw Failure("Saved dictionary exceeds 3 MB");
@@ -42,6 +43,7 @@ namespace chosuta {
         s.setValue("timeline/mouthHeight",p.mouthLaneHeight);
         s.setValue("timeline/subtitleHeight",p.subtitleLaneHeight);
         s.setValue("timeline/viewportHeight",p.timelineHeight);
+        s.setValue("timeline/waveformHeight",p.waveformLaneHeight);
         s.sync();
         if(s.status()!=QSettings::NoError)throw Failure("Cannot save application preferences: "+s.fileName());
     }

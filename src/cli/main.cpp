@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
 #include "render/render.h"
+#include "render/waveform.h"
 #include <QGuiApplication>
 #include <csignal>
 #include <iostream>
@@ -27,7 +28,7 @@ int main(int argc,char**argv) {
     parser.setApplicationDescription("Chosuta: inspect/generate/export SVP or .chosuta projects; create original demo assets.");
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addPositionalArgument("command","inspect | generate | export | demo");
+    parser.addPositionalArgument("command","inspect | generate | export | correct | revert | demo");
     parser.addPositionalArgument("input","SVP/project input; demo uses output directory");
     parser.addPositionalArgument("output","Project/video output for generate/export","[output]");
     auto option=[&](QString name,QString description,QString value,QString def={}) {
@@ -54,6 +55,8 @@ int main(int argc,char**argv) {
     option("audio","Optional audio file","path");
     option("audio-offset","Audio start offset in seconds (negative trims)","seconds");
     option("sync-offset","Animation offset in seconds","seconds");
+    option("max-shift","Maximum local waveform timing shift (0..1000 ms; default 100)","milliseconds");
+    option("max-duration-change","Maximum relative duration change (0..50 percent; default 25)","percent");
     option("crf","Constant quality (0..51)","quality");
     option("bitrate","Target video kbps, 0 = quality mode","kbps");
     parser.addOption( {
@@ -231,10 +234,11 @@ int main(int argc,char**argv) {
             summary["tempo"]=tempos;
             summary["meter"]=meters;
             summary["diagnostics"]=diagnostics;
+            summary["timingCorrection"]=QJsonObject{{"enabled",p.timing.enabled},{"current",timingCorrectionCurrent(p)},{"sources",p.timing.sources.size()},{"maxShift",p.timing.maxShift},{"maxDurationChange",p.timing.maxDurationChange}};
             std::cout<<QJsonDocument(summary).toJson().constData();
             return 0;
         }
-        if(command!="generate"&&command!="export")throw Failure("Unknown command");
+        if(command!="generate"&&command!="export"&&command!="correct"&&command!="revert")throw Failure("Unknown command");
         if(args.size()!=3)throw Failure("Output path is required");
         if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary")||parser.isSet("custom-dictionary")||parser.isSet("japanese-kanji")||parser.isSet("no-japanese-kanji"))p.regenerate();
         if(parser.isSet("assets")) {
@@ -290,12 +294,27 @@ int main(int argc,char**argv) {
         if(parser.isSet("ffmpeg"))p.output.ffmpeg=parser.value("ffmpeg");
         if(parser.isSet("audio"))p.audioPath=QFileInfo(parser.value("audio")).absoluteFilePath();
         if(parser.isSet("transparent"))p.canvas.transparent=true;
-        if(command=="generate") {
+        if(command=="correct"){
+            p.timing.sources.clear();p.timing.enabled=false;
+            double shift=p.timing.maxShift*1000,stretch=p.timing.maxDurationChange*100;real("max-shift",shift);real("max-duration-change",stretch);
+            p.timing.maxShift=shift/1000;p.timing.maxDurationChange=stretch/100;validateTimingCorrection(p);
+            auto decoded=readWaveform(p.audioPath,p.output.ffmpeg,cancelled,{},p.audioDuration);
+            if(decoded.cancelled)return 130;if(!decoded.error.isEmpty())throw Failure(decoded.error);
+            std::cout<<"Waveform: "<<decoded.wave->bins.size()<<" bins, "<<decoded.wave->storageBytes()<<" summary bytes, "<<decoded.wave->duration()<<" seconds\n";
+            auto result=correctWaveform(p,*decoded.wave,cancelled);
+            if(result.cancelled)return 130;if(!result.error.isEmpty())throw Failure(result.error);
+            p.timing=result.timing;p.audioDuration=decoded.wave->duration();
+            std::cout<<result.accepted<<" corrected score sources; "<<result.protectedSources<<" protected, "<<result.unclear<<" unclear, "<<result.conflicts<<" conflicting\n";
+        }
+        if(command=="revert"){p.timing.sources.clear();p.timing.enabled=false;}
+        if(command=="generate"||command=="correct"||command=="revert") {
             if(QFileInfo::exists(args[2])&&!parser.isSet("force"))throw Failure("Output exists; use --force");
             saveProject(p,args[2]);
             std::cout<<p.generated.size()<<" estimated events\n";
             return 0;
         }
+        if(!verifyTimingAudio(p,cancelled))return 130;
+        if(p.timing.enabled&&!p.timing.sources.isEmpty()&&!timingCorrectionCurrent(p))std::cerr<<"Chosuta: waveform correction is stale; using score timing and manual edits.\n";
         auto result=exportVideo(p,args[2],cancelled,[](int n) {
             std::cerr<<"\r"<<n<<"%   "<<std::flush;
         },parser.isSet("force"));

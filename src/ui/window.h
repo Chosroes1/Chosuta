@@ -20,6 +20,7 @@ namespace chosuta {
         Q_OBJECT
         public:
         explicit Window();
+        ~Window()override;
         void openPath(const QString &path);
         void attachAudioPath(const QString &path);
         const Project &currentProject() const {
@@ -80,16 +81,28 @@ namespace chosuta {
         QFutureWatcher<LoadResult>loadWatcher;
         QFutureWatcher<ExportResult>exportWatcher;
         QFutureWatcher<AudioInfo>audioWatcher;
+        QFutureWatcher<WaveformResult>waveformWatcher;
+        QFutureWatcher<WaveCorrectionResult>correctionWatcher;
+        std::shared_ptr<const Waveform> waveform;
+        QString waveformKey,waveformMessage;
+        QWidget *waveformControls=nullptr;
+        QDoubleSpinBox *timingMaxShift=nullptr,*timingMaxDuration=nullptr;
+        QPushButton *correctTimingButton=nullptr,*revertTimingButton=nullptr,*reloadWaveformButton=nullptr;
+        void ensureWaveform();
+        void refreshWaveform();
+        void correctTiming();
+        void revertTiming();
+        void updateTimelineMinimum();
         QString activePath;
         bool audioStarted=false;
         QString trText(const char *key)const;
         void buildUi();
-        void refresh();
+        void refresh(bool timingOnly=false);
         void refreshPreview();
         void refreshSelection();
         void collectRules(Project &p)const;
-        void change(const QString &label,const std::function<void(Project &)> &fn);
-        void assignProject(Project p);
+        void change(const QString &label,const std::function<void(Project &)> &fn,bool timingOnly=false);
+        void assignProject(Project p,bool timingOnly=false);
         void setBusy(bool value);
         void error(const QString &message);
         bool confirmDiscard();

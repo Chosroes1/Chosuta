@@ -88,10 +88,22 @@ namespace chosuta {
     }
     QVector<Event> Project::effective()const {
         QVector<Event> result;
+        const bool corrected=timing.enabled&&timingCorrectionCurrent(*this);
         QSet<QString> sources;
         for(const auto&e:generated) {
             sources.insert(e.id);
-            if(!overrides.contains(e.id))result.append(e);
+            if(!overrides.contains(e.id)){
+                Event v=e;
+                if(corrected&&timing.sources.contains(e.source)){
+                    const auto &s=timing.sources[e.source];
+                    if(e.start>=s.originalStart-1e-9&&e.end<=s.originalEnd+1e-9&&s.originalEnd>s.originalStart){
+                        double factor=(s.end-s.start)/(s.originalEnd-s.originalStart);
+                        v.start=s.start+(e.start-s.originalStart)*factor;v.end=s.start+(e.end-s.originalStart)*factor;
+                        v.provenance+="/waveform-estimated";
+                    }
+                }
+                result.append(v);
+            }
         }
         for(auto it=overrides.begin();it!=overrides.end();++it) {
             const auto&o=it.value();
@@ -136,6 +148,7 @@ namespace chosuta {
             else ++it;
         }
         generated=std::move(result);
+        timing.sources.clear();timing.enabled=false;
     }
     void Project::edit(const Event&e,bool locked,QString anchor) {
         if(!std::isfinite(e.start)||!std::isfinite(e.end)||e.end<=e.start)throw Failure("Invalid event interval");

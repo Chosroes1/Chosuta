@@ -7,7 +7,7 @@ struct Preferences {
     QString language="auto";
     bool returnOnPause=false;
     PronunciationOptions pronunciation;
-    int mouthLaneHeight=138,subtitleLaneHeight=60,timelineHeight=250;
+    int mouthLaneHeight=96,subtitleLaneHeight=60,timelineHeight=250,waveformLaneHeight=80;
 };
 QString resolveUiLanguage(const QString &choice,const QStringList &systemLanguages);
 Preferences loadPreferences();

@@ -8,13 +8,14 @@ namespace chosuta {
     class ProjectCommand:public QUndoCommand {
         Window *window;
         Project before,after;
+        bool timingOnly=false;
         public:
-        ProjectCommand(Window*w,Project a,Project b,QString label):QUndoCommand(label),window(w),before(std::move(a)),after(std::move(b)){}
+        ProjectCommand(Window*w,Project a,Project b,QString label,bool onlyTiming=false):QUndoCommand(label),window(w),before(std::move(a)),after(std::move(b)),timingOnly(onlyTiming){}
         void undo()override {
-            window->assignProject(before);
+            window->assignProject(before,timingOnly);
         }
         void redo()override {
-            window->assignProject(after);
+            window->assignProject(after,timingOnly);
         }
     };
     QString Window::trText(const char*key)const {
@@ -24,6 +25,19 @@ namespace chosuta {
             const char*ja;
         };
         static const Entry entries[]= {
+            {"Waveform timing","波形时间校正","波形によるタイミング調整"},
+            {"Correct timing from waveform","按波形校正时间","波形でタイミングを補正"},
+            {"Revert waveform correction","回退波形校正","波形補正を元に戻す"},
+            {"Waveform correction reverted.","已回退波形校正。","波形補正を元に戻しました。"},
+            {"Reload waveform","重读波形","波形を再読込"},
+            {"Max shift (ms)","最大偏移（毫秒）","最大ずれ（ms）"},
+            {"Max duration change (%)","最大时长变化（%）","最大時間変化（%）"},
+            {"Preparing waveform…","正在准备波形…","波形を準備中…"},
+            {"Waveform unavailable: %1","波形不可用：%1","波形を利用できません：%1"},
+            {"Waveform preparation cancelled. Reload to retry.","波形准备已取消，可点击重读重试。","波形の準備を中止しました。再読込で再試行できます。"},
+            {"Correction is optional and starts only when clicked. Clear onset/end estimates stay near score timing; unclear or mixed audio may keep the original timing. Limits apply when correcting.","点击后才校正，可回退；只在工程附近估计明确起止。连唱或混音中不明确的位置保留工程时间。上限在点击校正时应用。","クリックした時だけ補正し、元に戻せます。譜面付近の明確な開始・終了のみ推定します。連続歌唱やミックスで不明確な箇所は元の時間を保ちます。上限は補正時に適用されます。"},
+            {"Waveform correction: %1 changed, %2 protected, %3 unclear, %4 conflicting.","波形校正：%1 个来源已调整，%2 个受人工修改保护，%3 个不明确，%4 个冲突。","波形補正：%1 件を調整、%2 件は手動編集を保護、%3 件は不明確、%4 件は競合。"},
+            {"Saved waveform correction is stale; score timing is used. Correct again if needed.","已保存的波形校正已失效，使用工程时间；需要时可重新校正。","保存された波形補正は無効です。譜面時間を使用します。必要なら再補正してください。"},
             {"Edit subtitle text","编辑字幕文字","字幕の文字を編集"},
             {"Subtitle text limit is 4096 characters.","单条字幕文字上限为 4096 字符，已拒绝本次超限输入。","字幕の文字数は最大 4096 です。上限を超える入力は適用されません。"},
             {"Subtitle ends after the animation. Extend the duration to include it.","字幕超过动画末尾，可延长动画时长以完整显示。","字幕がアニメーションの終わりを超えています。全体を表示するには時間を延長してください。"},
@@ -355,6 +369,7 @@ namespace chosuta {
         progress->setMaximumWidth(210);
         progress->hide();
         cancelButton=new QPushButton;
+        cancelButton->setObjectName("cancelTask");
         cancelButton->hide();
         statusBar()->addPermanentWidget(progress);
         statusBar()->addPermanentWidget(cancelButton);
@@ -400,6 +415,30 @@ namespace chosuta {
             }
             change(trText("Audio"),[r,audioEnd,extend](Project&p){p.audioPath=r.path;p.audioDuration=r.duration;if(extend)p.output.duration=audioEnd;});
             if(!r.warning.isEmpty())statusBar()->showMessage(r.warning);
+        });
+        connect(&waveformWatcher,&QFutureWatcher<WaveformResult>::finished,this,[this]{
+            auto r=waveformWatcher.result();setBusy(false);waveform=r.wave;
+            if(waveform)project.audioContentHash=waveform->hash;
+            else {
+                QFileInfo info(project.audioPath);
+                waveformKey=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+project.output.ffmpeg;
+            }
+            waveformMessage=r.cancelled?trText("Waveform preparation cancelled. Reload to retry."):r.error.isEmpty()?QString{}:trText("Waveform unavailable: %1").arg(r.error);
+            // Recheck saved timing against the decoded content, without reloading PNGs.
+            if(scene)scene->setTiming(project);
+            timeline->setProject(project);refreshWaveform();refreshSelection();refreshPreview();
+            auto stale=trText("Saved waveform correction is stale; score timing is used. Correct again if needed.");
+            auto text=diagnostics->toPlainText();text.remove(stale);
+            if(!project.timing.sources.isEmpty()&&!timingCorrectionCurrent(project))text+="\n\n"+stale;
+            diagnostics->setPlainText(text);
+            if(!waveformMessage.isEmpty())statusBar()->showMessage(waveformMessage);
+        });
+        connect(&correctionWatcher,&QFutureWatcher<WaveCorrectionResult>::finished,this,[this]{
+            auto r=correctionWatcher.result();setBusy(false);
+            if(r.cancelled){statusBar()->showMessage(trText("Cancelled"));return;}
+            if(!r.error.isEmpty()){error(r.error);return;}
+            change(trText("Correct timing from waveform"),[r](Project &p){p.timing=r.timing;},true);
+            statusBar()->showMessage(trText("Waveform correction: %1 changed, %2 protected, %3 unclear, %4 conflicting.").arg(r.accepted).arg(r.protectedSources).arg(r.unclear).arg(r.conflicts));
         });
         playbackTimer.setInterval(16);
         connect(&playbackTimer,&QTimer::timeout,this,[this] {
@@ -769,6 +808,15 @@ namespace chosuta {
         button(timelineRow,"Export Video",[this] {
             startExport();
         });
+        waveformControls=new QWidget;waveformControls->setObjectName("waveformControls");auto waveRow=new QHBoxLayout(waveformControls);waveRow->setContentsMargins(0,0,0,0);
+        waveRow->addWidget(new QLabel(trText("Waveform timing")));
+        timingMaxShift=new QDoubleSpinBox;timingMaxShift->setObjectName("timingMaxShift");timingMaxShift->setRange(0,1000);timingMaxShift->setDecimals(0);timingMaxShift->setSuffix(" ms");
+        waveRow->addWidget(new QLabel(trText("Max shift (ms)")));waveRow->addWidget(timingMaxShift);
+        timingMaxDuration=new QDoubleSpinBox;timingMaxDuration->setObjectName("timingMaxDuration");timingMaxDuration->setRange(0,50);timingMaxDuration->setDecimals(0);timingMaxDuration->setSuffix(" %");waveRow->addWidget(new QLabel(trText("Max duration change (%)")));waveRow->addWidget(timingMaxDuration);
+        correctTimingButton=new QPushButton(trText("Correct timing from waveform"));correctTimingButton->setObjectName("correctWaveformTiming");waveRow->addWidget(correctTimingButton);connect(correctTimingButton,&QPushButton::clicked,this,&Window::correctTiming);
+        revertTimingButton=new QPushButton(trText("Revert waveform correction"));revertTimingButton->setObjectName("revertWaveformTiming");waveRow->addWidget(revertTimingButton);connect(revertTimingButton,&QPushButton::clicked,this,&Window::revertTiming);
+        reloadWaveformButton=new QPushButton(trText("Reload waveform"));reloadWaveformButton->setObjectName("reloadWaveform");waveRow->addWidget(reloadWaveformButton);connect(reloadWaveformButton,&QPushButton::clicked,this,[this]{waveformKey.clear();ensureWaveform();});waveRow->addStretch();
+        waveformControls->setToolTip(trText("Correction is optional and starts only when clicked. Clear onset/end estimates stay near score timing; unclear or mixed audio may keep the original timing. Limits apply when correcting."));timelineLayout->addWidget(waveformControls);
         timelineScroll=new QScrollArea;
         timelineScroll->setObjectName("timelineScroll");
         auto scroll=timelineScroll;
@@ -778,9 +826,10 @@ namespace chosuta {
         scroll->setWidget(timeline);
         timelineLayout->addWidget(scroll);
         timeline->setLaneHeights(preferences.mouthLaneHeight,preferences.subtitleLaneHeight);
+        timeline->setWaveformHeight(preferences.waveformLaneHeight);
         timelineSplitter->setSizes({600,preferences.timelineHeight+40});
         connect(timelineSplitter,&QSplitter::splitterMoved,this,[this]{preferences.timelineHeight=std::clamp(timelineScroll->height(),180,900);});
-        connect(timeline,&Timeline::laneHeightChanged,this,[this](const QString&id,int h){if(id.isEmpty())preferences.mouthLaneHeight=h;else preferences.subtitleLaneHeight=h;timelineScroll->setMinimumHeight(qRound(timeline->mouthLaneRect().height())+32+(project.subtitlesEnabled?72:16));saveViewPreferences();});
+        connect(timeline,&Timeline::laneHeightChanged,this,[this](const QString&id,int h){if(id.isEmpty())preferences.mouthLaneHeight=h;else if(id=="@waveform")preferences.waveformLaneHeight=h;else preferences.subtitleLaneHeight=h;updateTimelineMinimum();saveViewPreferences();});
         connect(timeline,&Timeline::textEditingFinished,this,[this]{++subtitleTextSession;});
         connect(timeline,&Timeline::deleteRequested,this,&Window::deleteSelection);
         connect(timeline,&Timeline::blankClicked,this,&Window::clearObjectSelection);
@@ -813,11 +862,13 @@ namespace chosuta {
         });
         cancelButton->setText(trText("Cancel"));
     }
-    void Window::assignProject(Project p) {
+    void Window::assignProject(Project p,bool timingOnly) {
+        if(waveform&&waveform->path==p.audioPath)p.audioContentHash=waveform->hash;
+        else p.audioContentHash.clear();
         project=std::move(p);
-        refresh();
+        refresh(timingOnly);
     }
-    void Window::refresh() {
+    void Window::refresh(bool timingOnly) {
         refreshing=true;
         setWindowTitle("Chosuta — "+(projectPath.isEmpty()?trText("Estimated timing"):QFileInfo(projectPath).fileName())+"[*]");
         setWindowModified(!history.isClean());
@@ -865,7 +916,8 @@ namespace chosuta {
             qobject_cast<QComboBox*>(special->cellWidget(i,2))->setCurrentText(policy.shape);
             qobject_cast<QDoubleSpinBox*>(special->cellWidget(i,3))->setValue(policy.holdSeconds);
         }
-        scene=std::make_unique<Scene>(project);
+        if(timingOnly&&scene)scene->setTiming(project);
+        else scene=std::make_unique<Scene>(project);
         QStringList messages {
             trText("Estimated timing")
         };
@@ -880,11 +932,13 @@ namespace chosuta {
         }
         messages<<QString("%1: %2").arg(trText("Unknown pronunciations")).arg(unknown);
         if(!project.audioPath.isEmpty())messages<<trText("Audio")+": "+project.audioPath;
+        if(!project.timing.sources.isEmpty()&&!timingCorrectionCurrent(project))messages<<trText("Saved waveform correction is stale; score timing is used. Correct again if needed.");
         diagnostics->setPlainText(messages.join("\n\n"));
         refreshCanvas();
-        refreshSubtitles();
         timeline->setProject(project);
+        refreshSubtitles();
         timeline->setReturnPosition(project.playbackReturnPosition);
+        refreshWaveform();
         refreshing=false;
         refreshSelection();
         refreshPreview();
@@ -893,6 +947,8 @@ namespace chosuta {
         if(!scene)return;
         preview->setState(project,scene.get(),playTime,!playing&&!busy);
         timeline->setEditable(!playing&&!busy);
+        if(correctTimingButton)correctTimingButton->setEnabled(waveform&&waveform->path==project.audioPath&&!project.generated.isEmpty()&&!playing&&!busy);
+        if(revertTimingButton)revertTimingButton->setEnabled(!project.timing.sources.isEmpty()&&!playing&&!busy);
         timeline->setCursor(playTime);
         bool old=refreshing;
         refreshing=true;
@@ -924,12 +980,12 @@ namespace chosuta {
             qobject_cast<QComboBox*>(special->cellWidget(i,1))->currentData().toString(),qobject_cast<QComboBox*>(special->cellWidget(i,2))->currentText(),qobject_cast<QDoubleSpinBox*>(special->cellWidget(i,3))->value()
         };
     }
-    void Window::change(const QString&label,const std::function<void(Project&)>&fn) {
+    void Window::change(const QString&label,const std::function<void(Project&)>&fn,bool timingOnly) {
         if(busy)return;
         try {
             Project next=project;
             fn(next);
-            history.push(new ProjectCommand(this,project,std::move(next),label));
+            history.push(new ProjectCommand(this,project,std::move(next),label,timingOnly));
         }
         catch(const std::exception&e) {
             error(QString::fromUtf8(e.what()));

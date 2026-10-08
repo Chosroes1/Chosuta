@@ -14,6 +14,7 @@ namespace chosuta {
         std::optional<SubtitleInterval> cueInterval(const QString &id)const;
         void setLayout(const CanvasSettings &,const QVector<SubtitleTrack> &,bool enabled);
         void setSubtitleText(const QString &id,const QString &text);
+        void setTiming(const Project &project); // Same assets/layout; no image decoding.
         QStringList diagnostics;
         bool hasFallback()const {
             return images.contains(project.fallback);
