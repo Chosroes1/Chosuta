@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "core/model.h"
+#include "core/appearance.h"
 #include <QImage>
 #include <QTextLayout>
 #include <memory>
@@ -15,15 +16,25 @@ namespace chosuta {
         void setLayout(const CanvasSettings &,const QVector<SubtitleTrack> &,bool enabled);
         void setSubtitleText(const QString &id,const QString &text);
         void setTiming(const Project &project); // Same assets/layout; no image decoding.
-        QStringList diagnostics;
+        mutable QStringList diagnostics;
+        AssetSelection selectionAt(double seconds)const;
+        QStringList missingAppearanceAssets()const;
+        qint64 imageCacheBytes()const{return images.totalCost();}
+        int imageDecodeCount()const{return decodeCount;}
         bool hasFallback()const {
-            return images.contains(project.fallback);
+            return available.contains(project.fallback);
         }
         bool hasBackground()const{return project.canvas.backgroundImage.isEmpty()||!background.isNull();}
         private:
         Project project;
         QVector<Event>events;
-        QMap<QString,QImage>images;
+        AppearanceResolver appearance;
+        mutable QCache<QString,QImage>images;
+        QMap<QString,QSize>imageSizes;
+        QSize imageCacheFit;
+        mutable QSet<QString>available;
+        mutable int decodeCount=0;
+        QImage imageFor(const QString &id)const;
         QImage background;
         struct TextLayout {std::unique_ptr<QTextLayout> text;QSizeF size;};
         struct RenderCue {SubtitleCue cue;SubtitleInterval interval;SubtitleStyle style;};

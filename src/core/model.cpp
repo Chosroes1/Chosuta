@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "model.h"
+#include "appearance.h"
 #include <cmath>
 #include <algorithm>
 #include <set>
@@ -154,6 +155,9 @@ namespace chosuta {
         if(!std::isfinite(e.start)||!std::isfinite(e.end)||e.end<=e.start)throw Failure("Invalid event interval");
         Override o;
         o.event=e;
+        const auto generatedEvent=std::find_if(generated.cbegin(),generated.cend(),[&](const Event &v){return v.id==e.id;});
+        if(generatedEvent!=generated.cend()&&e.shape!=generatedEvent->shape)o.event.appearanceFixed=true;
+        if(generatedEvent==generated.cend()&&!overrides.contains(e.id)&&e.provenance!="manual/split")o.event.appearanceFixed=true;
         if(overrides.contains(e.id))o.parentIds=overrides[e.id].parentIds;
         o.standalone=overrides.contains(e.id)?overrides[e.id].standalone:(e.provenance=="manual/split"||e.provenance=="manual/merge");
         if(!o.event.provenance.startsWith("manual"))o.event.provenance="manual/edit";
@@ -189,6 +193,7 @@ namespace chosuta {
     void Project::merge(const QVector<Event>&events) {
         if(events.size()<2)throw Failure("Select two or more events");
         Event e=events.front();
+        if(appearance.enabled){const auto selected=AppearanceResolver(*this).event(*this,e);if(!selected.missing)e.shape=selected.id;}
         QStringList parents;
         for(const auto&v:events) {
             e.start=std::min(e.start,v.start);

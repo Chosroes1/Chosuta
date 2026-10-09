@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
+#include "core/appearance.h"
 #include <cmath>
+#include <initializer_list>
 namespace chosuta {
+    static void requireFields(const QJsonObject &object,std::initializer_list<const char *> keys) {
+        for(const auto key:keys)if(!object.contains(key))throw Failure("Missing project field: "+QString::fromLatin1(key));
+    }
     static QJsonObject eventJson(const Event&e) {
         return {
             {
@@ -21,11 +26,18 @@ namespace chosuta {
             }, {
                 "text",e.text
             }, {
+                "phone",e.phone
+            }, {
+                "articulation",e.articulation
+            }, {
+                "appearanceFixed",e.appearanceFixed
+            }, {
                 "unknown",e.unknown
             }
         };
     }
     static Event eventRead(const QJsonObject&o) {
+        requireFields(o,{"id","source","track","shape","start","end","provenance","text","phone","articulation","appearanceFixed","unknown"});
         Event e;
         e.id=o["id"].toString();
         e.source=o["source"].toString();
@@ -36,6 +48,11 @@ namespace chosuta {
         e.start=o["start"].toDouble();
         e.end=o["end"].toDouble();
         e.unknown=o["unknown"].toBool();
+        for(const auto &key:{"phone","articulation"})if(!o[key].isString())throw Failure("Invalid event pronunciation metadata");
+        if(!o["appearanceFixed"].isBool())throw Failure("Invalid event appearance flag");
+        e.phone=o["phone"].toString();e.articulation=o["articulation"].toString();
+        e.appearanceFixed=o["appearanceFixed"].toBool();
+        if(e.phone.size()>128||!QStringList{"","consonant","vowel","cl","br","rest","nasal","extend","empty","unknown"}.contains(e.articulation))throw Failure("Invalid event articulation");
         if(e.id.isEmpty()||e.shape.isEmpty()||!std::isfinite(e.start)||!std::isfinite(e.end)||e.end<=e.start||std::abs(e.start)>864000||std::abs(e.end)>864000)throw Failure("Invalid saved event");
         return e;
     }
@@ -49,13 +66,14 @@ namespace chosuta {
     void saveProject(const Project&p,const QString&path) {
         if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8||!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant timing settings");
         validatePronunciationOptions(p.rules.pronunciation);
+        validateConsonants(p.rules.consonants);validateAppearance(p.appearance);
         validateSubtitles(p);
         QDir base=QFileInfo(path).absoluteDir();
         QJsonObject root {
             {
                 "format","Chosuta"
             }, {
-                "schema",5
+                "schema",9
             }, {
                 "sourceBase64",QString::fromLatin1(p.score.raw.toBase64())
             }, {
@@ -93,6 +111,8 @@ namespace chosuta {
                 "holdSeconds",it.value().holdSeconds
             }
         };
+        rules["consonants"]=consonantsJson(p.rules.consonants);
+        root["appearance"]=appearanceJson(p.appearance);
         rules["pronunciation"]=pronunciationOptionsJson(p.rules.pronunciation);
         rules["special"]=special;
         QJsonObject readings;
@@ -151,7 +171,8 @@ namespace chosuta {
         QFile file(path);
         if(!file.open(QIODevice::ReadOnly)||file.size()>64*1024*1024)throw Failure("Cannot read project (limit 64 MiB): "+file.errorString());
         auto root=checkedJson(file.readAll()).object();
-        if(root["format"]!="Chosuta"||root["schema"].toInt()<1||root["schema"].toInt()>5)throw Failure("Unsupported project format/schema");
+        if(root["format"]!="Chosuta"||root["schema"]!=9)throw Failure("Unsupported project format/schema");
+        requireFields(root,{"sourceBase64","sourcePath","sourceHash","selected","priorities","rules","appearance","generated","overrides","assets","fallback","audioPath","canvas","audioDuration","playbackReturnPosition","output","subtitles","timingCorrection"});
         auto decoded=QByteArray::fromBase64Encoding(root["sourceBase64"].toString().toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
         if(!decoded)throw Failure("Invalid embedded source");
         Project p;
@@ -168,18 +189,22 @@ namespace chosuta {
         auto priorities=root["priorities"].toObject();
         for(auto it=priorities.begin();it!=priorities.end();++it)p.priorities[it.key()]=it.value().toInt();
         auto rules=root["rules"].toObject();
-        p.rules.language=rules["language"].toString("auto");
+        requireFields(rules,{"language","harmonyTakeover","consonantRatio","consonantMaxSeconds","englishDictionary","special","readings","consonants","pronunciation"});
+        p.rules.language=rules["language"].toString();
         if(!QStringList {
             "auto","ja","zh","en"
         }
         .contains(p.rules.language))throw Failure("Invalid language");
-        p.rules.harmonyTakeover=rules["harmonyTakeover"].toBool(true);
-        p.rules.consonantRatio=rules["consonantRatio"].toDouble(.18);
+        p.rules.harmonyTakeover=rules["harmonyTakeover"].toBool();
+        p.rules.consonantRatio=rules["consonantRatio"].toDouble();
         if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8)throw Failure("Invalid consonant ratio");
         const auto cap=rules.value("consonantMaxSeconds");
-        if(!cap.isUndefined()&&!cap.isDouble())throw Failure("Invalid consonant duration limit");
-        p.rules.consonantMaxSeconds=cap.isUndefined()?0:cap.toDouble();
+        if(!cap.isDouble())throw Failure("Invalid consonant duration limit");
+        p.rules.consonantMaxSeconds=cap.toDouble();
         if(!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant duration limit");
+        p.rules.consonants=readConsonants(rules.value("consonants"));
+        p.appearance=readAppearance(root.value("appearance"));
+        if(!rules["pronunciation"].isObject())throw Failure("Missing pronunciation settings");
         p.rules.englishDictionary=absolute(base,rules["englishDictionary"]);
         p.rules.pronunciation=pronunciationOptionsRead(rules.value("pronunciation"));
         auto special=rules["special"].toObject();
@@ -207,6 +232,7 @@ namespace chosuta {
         }
         for(const auto&v:overrides) {
             auto o=v.toObject();
+            requireFields(o,{"key","event","locked","deleted","standalone","parentIds","anchor","startBlick","endBlick"});
             Override edit;
             edit.event=eventRead(o["event"].toObject());
             QString key=o["key"].toString();
@@ -215,7 +241,7 @@ namespace chosuta {
             edit.deleted=o["deleted"].toBool();
             edit.standalone=o["standalone"].toBool();
             for(const auto&parent:o["parentIds"].toArray())edit.parentIds.append(parent.toString());
-            edit.anchor=o["anchor"].toString("seconds");
+            edit.anchor=o["anchor"].toString();
             bool a=false,b=false;
             edit.startBlick=o["startBlick"].toString().toLongLong(&a);
             edit.endBlick=o["endBlick"].toString().toLongLong(&b);
@@ -227,32 +253,35 @@ namespace chosuta {
         }
         auto assets=root["assets"].toObject();
         for(auto it=assets.begin();it!=assets.end();++it)p.assets[it.key()]=absolute(base,it.value());
-        p.fallback=root["fallback"].toString("closed");
+        p.fallback=root["fallback"].toString();
         p.audioPath=absolute(base,root["audioPath"]);
         auto output=root["output"].toObject();
+        requireFields(output,{"fpsNum","fpsDen","format","crf","bitrateKbps","ffmpeg","duration","syncOffset","audioOffset"});
         auto&s=p.output;
 
-        s.fpsNum=output["fpsNum"].toInt(30);
-        s.fpsDen=output["fpsDen"].toInt(1);
-        s.format=output["format"].toString("mp4");
-        s.crf=output["crf"].toInt(20);
+        s.fpsNum=output["fpsNum"].toInt();
+        s.fpsDen=output["fpsDen"].toInt();
+        s.format=output["format"].toString();
+        s.crf=output["crf"].toInt();
         s.bitrateKbps=output["bitrateKbps"].toInt();
 
-        s.ffmpeg=output["ffmpeg"].toString("ffmpeg");
+        s.ffmpeg=output["ffmpeg"].toString();
         s.duration=output["duration"].toDouble();
         s.syncOffset=output["syncOffset"].toDouble();
         s.audioOffset=output["audioOffset"].toDouble();
         if(!std::isfinite(s.duration)||s.duration<0||s.duration>21600||!std::isfinite(s.syncOffset)||std::abs(s.syncOffset)>21600||!std::isfinite(s.audioOffset)||std::abs(s.audioOffset)>21600)throw Failure("Invalid output time settings");
-        auto canvas=root["schema"].toInt()==1?output:root["canvas"].toObject();
-        auto &c=p.canvas;c.width=canvas["width"].toInt(1280);c.height=canvas["height"].toInt(720);
-        c.background=QColor(canvas["background"].toString("#ffffffff"));c.transparent=canvas["transparent"].toBool();
-        c.backgroundImage=absolute(base,canvas["backgroundImage"]);c.backgroundFit=canvas["backgroundFit"].toString("cover");
-        c.characterScale=canvas["characterScale"].toDouble(1);c.characterX=canvas["characterX"].toDouble(.5);c.characterY=canvas["characterY"].toDouble(.5);
+        if(!root["canvas"].isObject())throw Failure("Missing canvas settings");
+        auto canvas=root["canvas"].toObject();
+        requireFields(canvas,{"width","height","background","transparent","backgroundImage","backgroundFit","characterScale","characterX","characterY"});
+        auto &c=p.canvas;c.width=canvas["width"].toInt();c.height=canvas["height"].toInt();
+        c.background=QColor(canvas["background"].toString());c.transparent=canvas["transparent"].toBool();
+        c.backgroundImage=absolute(base,canvas["backgroundImage"]);c.backgroundFit=canvas["backgroundFit"].toString();
+        c.characterScale=canvas["characterScale"].toDouble();c.characterX=canvas["characterX"].toDouble();c.characterY=canvas["characterY"].toDouble();
         validateCanvas(c);
         p.audioDuration=root["audioDuration"].toDouble();p.playbackReturnPosition=root["playbackReturnPosition"].toDouble();
         if(!std::isfinite(p.audioDuration)||p.audioDuration<0||p.audioDuration>864000||!std::isfinite(p.playbackReturnPosition)||p.playbackReturnPosition<0||p.playbackReturnPosition>21600)throw Failure("Invalid audio duration/return position");
-        if(root["schema"].toInt()>=4)readSubtitles(p,root.value("subtitles"));
-        if(root["schema"].toInt()>=5)readTimingCorrection(p,root.value("timingCorrection"));
+        readSubtitles(p,root.value("subtitles"));
+        readTimingCorrection(p,root.value("timingCorrection"));
         return p;
     }
 }

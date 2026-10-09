@@ -12,6 +12,7 @@ QString timingBasisHash(const Project &p,const std::atomic_bool *cancel) {
     for(const auto &t:p.score.time.tempos){add(QString::number(t.position));add(QString::number(t.bpm,'g',17));}
     for(const auto &id:p.selected){add(id);add(QString::number(p.priorities.value(id)));}
     add(p.rules.language);add(QString::number(p.rules.consonantRatio,'g',17));add(QString::number(p.rules.consonantMaxSeconds,'g',17));add(QString::number(p.rules.harmonyTakeover));
+    add(QString::fromUtf8(QJsonDocument(consonantsJson(p.rules.consonants)).toJson(QJsonDocument::Compact)));
     for(auto i=p.rules.readings.begin();i!=p.rules.readings.end();++i){add(i.key());add(i.value());}
     add(QString::fromUtf8(QJsonDocument(pronunciationOptionsJson(p.rules.pronunciation)).toJson(QJsonDocument::Compact)));
     for(auto i=p.rules.special.begin();i!=p.rules.special.end();++i){add(i.key());add(i->mode);add(i->shape);add(QString::number(i->holdSeconds,'g',17));}
@@ -55,11 +56,10 @@ QJsonObject timingCorrectionJson(const Project &p) {
     return {{"maxShift",t.maxShift},{"maxDurationChange",t.maxDurationChange},{"enabled",t.enabled},{"basisHash",t.basisHash},{"audioHash",t.audioHash},{"audioBytes",QString::number(t.audioBytes)},{"audioModified",QString::number(t.audioModified)},{"sources",sources}};
 }
 void readTimingCorrection(Project &p,const QJsonValue &value) {
-    if(value.isUndefined())return;
     if(!value.isObject())throw Failure("Invalid timing correction data");
     auto o=value.toObject();auto &t=p.timing;
-    auto number=[&](const char *key,double fallback){auto v=o.value(key);if(!v.isUndefined()&&!v.isDouble())throw Failure("Invalid timing correction number");return v.isUndefined()?fallback:v.toDouble();};
-    t.maxShift=number("maxShift",.1);t.maxDurationChange=number("maxDurationChange",.25);
+    auto number=[&](const char *key){auto v=o.value(key);if(!v.isDouble())throw Failure("Invalid timing correction number");return v.toDouble();};
+    t.maxShift=number("maxShift");t.maxDurationChange=number("maxDurationChange");
     if(!o.value("enabled").isBool()||!o.value("sources").isArray())throw Failure("Invalid timing correction state");
     t.enabled=o["enabled"].toBool();t.basisHash=o["basisHash"].toString();t.audioHash=o["audioHash"].toString();
     bool a=false,b=false;t.audioBytes=o["audioBytes"].toString().toLongLong(&a);t.audioModified=o["audioModified"].toString().toLongLong(&b);

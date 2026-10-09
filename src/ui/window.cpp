@@ -25,6 +25,10 @@ namespace chosuta {
             const char*ja;
         };
         static const Entry entries[]= {
+            {"Advanced variant settings","高级差分设置","高度な差分設定"},
+            {"Missing compatible pose","缺少对应姿态图片","対応する姿勢画像がありません"},
+            {"Enable advanced variants","启用高级差分","高度な差分を有効化"},
+            {"These rules also apply to advanced variants: they determine mouth states and timing; advanced settings select images that preserve pose and expression.","这些规则同样适用于高级差分：决定口形状态与时序，高级设置据此选择包含动作和神态的图片。","これらの規則は高度な差分にも適用されます。口形とタイミングを決め、高度な設定で動作や表情を保つ画像を選択します。"},
             {"Waveform timing","波形时间校正","波形によるタイミング調整"},
             {"Correct timing from waveform","按波形校正时间","波形でタイミングを補正"},
             {"Revert waveform correction","回退波形校正","波形補正を元に戻す"},
@@ -64,7 +68,7 @@ namespace chosuta {
             {"Font","字体","フォント"},
             {"Edit text in subtitle block","在字幕块中编辑文字","字幕ブロック内で文字を編集"},
             {"Restore timeline heights","恢复轴高度","トラックの高さをリセット"},
-            {"Consonant limit (ms; 0 = legacy)","辅音组时长上限（毫秒；0 为旧规则）","子音群の時間上限（ms、0 は従来規則）"},
+            {"Consonant limit (ms; 0 = no cap)","辅音组时长上限（毫秒；0 为不限）","子音群の時間上限（ms、0 は上限なし）"},
             {"Font height (% of canvas)","字号（画布高度 %）","文字サイズ（画面高さ %）"},
             {"Center X (%)","中心 X（%）","中心 X（%）"},
             {"Center Y (%)","中心 Y（%）","中心 Y（%）"},
@@ -502,6 +506,7 @@ namespace chosuta {
             resetOverrides();
         });
         action(settings,"Preferences",[this]{showPreferences();})->setObjectName("preferencesAction");
+        action(settings,"Advanced variant settings",[this]{showMouthSettings();})->setObjectName("advancedMouthAction");
         action(settings,"Advanced settings",[this]{showAdvancedSettings();})->setObjectName("advancedSettingsAction");
         action(settings,"Canvas",[this]{tabs->setCurrentWidget(canvasPage);});
         action(help,"Guide",[this] {
@@ -561,6 +566,9 @@ namespace chosuta {
         });
         auto assetPage=new QWidget;
         auto assetLayout=new QVBoxLayout(assetPage);
+        advancedMouth=new QCheckBox(trText("Enable advanced variants"));advancedMouth->setObjectName("advancedMouthEnabled");assetLayout->addWidget(advancedMouth);
+        connect(advancedMouth,&QCheckBox::toggled,this,[this](bool value){if(!refreshing&&!busy)change(trText("Advanced variant settings"),[value](Project &p){p.appearance.enabled=value;});});
+        auto mouthSettings=new QPushButton(trText("Advanced variant settings"));mouthSettings->setObjectName("advancedMouthButton");assetLayout->addWidget(mouthSettings);connect(mouthSettings,&QPushButton::clicked,this,&Window::showMouthSettings);
         assets=new QTableWidget(0,2);
         assets->setHorizontalHeaderLabels( {
             trText("Shape"),trText("Path")
@@ -621,7 +629,7 @@ namespace chosuta {
         consonant->setRange(0,.8);
         consonant->setSingleStep(.01);
         form->addRow(trText("Consonant fraction"),consonant);
-        consonantLimit=new QDoubleSpinBox;consonantLimit->setObjectName("consonantLimit");consonantLimit->setRange(0,1000);consonantLimit->setDecimals(1);consonantLimit->setSingleStep(10);form->addRow(trText("Consonant limit (ms; 0 = legacy)"),consonantLimit);
+        consonantLimit=new QDoubleSpinBox;consonantLimit->setObjectName("consonantLimit");consonantLimit->setRange(0,1000);consonantLimit->setDecimals(1);consonantLimit->setSingleStep(10);form->addRow(trText("Consonant limit (ms; 0 = no cap)"),consonantLimit);
         special=new QTableWidget(6,4);
         special->setHorizontalHeaderLabels( {
             trText("Special"),trText("Mode"),trText("Shape"),trText("Hold (seconds)")
@@ -629,6 +637,10 @@ namespace chosuta {
         special->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
         special->setMinimumHeight(230);
         ruleLayout->addWidget(special);
+        auto scopeHint=new QLabel(trText("These rules also apply to advanced variants: they determine mouth states and timing; advanced settings select images that preserve pose and expression."));
+        scopeHint->setObjectName("rulesAdvancedScopeHint");
+        scopeHint->setWordWrap(true);
+        ruleLayout->addWidget(scopeHint);
         QStringList keys= {
             "rest","empty","cl","br","nasal","extend"
         };
@@ -689,7 +701,7 @@ namespace chosuta {
         auto rightLayout=new QVBoxLayout(right);
         horizontal->addWidget(right);
         layoutTarget=new QComboBox;layoutTarget->setObjectName("layoutTarget");layoutTarget->addItem(trText("Move character"),QString{});rightLayout->addWidget(layoutTarget);
-        preview=new PreviewCanvas;
+        preview=new PreviewCanvas;preview->setProperty("missingAssetLabel",trText("Missing compatible pose"));
         rightLayout->addWidget(preview,1);
         connect(layoutTarget,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)updateLayoutTarget();});
         connect(preview,&PreviewCanvas::layoutEdited,this,[this](Project p){changeSubtitles(trText("Canvas"),[p](Project&next){next.canvas=p.canvas;next.subtitles=p.subtitles;});});
@@ -886,13 +898,16 @@ namespace chosuta {
             count->setFlags(Qt::ItemIsEnabled);
             tracks->setItem(i,2,count);
         }
+        advancedMouth->setChecked(project.appearance.enabled);
         QStringList shapes= {
             "A","I","U","E","O","closed","rest","breath","unknown"
         };
         for(const auto&s:project.assets.keys())if(!shapes.contains(s))shapes<<s;
-        assets->setRowCount(shapes.size());
-        for(int i=0;i<shapes.size();++i) {
-            auto s=shapes[i];
+        QStringList simpleShapes;
+        for(const auto &id:shapes)if(!id.contains("_")||!normalizedAssetId(id))simpleShapes.append(id);
+        assets->setRowCount(simpleShapes.size());
+        for(int i=0;i<simpleShapes.size();++i) {
+            auto s=simpleShapes[i];
             assets->setItem(i,0,new QTableWidgetItem(s));
             auto item=new QTableWidgetItem(project.assets.value(s));
             if(!item->text().isEmpty()&&!QFileInfo::exists(item->text()))item->setForeground(Qt::red);
@@ -1102,6 +1117,7 @@ namespace chosuta {
                     "a","i","u","e","o"
                 }
                 .contains(id))id=id.toUpper();
+                if(const auto canonical=normalizedAssetId(id))id=*canonical;
                 p.assets[id]=path;
             }
         });

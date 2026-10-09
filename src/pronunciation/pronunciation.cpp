@@ -127,18 +127,16 @@ namespace chosuta {
             }
         };
     }
-    // Binary animation defaults, not a phonetic timing model. Open consonants
-    // anticipate the nearby vowel; half-closed/articulator detail is deferred.
-    static QString consonantShape(QString phone,const QString&language){
-        phone=phone.toLower();
-        const QStringList closed=language=="zh"?QStringList{"b","p","m","d","t","g","k","j","q","zh","ch","z","c"}:
-            QStringList{"b","p","m","d","t","g","k","ch","jh","j","ts","by","py","my","dy","ty","gy","ky"};
-        return closed.contains(phone)?"closed":"open";
+    static QString phoneKey(const QString &language,QString phone) {
+        return language+":"+(language=="en"?"arpabet":language=="ja"?"romaji":"xsampa")+":"+(language=="en"?phone.toUpper():phone);
     }
-    static Pronunciation phones(const QStringList&tokens,QString language) {
+    static QString consonantShape(QString phone,const QString &language,const Rules::Consonants &rules) {
+        return consonantMode(phoneKey(language,phone),rules);
+    }
+    static Pronunciation phones(const QStringList&tokens,QString language,const Rules::Consonants &rules={}) {
         Pronunciation r;
         r.provenance="explicit/estimated";
-        QStringList pending;
+        QStringList pending,keys;
         auto vowels=englishPhones();
         const QStringList engConsonants= {
             "B","CH","D","DH","DX","F","G","HH","JH","K","L","LL","M","N","NG","P","R","S","SH","T","TH","V","W","Y","Z","ZH"
@@ -149,7 +147,7 @@ namespace chosuta {
         for(QString token:tokens) {
             if(token=="|") {
                 if(r.syllables.isEmpty()) {r.unknown=true;return r;}
-                r.syllables.last().append(pending);r.roles.last()+=QVector<SegmentRole>(pending.size(),SegmentRole::Consonant);pending.clear();continue;
+                r.syllables.last().append(pending);r.roles.last()+=QVector<SegmentRole>(pending.size(),SegmentRole::Consonant);r.phones.last()+=keys;pending.clear();keys.clear();continue;
             }
             if(language=="en")token.remove(QRegularExpression("[012]$"));
             QStringList shape;
@@ -173,7 +171,7 @@ namespace chosuta {
                 "nasal"
             };
             else if((language=="en"&&engConsonants.contains(token.toUpper()))||(language=="ja"&&jpConsonants.contains(token))||(language=="zh"&&QStringList{"b","p","m","f","d","t","n","l","g","k","h","j","q","x","zh","ch","sh","r","z","c","s","y","w"}.contains(token))) {
-                pending<<consonantShape(token,language);
+                pending<<consonantShape(token,language,rules);keys<<phoneKey(language,token);
                 continue;
             }
             else {
@@ -181,20 +179,21 @@ namespace chosuta {
                 return r;
             }
             r.syllables.append(pending+shape);
+            r.phones.append(keys+QStringList(shape.size(),phoneKey(language,token)));
             QVector<SegmentRole> roles(pending.size(),SegmentRole::Consonant);
             const bool vowel=language=="en"?vowels.contains(token.toUpper()):QStringList{"a","i","u","e","o"}.contains(token.toLower());
             roles+=QVector<SegmentRole>(shape.size(),vowel?SegmentRole::Vowel:SegmentRole::Special);
             r.roles.append(roles);
-            pending.clear();
+            pending.clear();keys.clear();
         }
         if(!pending.isEmpty()) {
-            if(r.syllables.isEmpty()){r.syllables.append(pending);r.roles.append(QVector<SegmentRole>(pending.size(),SegmentRole::Consonant));}
-            else {r.syllables.last().append(pending);r.roles.last()+=QVector<SegmentRole>(pending.size(),SegmentRole::Consonant);}
+            if(r.syllables.isEmpty()){r.syllables.append(pending);r.roles.append(QVector<SegmentRole>(pending.size(),SegmentRole::Consonant));r.phones.append(keys);}
+            else {r.syllables.last().append(pending);r.roles.last()+=QVector<SegmentRole>(pending.size(),SegmentRole::Consonant);r.phones.last()+=keys;}
         }
         if(r.syllables.isEmpty())r.unknown=true;
         return r;
     }
-    static Pronunciation japanese(QString text) {
+    static Pronunciation japanese(QString text,const Rules::Consonants &rules) {
         Pronunciation r;
         r.provenance="japanese-rule/estimated";
         text=text.normalized(QString::NormalizationForm_KC);
@@ -226,53 +225,54 @@ namespace chosuta {
         })map[pair.first]=pair.second;
         QString small="ぁぃぅぇぉゃゅょゎ";
         QString corresponding="AIUEOAUOA";
+        QMap<QChar,QString> initials;
+        const QStringList headsByRow={"","k","g","s","z","t","d","n","h","b","p","m","r"};
+        for(int row=0;row<rows.size();++row)for(auto c:rows[row])initials[c]=headsByRow[row];
+        initials[u'し']="sh";initials[u'じ']="j";initials[u'ち']="ch";initials[u'つ']="ts";
+        initials[u'ぢ']="j";initials[u'づ']="z";initials[u'ふ']="f";
+        initials[u'や']=initials[u'ゆ']=initials[u'よ']="y";
+        initials[u'わ']=initials[u'ゐ']=initials[u'ゑ']=initials[u'を']="w";initials[u'ゔ']="v";
+        auto append=[&](QStringList shapes,QStringList phones,QVector<SegmentRole> roles) {
+            r.syllables.append(std::move(shapes));r.phones.append(std::move(phones));r.roles.append(std::move(roles));
+        };
         bool kana=false;
         for(QChar c:text)if(c.unicode()>=0x3041&&c.unicode()<=0x3096)kana=true;
         if(kana) {
             for(QChar c:text) {
                 if(c.isSpace()||(c.isPunct()&&c!=u'ー'))continue;
-                if(c==u'ん') {
-                    r.syllables.append( {
-                        "nasal"
-                    });
-                    continue;
-                }
-                if(c==u'っ') {
-                    r.syllables.append( {
-                        "closed"
-                    });
-                    continue;
-                }
+                if(c==u'ん'){append({"nasal"},{phoneKey("ja","N")},{SegmentRole::Special});continue;}
+                if(c==u'っ'){append({"closed"},{phoneKey("ja","cl")},{SegmentRole::Special});continue;}
                 if(c==u'ー') {
-                    if(r.syllables.isEmpty()) {
-                        r.unknown=true;
-                        return r;
-                    }
-                    r.syllables.append( {
-                        r.syllables.last().last()
-                    });
-                    continue;
+                    if(r.syllables.isEmpty()){r.unknown=true;return r;}
+                    append({r.syllables.last().last()},{r.phones.last().last()},{r.roles.last().last()});continue;
                 }
                 if(small.contains(c)) {
-                    QString v(corresponding[small.indexOf(c)]);
+                    const QString v(corresponding[small.indexOf(c)]);
                     if(r.syllables.isEmpty()||QStringList{"nasal","closed"}.contains(r.syllables.last().last())) {
-                        if(QString("ぁぃぅぇぉ").contains(c))r.syllables.append({v});
+                        if(QString("ぁぃぅぇぉ").contains(c))append({v},{phoneKey("ja",v.toLower())},{SegmentRole::Vowel});
                         else {r.unknown=true;return r;}
+                    } else {
+                        r.syllables.last().last()=v;r.phones.last().last()=phoneKey("ja",v.toLower());
+                        if(QString("ゃゅょ").contains(c)&&r.syllables.last().size()>1) {
+                            const auto oldKey=r.phones.last().front();auto head=oldKey.section(':',2);
+                            if(!QStringList{"sh","ch","j"}.contains(head)&&!head.endsWith('y'))head+='y';
+                            const auto key=phoneKey("ja",head);
+                            if(consonantKeys("ja").contains(key)){
+                                r.phones.last().front()=key;
+                                r.syllables.last().front()=consonantMode(key,rules);
+                            }
+                        }
                     }
-                    else r.syllables.last().last()=v;
                     continue;
                 }
-                if(!map.contains(c)) {
-                    r.unknown=true;
-                    return r;
+                if(!map.contains(c)){r.unknown=true;return r;}
+                const QString v(map[c]),head=initials.value(c);
+                if(head.isEmpty())append({v},{phoneKey("ja",v.toLower())},{SegmentRole::Vowel});
+                else {
+                    const auto key=phoneKey("ja",head);
+                    QString mode=consonantMode(key,rules);
+                    append({mode,v},{key,phoneKey("ja",v.toLower())},{SegmentRole::Consonant,SegmentRole::Vowel});
                 }
-                QString v(map[c]);
-                if(QString("あいうえお").contains(c))r.syllables.append( {
-                    v
-                });
-                else r.syllables.append( {
-                    QString::fromUtf8("かきくけこがぎぐげごたちつてとだぢづでどばびぶべぼぱぴぷぺぽまみむめもじ").contains(c)?QString("closed"):QString("open"),v
-                });
             }
             return r;
         }
@@ -287,6 +287,7 @@ namespace chosuta {
                 r.syllables.append( {
                     "nasal"
                 });
+                r.phones.append({phoneKey("ja","N")});r.roles.append({SegmentRole::Special});
                 s.remove(0,s.size()>1&&s[1]==u'\''?2:1);
                 continue;
             }
@@ -294,6 +295,7 @@ namespace chosuta {
                 r.syllables.append( {
                     "closed"
                 });
+                r.phones.append({phoneKey("ja","cl")});r.roles.append({SegmentRole::Special});
                 s.remove(0,1);
                 continue;
             }
@@ -304,8 +306,10 @@ namespace chosuta {
                     vowel
                 }
                 :QStringList {
-                    consonantShape(head,"ja"),vowel
+                    consonantShape(head,"ja",rules),vowel
                 });
+                r.phones.append(head.isEmpty()?QStringList{phoneKey("ja",vowel.toLower())}:QStringList{phoneKey("ja",head),phoneKey("ja",vowel.toLower())});
+                r.roles.append(head.isEmpty()?QVector<SegmentRole>{SegmentRole::Vowel}:QVector<SegmentRole>{SegmentRole::Consonant,SegmentRole::Vowel});
                 s.remove(0,head.size()+1);
                 matched=true;
                 break;
@@ -318,7 +322,7 @@ namespace chosuta {
         if(r.syllables.isEmpty())r.unknown=true;
         return r;
     }
-    static Pronunciation chinese(QString text) {
+    static Pronunciation chinese(QString text,const Rules::Consonants &rules) {
         Pronunciation r;
         r.provenance="icu-han-pinyin/estimated";
         QString s=transliterate(text.normalized(QString::NormalizationForm_KC),"Han-Latin; Lower");
@@ -487,7 +491,7 @@ namespace chosuta {
             "zh","ch","sh","b","p","m","f","d","t","n","l","g","k","h","j","q","x","r","z","c","s","y","w"
         };
         for(auto w:words) {
-            if(QStringList{"m","n","ng"}.contains(w)) {r.syllables.append(finals[w]);continue;}
+            if(QStringList{"m","n","ng"}.contains(w)) {r.syllables.append(w=="m"?QStringList{consonantShape("m","zh",rules)}:finals[w]);r.phones.append({phoneKey("zh",w)});r.roles.append({w=="m"?SegmentRole::Consonant:SegmentRole::Special});continue;}
             QString initial;
             for(const auto&i:initials)if(w.startsWith(i)) {
                 initial=i;
@@ -500,8 +504,11 @@ namespace chosuta {
                 return r;
             }
             auto shapes=finals[w];
-            if(!initial.isEmpty())shapes.prepend(consonantShape(initial,"zh"));
-            r.syllables.append(shapes);
+            QStringList keys;
+            QVector<SegmentRole> roles;
+            for(const auto &shape:shapes){keys.append(phoneKey("zh",shape=="nasal"?(w.endsWith("ng")?"ng":"N"):shape.toLower()));roles.append(shape=="nasal"?SegmentRole::Special:SegmentRole::Vowel);}
+            if(!initial.isEmpty()){shapes.prepend(consonantShape(initial,"zh",rules));keys.prepend(phoneKey("zh",initial));roles.prepend(SegmentRole::Consonant);}
+            r.syllables.append(shapes);r.phones.append(keys);r.roles.append(roles);
         }
         if(r.syllables.isEmpty())r.unknown=true;
         return r;
@@ -525,6 +532,7 @@ namespace chosuta {
     }
     static Pronunciation withRoles(Pronunciation r) {
         for(int i=0;i<r.syllables.size();++i) {
+            if(i>=r.phones.size())r.phones.append(QStringList(r.syllables[i].size(),QString()));
             if(i<r.roles.size()&&r.roles[i].size()==r.syllables[i].size())continue;
             QVector<SegmentRole> roles;
             for(const auto &shape:r.syllables[i])roles.append(QStringList{"A","I","U","E","O"}.contains(shape)?SegmentRole::Vowel:(shape=="closed"||shape=="open")?SegmentRole::Consonant:SegmentRole::Special);
@@ -532,7 +540,7 @@ namespace chosuta {
         }
         return r;
     }
-    Pronunciation pronounce(const QString&input,const QString&language,bool explicitPhones,const QString&dictionary,const QString&phoneset,const PronunciationOptions&options) {
+    Pronunciation pronounce(const QString&input,const QString&language,bool explicitPhones,const QString&dictionary,const QString&phoneset,const PronunciationOptions&options,const Rules::Consonants &consonants) {
         Pronunciation r;
         if(input.size()>4096) {
             r.unknown=true;r.provenance="text-limit/estimated";return r;
@@ -567,13 +575,13 @@ namespace chosuta {
             if(!phoneset.isEmpty()&&phoneset!=expected) {
                 r.unknown=true;r.provenance="unsupported-phoneset/estimated";return r;
             }
-            return phones(text.split(QRegularExpression("\\s+"),Qt::SkipEmptyParts),l);
+            return phones(text.split(QRegularExpression("\\s+"),Qt::SkipEmptyParts),l,consonants);
         }
         bool closure=text.startsWith(u'\'')||text.startsWith(u'’');
         if(closure)text.remove(0,1);
         const auto custom=options.words.value(l);
         auto customReading=[&](const DictionaryReading &entry) {
-            auto result=pronounce(entry.text,l,entry.phonemes,dictionary);
+            auto result=pronounce(entry.text,l,entry.phonemes,dictionary,{}, {},consonants);
             result.provenance="user-dictionary/estimated";
             return result;
         };
@@ -586,18 +594,18 @@ namespace chosuta {
             for(const auto&w:tokens) {
                 Pronunciation p;
                 if(custom.contains(w))p=customReading(custom[w]);
-                else if(words.contains(w))p=phones(words[w],"en");
+                else if(words.contains(w))p=phones(words[w],"en",consonants);
                 else {r.unknown=true;return r;}
                 if(p.unknown) {r.unknown=true;return r;}
                 if(custom.contains(w))r.provenance="user-dictionary/estimated";
-                r.syllables+=p.syllables;r.roles+=p.roles;
+                r.syllables+=p.syllables;r.roles+=p.roles;r.phones+=p.phones;
             }
         } else {
             const auto &builtin=readingWords(l);
             const bool allowBuiltin=l=="zh"||options.japaneseKanji;
             r.provenance=l=="zh"?"icu-han-pinyin/estimated":"japanese-rule/estimated";
-            auto fallback=[&](const QString &chunk) {return l=="zh"?chinese(chunk):japanese(chunk);};
-            auto append=[&](const Pronunciation &piece) {auto tagged=withRoles(piece);r.syllables+=tagged.syllables;r.roles+=tagged.roles;r.unknown=r.unknown||piece.unknown;};
+            auto fallback=[&](const QString &chunk) {return l=="zh"?chinese(chunk,consonants):japanese(chunk,consonants);};
+            auto append=[&](const Pronunciation &piece) {auto tagged=withRoles(piece);r.syllables+=tagged.syllables;r.roles+=tagged.roles;r.phones+=tagged.phones;r.unknown=r.unknown||piece.unknown;};
             QString chunk;
             for(qsizetype i=0;i<text.size();) {
                 QString found;
@@ -624,7 +632,7 @@ namespace chosuta {
         }
         if(r.syllables.isEmpty())r.unknown=true;
         r=withRoles(r);
-        if(closure&&!r.syllables.isEmpty()){r.syllables.first().prepend("closed");r.roles.first().prepend(SegmentRole::Special);}
+        if(closure&&!r.syllables.isEmpty()){r.syllables.first().prepend("closed");r.roles.first().prepend(SegmentRole::Special);r.phones.first().prepend(phoneKey(l,"cl"));}
         return r;
     }
 }

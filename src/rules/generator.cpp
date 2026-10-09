@@ -6,6 +6,7 @@
 namespace chosuta {
     QVector<Event> generate(const Project&p,const std::atomic_bool*cancel,Progress progress) {
         validatePronunciationOptions(p.rules.pronunciation);
+        validateConsonants(p.rules.consonants);
         if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8||!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant timing settings");
         if(!p.rules.englishDictionary.isEmpty()&&QFileInfo(p.rules.englishDictionary).size()+pronunciationDictionaryBytes(p.rules.pronunciation)>DictionaryByteLimit)
             throw Failure("Pronunciation dictionaries exceed 3 MB");
@@ -43,6 +44,7 @@ namespace chosuta {
                 auto &word=context.word;
                 auto &continuation=context.continuation;
                 double start=p.score.time.seconds(n.onset),end=p.score.time.seconds(n.onset+n.duration);
+                QString emittedPhone,emittedArticulation;
                 auto emitPart=[&](QString shape,double a,double b,int part,QString provenance,bool unknown=false) {
                     if(b<=a)return;
                     if(candidates.size()>=500000)throw Failure("More than 500000 generated segments");
@@ -56,6 +58,7 @@ namespace chosuta {
                     e.provenance=provenance;
                     e.text=n.lyrics;
                     e.unknown=unknown||shape=="unknown";
+                    e.phone=emittedPhone;e.articulation=emittedArticulation;
                     candidates.append( {
                         e,p.priorities.value(t.id,ti),ti
                     });
@@ -73,6 +76,7 @@ namespace chosuta {
                     else if(text=="-"||text=="ー")special="extend";
                 }
                 if(!special.isEmpty()) {
+                    emittedArticulation=special;
                     auto policy=p.rules.special.value(special);
                     QString hold=special=="extend"&&!context.vowel.isEmpty()?context.vowel:previous;
                     if(special!="extend") {word={};continuation=0;context.vowel.clear();}
@@ -94,7 +98,7 @@ namespace chosuta {
                     else {
                         const int take=following[ni]>0?1:int(word.syllables.size())-continuation;
                         result.syllables=word.syllables.mid(continuation,take);
-                        result.roles=word.roles.mid(continuation,take);
+                        result.roles=word.roles.mid(continuation,take);result.phones=word.phones.mid(continuation,take);
                         continuation+=take;
                         result.provenance=word.provenance+"/continuation";
                     }
@@ -107,15 +111,16 @@ namespace chosuta {
                         else if(language=="en"&&reading==reading.toLower())phoneNotation=false;
                         else if(language=="zh"&&reading.split(' ').value(0).size()>1)phoneNotation=false;
                     }
-                    result=pronounce(explicitPhone?phones:text,language,phoneNotation,p.rules.englishDictionary,reading.isEmpty()?n.phoneset:QString(),reading.isEmpty()?p.rules.pronunciation:PronunciationOptions{});
+                    result=pronounce(explicitPhone?phones:text,language,phoneNotation,p.rules.englishDictionary,reading.isEmpty()?n.phoneset:QString(),reading.isEmpty()?p.rules.pronunciation:PronunciationOptions{},p.rules.consonants);
                     {
                         word=result;
                         continuation=following[ni]>0?1:int(result.syllables.size());
-                        if(following[ni]>0&&!result.syllables.isEmpty()){result.syllables={result.syllables.front()};result.roles={result.roles.front()};}
+                        if(following[ni]>0&&!result.syllables.isEmpty()){result.syllables={result.syllables.front()};result.roles={result.roles.front()};result.phones={result.phones.front()};}
                         context.vowel.clear();
                     }
                 }
                 if(result.unknown||result.syllables.isEmpty()) {
+                    emittedArticulation="unknown";
                     emitPart("unknown",start,end,0,result.provenance,true);
                     continue;
                 }
@@ -159,6 +164,9 @@ namespace chosuta {
                             else if(j>=shapes.size()-trailing){int k=j-(shapes.size()-trailing);x=b-coda+coda*k/trailing;y=b-coda+coda*(k+1)/trailing;}
                             else {int count=shapes.size()-leading-trailing,k=j-leading;double body=b-a-onset-coda;x=a+onset+body*k/count;y=a+onset+body*(k+1)/count;}
                         }
+                        emittedPhone=result.phones.value(si).value(j);
+                        const auto role=roles.value(j,SegmentRole::Special);
+                        emittedArticulation=role==SegmentRole::Consonant?"consonant":role==SegmentRole::Vowel?"vowel":shapes[j]=="nasal"?"nasal":shapes[j]=="breath"?"br":shapes[j]=="rest"?"rest":"cl";
                         QString shape=shapes[j];
                         if(shape=="open"){
                             shape="I"; // neutral open fallback for a consonant without a vowel

@@ -7,28 +7,67 @@
 #include <QTextCharFormat>
 #include <cmath>
 namespace chosuta {
-    void Scene::setTiming(const Project &p){project=p;events=resolveEvents(p.effective());}
-    Scene::Scene(const Project&p):project(p),events(resolveEvents(p.effective())) {
-        QImageReader::setAllocationLimit(256);
+    void Scene::setTiming(const Project &p){project=p;events=resolveEvents(p.effective());appearance=AppearanceResolver(p);}
+    Scene::Scene(const Project &p):project(p),events(resolveEvents(p.effective())),appearance(p) {
+        configureImageReaderLimit();
+        const double decodeScale=std::max(1.,p.canvas.characterScale);
+        imageCacheFit={std::max(1,qRound(p.canvas.width*decodeScale)),std::max(1,qRound(p.canvas.height*decodeScale))};
+        for(auto it=p.assets.cbegin();it!=p.assets.cend();++it){
+            QImageReader reader(it.value());const auto size=reader.size();
+            if(!reader.canRead()||!size.isValid()||qint64(size.width())*size.height()*4>256LL*1024*1024)
+                diagnostics.append(it.key()+": missing, invalid or oversized image");
+            else {imageSizes[it.key()]=size;available.insert(it.key());}
+        }
         qint64 bytes=0;
-        auto assets=p.assets;
-        for(auto it=assets.begin();it!=assets.end();++it) {
-            QImageReader reader(it.value());
-            QImage image=reader.read();
-            if(image.isNull())diagnostics.append(it.key()+": "+reader.errorString());
-            else if(bytes+image.sizeInBytes()>512LL*1024*1024)diagnostics.append(it.key()+": decoded image cache exceeds 512 MiB");
-            else {
-                bytes+=image.sizeInBytes();
-                images[it.key()]=image;
-            }
-        }
-        prepareSubtitles();
         if(!p.canvas.backgroundImage.isEmpty()){
-            QImageReader reader(p.canvas.backgroundImage);auto image=reader.read();
-            if(image.isNull())diagnostics.append("background: "+reader.errorString());
-            else if(bytes+image.sizeInBytes()>512LL*1024*1024)diagnostics.append("background: decoded image cache exceeds 512 MiB");
-            else background=image;
+            QImageReader reader(p.canvas.backgroundImage);background=reader.read();
+            if(background.isNull())diagnostics.append("background: "+reader.errorString());
+            else bytes=background.sizeInBytes();
         }
+        images.setMaxCost(int(std::max<qint64>(256LL*1024*1024,512LL*1024*1024-bytes)));
+        // Decode just the fallback and initial frame. Other used images enter a bounded,
+        // path-deduplicated cache on demand; inactive combinations are never decoded.
+        if(available.contains(p.fallback))imageFor(p.fallback);
+        const auto first=selectionAt(0);if(!first.missing)imageFor(first.id);
+        prepareSubtitles();
+        for(const auto &missing:missingAppearanceAssets())diagnostics.append("Missing advanced asset: "+missing);
+    }
+    QImage Scene::imageFor(const QString &id)const {
+        if(!available.contains(id))return {};
+        const auto path=project.assets.value(id);const auto canonical=QFileInfo(path).canonicalFilePath();
+        auto target=imageSizes.value(id);
+        target.scale(imageCacheFit,Qt::KeepAspectRatio);
+        if(target.width()>imageSizes.value(id).width())target=imageSizes.value(id);
+        const QString key=canonical+QString("/%1x%2").arg(target.width()).arg(target.height());
+        if(auto *image=images.object(key))return *image;
+        QImageReader reader(path);reader.setScaledSize(target);auto image=reader.read();++decodeCount;
+        if(image.isNull()){
+            available.remove(id);const auto error=id+": "+reader.errorString();if(!diagnostics.contains(error))diagnostics.append(error);return {};
+        }
+        const auto cost=image.sizeInBytes();
+        if(cost>images.maxCost()){
+            available.remove(id);const auto error=id+": image exceeds cache budget";if(!diagnostics.contains(error))diagnostics.append(error);return {};
+        }
+        images.insert(key,new QImage(image),int(cost));return image;
+    }
+    AssetSelection Scene::selectionAt(double seconds)const{return appearance.at(project,events,seconds,true,&available);}
+    QStringList Scene::missingAppearanceAssets()const {
+        QStringList missing;if(!project.appearance.enabled)return missing;
+        auto check=[&](const AssetSelection &selection){if(selection.missing&&!missing.contains(selection.id)&&missing.size()<64)missing.append(selection.id);};
+        const double duration=project.duration(),offset=project.output.syncOffset;
+        double previous=0;
+        for(const auto &event:events){
+            const double start=event.start+offset,end=event.end+offset;
+            if(end<=0||start>=duration)continue;
+            const double gapEnd=std::min(duration,start);
+            if(gapEnd>previous){
+                check(selectionAt((previous+gapEnd)/2));
+                check(selectionAt(std::nextafter(gapEnd,previous)));
+            }
+            check(appearance.event(project,event,&available));previous=std::max(previous,end);
+        }
+        if(previous<duration){check(selectionAt((previous+duration)/2));check(selectionAt(std::nextafter(duration,previous)));}
+        return missing;
     }
     QImage Scene::frame(double seconds,QSize size)const {
         if(size.isEmpty())size= {
@@ -46,8 +85,8 @@ namespace chosuta {
             else scaled.scale(size,c.backgroundFit=="cover"?Qt::KeepAspectRatioByExpanding:Qt::KeepAspectRatio);
             painter.drawImage(QRectF((size.width()-scaled.width())/2,(size.height()-scaled.height())/2,scaled.width(),scaled.height()),background);
         }
-        auto img=images.value(shapeAt(project,events,seconds,true));
-        if(img.isNull())img=images.value(project.fallback);
+        QImage img;
+        for(int attempt=0;attempt<10&&img.isNull();++attempt){const auto selection=selectionAt(seconds);if(selection.missing)break;img=imageFor(selection.id);}
         if(!img.isNull()){
             QSizeF scaled(img.size());scaled.scale(size,Qt::KeepAspectRatio);scaled*=c.characterScale;
             QRectF rect(size.width()*c.characterX-scaled.width()/2,size.height()*c.characterY-scaled.height()/2,scaled.width(),scaled.height());
@@ -73,9 +112,8 @@ namespace chosuta {
         return out;
     }
     QRectF Scene::characterRect(double seconds)const {
-        auto img=images.value(shapeAt(project,events,seconds,true));if(img.isNull())img=images.value(project.fallback);
-        if(img.isNull())return {};
-        const auto&c=project.canvas;QSizeF size(img.size());size.scale(QSizeF(c.width,c.height),Qt::KeepAspectRatio);size*=c.characterScale;
+        const auto selection=selectionAt(seconds);if(selection.missing||!imageSizes.contains(selection.id))return {};
+        const auto&c=project.canvas;QSizeF size(imageSizes.value(selection.id));size.scale(QSizeF(c.width,c.height),Qt::KeepAspectRatio);size*=c.characterScale;
         return {c.width*c.characterX-size.width()/2,c.height*c.characterY-size.height()/2,size.width(),size.height()};
     }
     std::shared_ptr<Scene::TextLayout> Scene::textLayout(const SubtitleStyle &s,const QString &text)const {
@@ -206,6 +244,8 @@ namespace chosuta {
             if(!scene.hasBackground())throw Failure("Background image is missing or invalid: "+p.canvas.backgroundImage);
             if(!scene.hasFallback())throw Failure("Fallback PNG is missing or invalid: "+p.fallback+"; "+scene.diagnostics.join("; "));
             if(p.assets.isEmpty())throw Failure("Import PNG assets or create demo assets first");
+            const auto missing=scene.missingAppearanceAssets();
+            if(!missing.isEmpty())throw Failure("Missing assets; assign a matching, shared, or fallback image: "+missing.join(", "));
             QTemporaryDir temp(target.absoluteDir().filePath(".chosuta-export-XXXXXX"));
             if(!temp.isValid())throw Failure("Cannot create output staging directory");
             QString movie=temp.filePath("encoded."+p.output.format);
@@ -229,7 +269,10 @@ namespace chosuta {
                     r.cancelled=true;
                     return r;
                 }
-                auto image=scene.frame(double(i)*p.output.fpsDen/p.output.fpsNum);
+                const double frameTime=double(i)*p.output.fpsDen/p.output.fpsNum;
+                auto image=scene.frame(frameTime);
+                if(scene.selectionAt(frameTime).missing){stop();throw Failure("Missing or unreadable asset: "+scene.selectionAt(frameTime).id);}
+                r.diagnostics=scene.diagnostics;
                 qint64 remaining=image.sizeInBytes(),offset=0;
                 QElapsedTimer stall;
                 stall.start();

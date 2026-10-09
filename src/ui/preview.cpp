@@ -49,6 +49,8 @@ QRectF PreviewCanvas::selectionRect()const {
 void PreviewCanvas::paintEvent(QPaintEvent *) {
     QPainter painter(this);painter.fillRect(rect(),palette().dark());if(!scene)return;
     auto r=canvasRect();painter.drawImage(r,scene->frame(seconds,QSize(std::max(16,qRound(r.width())),std::max(16,qRound(r.height())))));
+    const auto selection=scene->selectionAt(seconds);
+    if(selection.missing){painter.setPen(Qt::white);auto label=property("missingAssetLabel").toString();if(label.isEmpty())label="Missing compatible pose";painter.drawText(r.adjusted(12,12,-12,-12),Qt::AlignCenter|Qt::TextWordWrap,label+"\n"+selection.id+".png");}
     if(editable){auto box=selectionRect();if(!box.isEmpty()){
         painter.setPen(QPen(palette().highlight().color(),1,Qt::DashLine));painter.setBrush(Qt::NoBrush);painter.drawRect(box);
         painter.setBrush(palette().highlight());painter.drawRect(QRectF(box.bottomRight()-QPointF(4,4),QSizeF(8,8)));

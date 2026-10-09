@@ -85,10 +85,14 @@ namespace chosuta {
     qint64 pronunciationDictionaryBytes(const PronunciationOptions &);
     void validatePronunciationOptions(const PronunciationOptions &);
     struct Rules {
+        struct Consonants {
+            QMap<QString,QString> overrides; // language:phoneset:phone -> open / closed
+            bool operator==(const Consonants &)const=default;
+        } consonants;
         QString language="auto";
         bool harmonyTakeover=true;
         double consonantRatio=.18;
-        // A shared budget for each leading/trailing consonant group. Zero keeps legacy timing.
+        // A shared budget for each leading/trailing consonant group. Zero disables the fixed time cap.
         double consonantMaxSeconds=.08;
         QMap<QString,Policy> special {
             {
@@ -128,6 +132,8 @@ namespace chosuta {
         QString id, source, track, shape, provenance, text;
         double start=0,end=0;
         bool unknown=false;
+        QString phone,articulation;
+        bool appearanceFixed=false;
     };
     struct Override {
         Event event;
@@ -189,6 +195,18 @@ namespace chosuta {
         QMap<QString,SourceTiming> sources;
     };
     struct Project {
+        struct Appearance {
+            bool enabled=false,direction=true,interval=true,beat=true;
+            int stepMax=2,smallMax=4;
+            QString intervalUnit="semitones";
+            int stepDegreeMax=2,smallDegreeMax=4;
+            QString degreeTonic="C",degreeMode="major";
+            QVector<int> customDegreeScale={0,2,4,5,7,9,11};
+            QMap<QString,QString> noteSpellings; // Expanded Note identity -> written pitch, e.g. C#4 / Db4.
+            QString closureAnchor="next",breathAnchor="previous",restAnchor="previous";
+            QMap<QString,QVector<int>> strongBeats; // signature -> 1-based denominator beats
+            bool operator==(const Appearance &)const=default;
+        } appearance;
         Score score;
         QStringList selected;
         QMap<QString,int> priorities;
@@ -232,8 +250,15 @@ namespace chosuta {
         QVector<QVector<SegmentRole>> roles;
         QString provenance;
         bool unknown=false;
+        QVector<QStringList> phones;
     };
-    Pronunciation pronounce(const QString &text,const QString &language,bool explicitPhones=false,const QString &dictionary={},const QString &phoneset={},const PronunciationOptions &options={});
+    QStringList consonantKeys(const QString &language);
+    QString consonantMode(const QString &key);
+    QString consonantMode(const QString &key,const Rules::Consonants &);
+    void validateConsonants(const Rules::Consonants &);
+    QJsonObject consonantsJson(const Rules::Consonants &);
+    Rules::Consonants readConsonants(const QJsonValue &);
+    Pronunciation pronounce(const QString &text,const QString &language,bool explicitPhones=false,const QString &dictionary={},const QString &phoneset={},const PronunciationOptions &options={},const Rules::Consonants &consonants={});
     void saveProject(const Project &p,const QString &path);
     Project loadProject(const QString &path);
     // Providers propose a separate layer, never mutate a project or its edits.

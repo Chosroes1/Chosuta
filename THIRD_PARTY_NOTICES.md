@@ -21,6 +21,8 @@
 
 0.4.1 继续复用现有 Qt Widgets 的单个 QPlainTextEdit 和 QSplitter，提供块内文字光标/输入法与视图高度调整；辅音组预算及角色元数据为 Chosuta 原创规则代码。没有新增运行组件、移植代码、词典/字体数据或 DAW 引擎。交互研究参考 Ardour 官方播放控制说明，仅参考标尺点击定位方式，没有集成其源码。
 
+0.6.0 的高级口形条件匹配、姿态锚定、可配置辅音规则、规范名导入和有界图片缓存为 Chosuta 原创 GPL-3.0-or-later 代码，仅复用既有 Qt Core/Gui/Widgets/Concurrent 与 C++20 标准库；没有新增数据包、模型、图片/字体或运行库。IPA 官方发音部位图及 Open University 复合拍说明只作为规则设计参考，未复制图表、源码或素材。音素标识来自既有已支持的解析接口，词典数据范围不变；回归图形/音频自行构造。
+
 ## 参考材料与外部词典
 
 0.5.0 的可选波形显示与有界时间校正为 Chosuta 原创 GPL-3.0-or-later 代码，复用已有 Qt Core/Concurrent/Gui/Widgets、QProcess/QPainter 和独立 FFmpeg。FFmpeg 新用途为流式解码单声道 16 kHz PCM，波形/能量摘要与校正由自有 C++ 代码计算；不捆绑新库、模型、音素字典或声部分离工具，不新增 Python 产品运行依赖。FFmpeg/Qt 的现有许可与捆绑边界继续适用。MFA、WhisperX、wav2vec2、Demucs 与歌唱对齐论文只用于本地早期方案比较，未复制源码、下载模型或集成依赖；不把候选代码许可当作模型/数据再分发授权。测试音频与纯色 PNG 自行构造，用户工程/歌曲/立绘仍不分发。
@@ -49,3 +51,6 @@
 `scripts/build-windows.ps1` 在用户的 Windows 机器上，使用其明确指定的现有 Qt/ICU SDK 部署运行库和 Qt 插件；FFmpeg/ffprobe 只有传入 `-FfmpegDir` 才复制。Qt Multimedia 的 FFmpeg 后端 DLL（若所选 SDK 提供）是 Qt 部署的一部分，与独立 ffmpeg.exe 分开记录。脚本记录真实 Qt/ICU/编译器版本、全部运行文件 SHA-256，收集 SDK 中已有的许可证，并检查所选独立 FFmpeg 不含 enable-nonfree。MSVC 使用已安装的官方 Visual C++ x64 Redistributable，不从编译器目录复制未核来源的 CRT DLL；MinGW 运行库由所选 Qt 的 windeployqt 收集。
 
 Windows 构建依赖的具体许可证、附带媒体库和源码义务以其实际 SDK/二进制为准，不能套用本机 Linux 版本表。MSVC 工具与 Visual C++ Redistributable 使用 Microsoft 的相应许可；当前仅提供调用脚本，没有下载、捆绑或安装它们。Windows 本地构建目录会含运行库，不能仅凭自动收集的许可文件就宣称已完成公开分发审查。源码 ZIP 仅含 Chosuta 自有源码、原有许可文本与原创夹具，没有第三方运行二进制或用户材料。
+
+
+0.6.1 的乐理度数、调式拼写及同音反复规则为 Chosuta 原创 C++ 代码，无新增库/数据包。仅参考 [music21 官方音程说明](https://music21.org/music21docs/usersGuide/usersGuide_18_intervals.html) 和 [官方音阶文档](https://music21.org/music21docs/moduleReference/moduleScale.html)核对字母度数与半音距离、教会调式概念；未复制其实现、安装或集成 music21。

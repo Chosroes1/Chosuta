@@ -28,7 +28,7 @@ void Window::refreshWaveform(){
     if(!busy&&!project.audioPath.isEmpty())QTimer::singleShot(0,this,[this]{ensureWaveform();});
 }
 void Window::ensureWaveform(){
-    if(busy||project.audioPath.isEmpty())return;
+    if(busy||mouthSettingsOpen||project.audioPath.isEmpty())return;
     QFileInfo info(project.audioPath);
     QString key=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+project.output.ffmpeg;
     if(waveformKey==key)return;

@@ -48,7 +48,6 @@ namespace chosuta {
     }
     PronunciationOptions pronunciationOptionsRead(const QJsonValue&value) {
         PronunciationOptions options;
-        if(value.isUndefined())return options;
         if(!value.isObject())throw Failure("Invalid pronunciation settings");
         const auto object=value.toObject();
         if(object["version"].toInt()!=1||!object["entries"].isArray()||!object["japaneseKanji"].isBool())

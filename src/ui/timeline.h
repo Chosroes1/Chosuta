@@ -2,6 +2,8 @@
 #pragma once
 #include <QWidget>
 #include "core/model.h"
+#include "core/appearance.h"
+#include <memory>
 #include "render/waveform.h"
 class QPlainTextEdit;
 namespace chosuta {
@@ -65,6 +67,7 @@ namespace chosuta {
         void resizeEvent(QResizeEvent *)override;
         private:
         Project project;
+        std::unique_ptr<AppearanceResolver> appearance;
         QVector<Event>events,beforeDrag;
         QStringList selected;
         QString dragging;

@@ -37,7 +37,7 @@ namespace chosuta {
     }
     void Timeline::setProject(const Project&p) {
         cancelLaneResize();
-        project=p;
+        project=p;appearance=std::make_unique<AppearanceResolver>(p);
         beforeSubtitle.reset();dragging.clear();rulerDragging=false;
         for(auto it=laneHeights.begin();it!=laneHeights.end();) {bool found=false;for(const auto&t:p.subtitles)if(t.id==it.key())found=true;if(!found)it=laneHeights.erase(it);else ++it;}
         events=p.effective();
@@ -241,7 +241,7 @@ namespace chosuta {
             painter.setPen(Qt::black);
             painter.save();
             painter.setClipRect(box.adjusted(3,0,-3,0));
-            painter.drawText(box.adjusted(5,3,-3,-3),Qt::AlignTop,e.shape+"\n"+e.text);
+            painter.drawText(box.adjusted(5,3,-3,-3),Qt::AlignTop,(project.appearance.enabled?appearance->event(project,e).id:e.shape)+"\n"+e.text);
             if(project.overrides.contains(e.id))painter.drawText(box.adjusted(5,std::max(10.,box.height()-29),-3,-3),QStringLiteral("●"));
             painter.restore();
         }
@@ -312,7 +312,10 @@ namespace chosuta {
             int i=hit(e->position().x(),e->position().y());
             if(i>=0) {
                 const auto&v=events[i];
-                QToolTip::showText(e->globalPosition().toPoint(),QString("%1\n%2 – %3 s\n%4\n%5").arg(v.text).arg(v.start,0,'f',3).arg(v.end,0,'f',3).arg(v.provenance,v.source),this);
+                const auto selected=appearance->event(project,v);
+                auto text=QString("%1\n%2 – %3 s\n%4\n%5\n%6\n%7").arg(v.text).arg(v.start,0,'f',3).arg(v.end,0,'f',3).arg(v.provenance,v.source,project.appearance.enabled?selected.id:v.shape,v.phone);
+                if(project.appearance.enabled&&!selected.context.intervalReason.isEmpty())text+="\n"+selected.context.intervalReason;
+                QToolTip::showText(e->globalPosition().toPoint(),text,this);
             }
             return;
         }

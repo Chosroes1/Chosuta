@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
+#include "core/appearance.h"
 #include "render/render.h"
 #include "render/waveform.h"
 #include <QGuiApplication>
@@ -40,7 +41,11 @@ int main(int argc,char**argv) {
     option("custom-dictionary","Chosuta custom pronunciation settings JSON","path");
     parser.addOption({"japanese-kanji","Enable optional estimated Japanese kanji readings"});
     parser.addOption({"no-japanese-kanji","Disable optional Japanese kanji readings"});
-    option("assets","PNG directory: A.png, I.png, U.png, E.png, O.png, closed.png, etc.","directory");
+    option("assets","Scan one PNG directory using basic or SHAPE_BEAT_DIRECTION_INTERVAL names; --force permits replacing mappings","directory");
+    parser.addOption({"advanced-mouth","Enable score-driven advanced images"});
+    parser.addOption({"simple-mouth","Use simple images (retain advanced settings)"});
+    option("mouth-directions","on | off","switch");option("mouth-intervals","on | off","switch");option("mouth-beats","on | off","switch");
+    option("consonant-settings","Consonant settings JSON; regenerate using its overrides","path");
     option("size","WIDTHxHEIGHT","resolution");
     option("fps","Integer or NUM/DEN","rate");
     option("duration","Output seconds; default score duration","seconds");
@@ -173,6 +178,12 @@ int main(int argc,char**argv) {
             "auto","ja","zh","en"
         }
         .contains(p.rules.language))throw Failure("Invalid language");
+        if(parser.isSet("advanced-mouth")&&parser.isSet("simple-mouth"))throw Failure("Conflicting mouth modes");
+        if(parser.isSet("advanced-mouth"))p.appearance.enabled=true;
+        if(parser.isSet("simple-mouth"))p.appearance.enabled=false;
+        auto mouthFlag=[&](const char *key,bool &value){if(!parser.isSet(key))return;const auto text=parser.value(key);if(text!="on"&&text!="off")throw Failure("Mouth switch must be on or off");value=text=="on";};
+        mouthFlag("mouth-directions",p.appearance.direction);mouthFlag("mouth-intervals",p.appearance.interval);mouthFlag("mouth-beats",p.appearance.beat);
+        if(parser.isSet("consonant-settings")){QFile file(parser.value("consonant-settings"));if(!file.open(QIODevice::ReadOnly)||file.size()>65536)throw Failure("Cannot read consonant settings (limit 64 KiB)");p.rules.consonants=readConsonants(checkedJson(file.readAll()).object());}
         if(parser.isSet("dictionary"))p.rules.englishDictionary=QFileInfo(parser.value("dictionary")).absoluteFilePath();
         if(parser.isSet("custom-dictionary")) {
             QFile file(parser.value("custom-dictionary"));
@@ -234,35 +245,26 @@ int main(int argc,char**argv) {
             summary["tempo"]=tempos;
             summary["meter"]=meters;
             summary["diagnostics"]=diagnostics;
+            summary["appearance"]=appearanceJson(p.appearance);summary["consonants"]=consonantsJson(p.rules.consonants);
             summary["timingCorrection"]=QJsonObject{{"enabled",p.timing.enabled},{"current",timingCorrectionCurrent(p)},{"sources",p.timing.sources.size()},{"maxShift",p.timing.maxShift},{"maxDurationChange",p.timing.maxDurationChange}};
             std::cout<<QJsonDocument(summary).toJson().constData();
             return 0;
         }
         if(command!="generate"&&command!="export"&&command!="correct"&&command!="revert")throw Failure("Unknown command");
         if(args.size()!=3)throw Failure("Output path is required");
-        if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary")||parser.isSet("custom-dictionary")||parser.isSet("japanese-kanji")||parser.isSet("no-japanese-kanji"))p.regenerate();
+        if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary")||parser.isSet("custom-dictionary")||parser.isSet("japanese-kanji")||parser.isSet("no-japanese-kanji")||parser.isSet("consonant-settings"))p.regenerate();
         if(parser.isSet("assets")) {
-            QDir dir(parser.value("assets"));
-            for(const auto&file:dir.entryList( {
-                "*.png","*.PNG"
-            },QDir::Files))p.assets[QFileInfo(file).completeBaseName()]=dir.absoluteFilePath(file);
+            const auto plan=scanAssetDirectory(parser.value("assets"),p.assets,&cancelled);
+            if(plan.cancelled)return 130;
+            if(!plan.error.isEmpty())throw Failure(plan.error);
+            for(const auto &entry:plan.entries){
+                if(entry.status=="conflict"||entry.status=="invalid")throw Failure(entry.status+": "+entry.path+": "+entry.message);
+                if(entry.status=="new"||(entry.status=="replace"&&parser.isSet("force")))p.assets[entry.id]=entry.path;
+                else std::cerr<<(entry.status+": skipped "+entry.path).toStdString()<<"\n";
+            }
         }
-        auto integer=[&](QString name,int&v) {
-            if(parser.isSet(name)) {
-                bool ok=false;
-                int x=parser.value(name).toInt(&ok);
-                if(!ok)throw Failure("Invalid "+name);
-                v=x;
-            }
-        };
-        auto real=[&](QString name,double&v) {
-            if(parser.isSet(name)) {
-                bool ok=false;
-                double x=parser.value(name).toDouble(&ok);
-                if(!ok||!std::isfinite(x))throw Failure("Invalid "+name);
-                v=x;
-            }
-        };
+        auto integer=[&](QString name,int &value){if(parser.isSet(name)){bool ok=false;const int n=parser.value(name).toInt(&ok);if(!ok)throw Failure("Invalid "+name);value=n;}};
+        auto real=[&](QString name,double &value){if(parser.isSet(name)){bool ok=false;const double n=parser.value(name).toDouble(&ok);if(!ok||!std::isfinite(n))throw Failure("Invalid "+name);value=n;}};
         if(parser.isSet("size")) {
             auto size=parser.value("size").split('x');
             if(size.size()!=2)throw Failure("Invalid size");

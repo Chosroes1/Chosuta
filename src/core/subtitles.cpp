@@ -85,36 +85,35 @@ QJsonObject subtitlesJson(const Project &p) {
     for(const auto&t:p.subtitles){QJsonArray cues;for(const auto&c:t.cues){const auto v=subtitleInterval(p,c,&sources);cues.append(QJsonObject{{"id",c.id},{"text",c.text},{"anchor",c.anchor},{"start",v.start},{"end",v.end},{"startBlick",QString::number(c.startBlick)},{"endBlick",QString::number(c.endBlick)},{"sourceTrack",c.sourceTrack},{"sourceNotes",QJsonArray::fromStringList(c.sourceNotes)},{"ownStyle",c.ownStyle},{"style",styleJson(c.style)}});}tracks.append(QJsonObject{{"id",t.id},{"name",t.name},{"enabled",t.enabled},{"alignLyrics",t.alignLyrics},{"sourceTrack",t.sourceTrack},{"style",styleJson(t.style)},{"cues",cues}});}
     return {{"enabled",p.subtitlesEnabled},{"tracks",tracks}};
 }
-static double number(const QJsonObject &o,const char *key,double fallback) {
-    auto v=o.value(QLatin1String(key));if(v.isUndefined())return fallback;if(!v.isDouble())throw Failure("Invalid subtitle numeric field");return v.toDouble();
+static double number(const QJsonObject &o,const char *key) {
+    auto v=o.value(QLatin1String(key));if(!v.isDouble())throw Failure("Invalid subtitle numeric field");return v.toDouble();
 }
-static bool boolean(const QJsonObject &o,const char *key,bool fallback) {
-    auto v=o.value(QLatin1String(key));if(v.isUndefined())return fallback;if(!v.isBool())throw Failure("Invalid subtitle boolean field");return v.toBool();
+static bool boolean(const QJsonObject &o,const char *key) {
+    auto v=o.value(QLatin1String(key));if(!v.isBool())throw Failure("Invalid subtitle boolean field");return v.toBool();
 }
-static QString string(const QJsonObject &o,const char *key,QString fallback={}) {
-    auto v=o.value(QLatin1String(key));if(v.isUndefined())return fallback;if(!v.isString())throw Failure("Invalid subtitle string field");return v.toString();
+static QString string(const QJsonObject &o,const char *key) {
+    auto v=o.value(QLatin1String(key));if(!v.isString())throw Failure("Invalid subtitle string field");return v.toString();
 }
 static SubtitleStyle styleRead(const QJsonValue &v) {
-    SubtitleStyle s;if(v.isUndefined())return s;if(!v.isObject())throw Failure("Invalid subtitle style");auto o=v.toObject();
-    s.family=string(o,"family");s.alignment=string(o,"alignment","center");s.color=QColor(string(o,"color","#ffffffff"));s.x=number(o,"x",.5);s.y=number(o,"y",.86);s.width=number(o,"width",.85);s.fontHeight=number(o,"fontHeight",.055);s.bold=boolean(o,"bold",false);s.italic=boolean(o,"italic",false);s.outline=boolean(o,"outline",true);validateSubtitleStyle(s);return s;
+    SubtitleStyle s;if(!v.isObject())throw Failure("Invalid subtitle style");auto o=v.toObject();
+    s.family=string(o,"family");s.alignment=string(o,"alignment");s.color=QColor(string(o,"color"));s.x=number(o,"x");s.y=number(o,"y");s.width=number(o,"width");s.fontHeight=number(o,"fontHeight");s.bold=boolean(o,"bold");s.italic=boolean(o,"italic");s.outline=boolean(o,"outline");validateSubtitleStyle(s);return s;
 }
 static qint64 music(const QJsonObject &o,const char *key) {
-    auto v=o.value(QLatin1String(key));if(v.isUndefined())return 0;bool ok=false;auto n=v.toString().toLongLong(&ok);if(!ok||n< -MusicLimit||n>MusicLimit)throw Failure("Invalid subtitle music position");return n;
+    auto v=o.value(QLatin1String(key));bool ok=false;auto n=v.toString().toLongLong(&ok);if(!ok||n< -MusicLimit||n>MusicLimit)throw Failure("Invalid subtitle music position");return n;
 }
 void readSubtitles(Project &p,const QJsonValue &v) {
-    if(v.isUndefined())return;
     if(!v.isObject())throw Failure("Invalid subtitles object");
     auto o=v.toObject();
-    p.subtitlesEnabled=boolean(o,"enabled",false);
+    p.subtitlesEnabled=boolean(o,"enabled");
     if(!o.value("tracks").isArray())throw Failure("Invalid subtitle tracks");
     auto tracks=o.value("tracks").toArray();if(tracks.size()>64)throw Failure("Subtitle track limit is 64");
     int totalCues=0;
     for(const auto&tv:tracks){if(!tv.isObject())throw Failure("Invalid subtitle track");auto t=tv.toObject();SubtitleTrack track;
-        track.id=string(t,"id");track.name=string(t,"name");track.sourceTrack=string(t,"sourceTrack");track.enabled=boolean(t,"enabled",true);track.alignLyrics=boolean(t,"alignLyrics",false);track.style=styleRead(t.value("style"));
+        track.id=string(t,"id");track.name=string(t,"name");track.sourceTrack=string(t,"sourceTrack");track.enabled=boolean(t,"enabled");track.alignLyrics=boolean(t,"alignLyrics");track.style=styleRead(t.value("style"));
         if(!t.value("cues").isArray())throw Failure("Invalid subtitle cues");
         auto cues=t.value("cues").toArray();if(cues.size()>100000)throw Failure("Subtitle cue limit exceeded");
         for(const auto&cv:cues){if(++totalCues>100000)throw Failure("Subtitle cue limit exceeded");if(!cv.isObject())throw Failure("Invalid subtitle cue");auto c=cv.toObject();SubtitleCue cue;
-            cue.id=string(c,"id");cue.text=string(c,"text");cue.anchor=string(c,"anchor","seconds");cue.start=number(c,"start",0);cue.end=number(c,"end",2);cue.startBlick=music(c,"startBlick");cue.endBlick=music(c,"endBlick");cue.sourceTrack=string(c,"sourceTrack");cue.ownStyle=boolean(c,"ownStyle",false);cue.style=styleRead(c.value("style"));
+            cue.id=string(c,"id");cue.text=string(c,"text");cue.anchor=string(c,"anchor");cue.start=number(c,"start");cue.end=number(c,"end");cue.startBlick=music(c,"startBlick");cue.endBlick=music(c,"endBlick");cue.sourceTrack=string(c,"sourceTrack");cue.ownStyle=boolean(c,"ownStyle");cue.style=styleRead(c.value("style"));
             if(!c.value("sourceNotes").isArray())throw Failure("Invalid subtitle sources");
             for(const auto&n:c.value("sourceNotes").toArray()){if(!n.isString())throw Failure("Invalid subtitle source");cue.sourceNotes.append(n.toString());}track.cues.append(cue);
         }p.subtitles.append(track);

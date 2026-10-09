@@ -66,6 +66,7 @@ namespace chosuta {
         int subtitleTextSession=0;
         QComboBox *language=nullptr,*fallback=nullptr,*shape=nullptr,*anchor=nullptr;
         QCheckBox *takeover=nullptr,*lock=nullptr;
+        QCheckBox *advancedMouth=nullptr;
         QDoubleSpinBox *start=nullptr,*end=nullptr,*consonant=nullptr,*consonantLimit=nullptr,*position=nullptr;
         QPlainTextEdit *diagnostics=nullptr;
         QPushButton *playButton=nullptr,*cancelButton=nullptr;
@@ -75,7 +76,7 @@ namespace chosuta {
         QTimer playbackTimer;
         QElapsedTimer playbackClock;
         double playTime=0,playOrigin=0;
-        bool refreshing=false,playing=false,busy=false,loadIsRegenerate=false;
+        bool refreshing=false,playing=false,busy=false,loadIsRegenerate=false,mouthSettingsOpen=false;
         std::unique_ptr<Scene>scene;
         std::shared_ptr<std::atomic_bool>cancel;
         QFutureWatcher<LoadResult>loadWatcher;
@@ -127,6 +128,7 @@ namespace chosuta {
         void showExportSettings();
         void showPreferences();
         void showAdvancedSettings();
+        void showMouthSettings();
         QWidget *buildCanvasPanel();
         void refreshCanvas();
         QWidget *buildSubtitlePanel();

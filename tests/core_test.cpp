@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <QtTest>
 #include "core/model.h"
+#include "core/intervals.h"
 #include "core/executable.h"
 #include "render/render.h"
 #include "render/audio.h"
@@ -21,6 +22,13 @@ static Project basic() {
     };
     p.regenerate();
     return p;
+}
+static Project appearanceProject(const QVector<int> &pitches,const QStringList &phones={}) {
+    auto root=checkedJson(fixture()).object();auto track=root["tracks"].toArray()[0].toObject();
+    auto group=track["mainGroup"].toObject();QJsonArray notes;
+    for(int i=0;i<pitches.size();++i)notes.append(QJsonObject{{"uuid",QString("pose%1").arg(i)},{"onset",double(qint64(i)*Blick)},{"duration",double(Blick)},{"pitch",pitches[i]},{"lyrics","a"},{"phonemes",phones.value(i,"a")}});
+    group["notes"]=notes;track["mainGroup"]=group;root["tracks"]=QJsonArray{track};
+    Project p;p.score=parseSvp(QJsonDocument(root).toJson());p.selected={p.score.tracks[0].id};p.appearance.enabled=true;p.regenerate();return p;
 }
 static void writeTimingAudio(const QString &path){
     QByteArray pcm;QDataStream data(&pcm,QIODevice::WriteOnly);data.setByteOrder(QDataStream::LittleEndian);
@@ -245,7 +253,7 @@ class CoreTest:public QObject {
         QCOMPARE(pronounce("かなカナ","ja").syllables,pronounce("かなカナ","ja",false,{},{},optional).syllables);
         QCOMPARE(pronounce("golden","en").syllables.size(),2);
         const auto golden=pronounce("golden","en");QCOMPARE(golden.syllables[0].last(),QString("open"));
-        QCOMPARE(golden.syllables[1].first(),QString("closed"));
+        QCOMPARE(golden.syllables[1].first(),QString("open"));
         QVERIFY(!pronounce("age","en").unknown);
         QCOMPARE(pronounce("银行","zh").syllables[1][1],QString("A"));
     }
@@ -272,10 +280,10 @@ class CoreTest:public QObject {
         QTemporaryDir dir;const auto path=dir.filePath("辞書.chosuta");saveProject(p,path);auto restored=loadProject(path);
         QCOMPARE(restored.rules.pronunciation,options);
         QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();
-        QCOMPARE(root["schema"].toInt(),5);
-        root["schema"]=2;auto rules=root["rules"].toObject();rules.remove("pronunciation");root["rules"]=rules;
+        QCOMPARE(root["schema"].toInt(),9);
+        auto rules=root["rules"].toObject();rules.remove("pronunciation");root["rules"]=rules;
         QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();
-        restored=loadProject(path);QCOMPARE(restored.rules.pronunciation,PronunciationOptions{});
+        QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
     }
     void dictionaryValidation() {
         PronunciationOptions oversized;
@@ -304,28 +312,166 @@ class CoreTest:public QObject {
         auto roles=pronounce("P AA T","en",true);QVERIFY(roles.roles[0]==QVector<SegmentRole>({SegmentRole::Consonant,SegmentRole::Vowel,SegmentRole::Consonant}));
         QVERIFY(pronounce("cl AA","en",true).roles[0][0]==SegmentRole::Special);
         auto varied=sequence("P AA T",1.5);varied.score.time.tempos={{0,120},{Blick,60}};varied.score.time.validate();varied.regenerate();QCOMPARE(varied.generated.last().end,2.5);QVERIFY(std::abs(varied.generated.last().start-2.42)<1e-9);
-        auto legacy=sequence("P AA T",2);legacy.rules.consonantMaxSeconds=0;legacy.regenerate();QVERIFY(std::abs(legacy.generated[0].end-.36)<1e-9);QVERIFY(std::abs(legacy.generated.last().start-1.18)<1e-9);
-        QTemporaryDir dir;auto path=dir.filePath("timing.chosuta");saveProject(legacy,path);QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();auto rules=root["rules"].toObject();rules.remove("consonantMaxSeconds");root["rules"]=rules;
-        auto write=[&]{if(!file.open(QIODevice::WriteOnly))return false;file.write(QJsonDocument(root).toJson());file.close();return true;};QVERIFY(write());auto old=loadProject(path);QCOMPARE(old.rules.consonantMaxSeconds,0.);QVERIFY(std::abs(old.generated[0].end-.36)<1e-9);old.regenerate();QVERIFY(std::abs(old.generated[0].end-.36)<1e-9);
-        auto locked=old.generated[0];locked.shape="E";locked.start=.01;locked.end=.02;old.edit(locked);old.rules.consonantMaxSeconds=.08;old.regenerate();QCOMPARE(shapeAt(old,old.effective(),.015),QString("E"));QCOMPARE(old.overrides[locked.id].event.end,.02);QVERIFY(std::abs(old.generated[0].end-.08)<1e-9);saveProject(old,path);QCOMPARE(loadProject(path).rules.consonantMaxSeconds,.08);
+        auto uncapped=sequence("P AA T",2);uncapped.rules.consonantMaxSeconds=0;uncapped.regenerate();QVERIFY(std::abs(uncapped.generated[0].end-.36)<1e-9);QVERIFY(std::abs(uncapped.generated.last().start-1.18)<1e-9);
+        QTemporaryDir dir;auto path=dir.filePath("timing.chosuta");saveProject(uncapped,path);QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();auto rules=root["rules"].toObject();rules.remove("consonantMaxSeconds");root["rules"]=rules;
+        auto write=[&]{if(!file.open(QIODevice::WriteOnly))return false;file.write(QJsonDocument(root).toJson());file.close();return true;};QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);rules["consonantMaxSeconds"]=0;root["rules"]=rules;QVERIFY(write());auto restored=loadProject(path);QCOMPARE(restored.rules.consonantMaxSeconds,0.);QVERIFY(std::abs(restored.generated[0].end-.36)<1e-9);restored.regenerate();QVERIFY(std::abs(restored.generated[0].end-.36)<1e-9);
+        auto locked=restored.generated[0];locked.shape="E";locked.start=.01;locked.end=.02;restored.edit(locked);restored.rules.consonantMaxSeconds=.08;restored.regenerate();QCOMPARE(shapeAt(restored,restored.effective(),.015),QString("E"));QCOMPARE(restored.overrides[locked.id].event.end,.02);QVERIFY(std::abs(restored.generated[0].end-.08)<1e-9);saveProject(restored,path);QCOMPARE(loadProject(path).rules.consonantMaxSeconds,.08);
         rules["consonantMaxSeconds"]="80";root["rules"]=rules;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);rules["consonantMaxSeconds"]=1.1;root["rules"]=rules;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
-        old.rules.consonantMaxSeconds=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(old.regenerate(),Failure);QVERIFY_EXCEPTION_THROWN(saveProject(old,path),Failure);
+        restored.rules.consonantMaxSeconds=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(restored.regenerate(),Failure);QVERIFY_EXCEPTION_THROWN(saveProject(restored,path),Failure);
     }
     void consonantDefaults() {
-        for(const auto &phone:QStringList{"B","P","M","T","D","K","G","CH","JH"})
+        for(const auto &phone:QStringList{"B","P","M"})
             QCOMPARE(pronounce(phone+" AA","en",true).syllables[0][0],QString("closed"));
-        for(const auto &phone:QStringList{"F","V","S","Z","SH","ZH","TH","DH","HH","R","L","W","Y","N","NG"}){
+        for(const auto &phone:QStringList{"T","D","K","G","CH","JH","F","V","S","Z","SH","ZH","TH","DH","HH","R","L","W","Y","N","NG"}){
             QCOMPARE(pronounce(phone+" AA","en",true).syllables[0][0],QString("open"));
             auto p=basic();p.score.tracks[0].notes[0].language="en";p.score.tracks[0].notes[0].phoneset="arpabet";p.score.tracks[0].notes[0].phonemes=phone+" AA";p.regenerate();
             QCOMPARE(shapeAt(p,p.effective(),.02),QString("A"));
             for(const auto&e:p.generated)QVERIFY(e.shape!="open");
         }
-        for(const auto &lyric:QStringList{"か","ま","ぱ","ka","ma","pa"})QCOMPARE(pronounce(lyric,"ja").syllables[0][0],QString("closed"));
-        for(const auto &lyric:QStringList{"さ","ら","は","sa","ra","ha"})QCOMPARE(pronounce(lyric,"ja").syllables[0][0],QString("open"));
-        for(const auto &lyric:QStringList{"ba","pa","ma","ka"})QCOMPARE(pronounce(lyric,"zh").syllables[0][0],QString("closed"));
-        for(const auto &lyric:QStringList{"shi","hao","ri","li"})QCOMPARE(pronounce(lyric,"zh").syllables[0][0],QString("open"));
+        for(const auto &lyric:QStringList{"ま","ぱ","ma","pa"})QCOMPARE(pronounce(lyric,"ja").syllables[0][0],QString("closed"));
+        for(const auto &lyric:QStringList{"か","た","だ","さ","ら","は","ka","ta","da","sa","ra","ha"})QCOMPARE(pronounce(lyric,"ja").syllables[0][0],QString("open"));
+        for(const auto &lyric:QStringList{"ba","pa","ma"})QCOMPARE(pronounce(lyric,"zh").syllables[0][0],QString("closed"));
+        for(const auto &lyric:QStringList{"ka","da","ta","shi","hao","ri","li"})QCOMPARE(pronounce(lyric,"zh").syllables[0][0],QString("open"));
         auto p=basic();p.score.tracks[0].notes[0].phonemes="a s i";p.regenerate();
         const auto segments=p.generated;QVERIFY(segments.size()>4);QCOMPARE(segments[1].shape,QString("I"));
+    }
+    void configurableConsonants() {
+        Rules::Consonants custom;custom.overrides={{"en:arpabet:D","closed"},{"ja:romaji:t","closed"},{"ja:romaji:ky","closed"},{"zh:xsampa:d","closed"},{"zh:xsampa:m","open"}};
+        validateConsonants(custom);
+        for(const auto &text:QStringList{"D AA","day"}){
+            const auto r=pronounce(text,"en",text=="D AA",{},{},{},custom);
+            QVERIFY(!r.unknown);QCOMPARE(r.syllables[0][0],QString("closed"));QCOMPARE(r.phones[0][0],QString("en:arpabet:D"));
+        }
+        for(const auto &text:QStringList{"た","タ","ta","t a"}){
+            const auto r=pronounce(text,"ja",text=="t a",{},{},{},custom);
+            QCOMPARE(r.syllables[0][0],QString("closed"));QCOMPARE(r.phones[0][0],QString("ja:romaji:t"));
+        }
+        for(const auto &text:QStringList{"きゃ","キャ","kya","ky a"}){
+            const auto r=pronounce(text,"ja",text=="ky a",{},{},{},custom);
+            QCOMPARE(r.syllables[0][0],QString("closed"));QCOMPARE(r.phones[0][0],QString("ja:romaji:ky"));
+        }
+        for(const auto &text:QStringList{"da","大","d a"})QCOMPARE(pronounce(text,"zh",text=="d a",{},{},{},custom).syllables[0][0],QString("closed"));
+        QCOMPARE(pronounce("m","zh",false,{},{},{},custom).syllables[0][0],QString("open"));
+        PronunciationOptions dictionary;dictionary.words["ja"]["試験"]={"た",false};
+        const auto word=pronounce("試験","ja",false,{},{},dictionary,custom);QCOMPARE(word.phones[0][0],QString("ja:romaji:t"));QCOMPARE(word.syllables[0][0],QString("closed"));
+        const auto cl=pronounce("っか","ja");QCOMPARE(cl.roles[0][0],SegmentRole::Special);QCOMPARE(cl.phones[0][0],QString("ja:romaji:cl"));
+        auto p=appearanceProject({60,62,64},{"d a","a | d i","p a"});p.rules.consonants=custom;p.regenerate();
+        QVERIFY(std::any_of(p.generated.cbegin(),p.generated.cend(),[](const Event &e){return e.phone=="ja:romaji:d"&&e.articulation=="consonant";}));
+        QCOMPARE(readConsonants(consonantsJson(custom)),custom);
+        auto invalid=custom;invalid.overrides["en:arpabet:D"]="half";QVERIFY_EXCEPTION_THROWN(validateConsonants(invalid),Failure);
+        invalid=custom;invalid.overrides["xx:arpabet:D"]="closed";QVERIFY_EXCEPTION_THROWN(validateConsonants(invalid),Failure);
+        auto json=consonantsJson(custom);json["preset"]="unknown";QVERIFY_EXCEPTION_THROWN(readConsonants(json),Failure);
+    }
+    void advancedClassificationAndSwitches() {
+        auto p=appearanceProject({60,62,66,60});AppearanceResolver resolver(p);const auto &notes=p.score.tracks[0].notes;
+        QCOMPARE(resolver.context(notes[0].id).direction,QString("any"));
+        QCOMPARE(resolver.context(notes[1].id).direction,QString("up"));QCOMPARE(resolver.context(notes[1].id).interval,QString("step"));QCOMPARE(resolver.context(notes[1].id).beat,QString("weak"));
+        QCOMPARE(resolver.context(notes[2].id).interval,QString("small"));QCOMPARE(resolver.context(notes[2].id).beat,QString("strong"));
+        QCOMPARE(resolver.context(notes[3].id).direction,QString("down"));QCOMPARE(resolver.context(notes[3].id).interval,QString("large"));
+        const QStringList expected={"A","A_weak_any_any","A_any_any_step","A_weak_any_step","A_any_up_any","A_weak_up_any","A_any_up_step","A_weak_up_step"};
+        for(int mask=0;mask<8;++mask){p.appearance.direction=mask&4;p.appearance.interval=mask&2;p.appearance.beat=mask&1;auto q=p;q.assets.clear();q.assets[expected[mask]]="chosen.png";const auto selection=resolver.event(q,q.generated[1]);QCOMPARE(selection.id,expected[mask]);QVERIFY(!selection.missing);}
+        p.appearance.direction=true;p.appearance.interval=false;p.appearance.beat=true;p.assets={{"A","plain.png"},{"A_weak_up_step","step.png"}};
+        QCOMPARE(resolver.event(p,p.generated[1]).id,QString("A")); // disabled interval cannot select the retained step mapping
+        p.assets["A_weak_up_any"]="shared.png";QCOMPARE(resolver.event(p,p.generated[1]).id,QString("A_weak_up_any"));
+        p.appearance.enabled=false;QCOMPARE(resolver.event(p,p.generated[1]).id,QString("A"));
+        auto repeat=appearanceProject({60,60});const auto repeatContext=AppearanceResolver(repeat).context(repeat.score.tracks[0].notes[1].id);QCOMPARE(repeatContext.interval,QString("any"));QCOMPARE(repeatContext.direction,QString("repeat"));QCOMPARE(AppearanceResolver(repeat).context(repeat.score.tracks[0].notes[0].id).interval,QString("any"));
+        repeat.assets={{"A","plain.png"},{"closed","closed.png"},{"A_weak_repeat_any","repeat.png"}};QCOMPARE(AppearanceResolver(repeat).event(repeat,repeat.generated[1]).id,QString("A_weak_repeat_any"));
+        QCOMPARE(AppearanceResolver(repeat).select(repeat,"closed",repeatContext).id,QString("closed"));repeat.assets["closed_weak_repeat_any"]="repeat-closure.png";QCOMPARE(AppearanceResolver(repeat).select(repeat,"closed",repeatContext).id,QString("closed_weak_repeat_any"));
+        repeat.appearance.interval=false;QCOMPARE(AppearanceResolver(repeat).event(repeat,repeat.generated[1]).id,QString("A_weak_repeat_any"));repeat.appearance.direction=false;QCOMPARE(AppearanceResolver(repeat).event(repeat,repeat.generated[1]).id,QString("A"));repeat.appearance.direction=true;repeat.appearance.interval=true;repeat.appearance.intervalUnit="diatonic";QCOMPARE(AppearanceResolver(repeat).context(repeat.score.tracks[0].notes[1].id).direction,QString("repeat"));
+        repeat.appearance.noteSpellings[repeat.score.tracks[0].notes[1].id]="B#3";QCOMPARE(AppearanceResolver(repeat).context(repeat.score.tracks[0].notes[1].id).interval,QString("step"));
+        auto limits=appearanceProject({60,62,65,69,74});auto classify=AppearanceResolver(limits);
+        QCOMPARE(classify.context(limits.score.tracks[0].notes[1].id).interval,QString("step"));QCOMPARE(classify.context(limits.score.tracks[0].notes[2].id).interval,QString("small"));QCOMPARE(classify.context(limits.score.tracks[0].notes[3].id).interval,QString("small"));QCOMPARE(classify.context(limits.score.tracks[0].notes[4].id).interval,QString("large"));
+        auto compound=appearanceProject({60,62,64,66});compound.score.time.meters={{0,6,8}};for(auto &note:compound.score.tracks[0].notes){note.onset/=2;note.duration/=2;}compound.regenerate();
+        auto six=AppearanceResolver(compound);QCOMPARE(six.context(compound.score.tracks[0].notes[1].id).beat,QString("weak"));QCOMPARE(six.context(compound.score.tracks[0].notes[3].id).beat,QString("strong"));
+        compound.appearance.strongBeats["6/8"]={1};QCOMPARE(AppearanceResolver(compound).context(compound.score.tracks[0].notes[3].id).beat,QString("weak"));
+        auto tempo=p;tempo.appearance.enabled=true;tempo.score.time.tempos={{0,120},{Blick,60}};tempo.output.syncOffset=.37;tempo.regenerate();QCOMPARE(AppearanceResolver(tempo).context(notes[2].id).beat,QString("strong"));
+        auto gap=appearanceProject({60,62});gap.score.tracks[0].notes[1].onset+=Blick;gap.regenerate();QCOMPARE(AppearanceResolver(gap).context(gap.score.tracks[0].notes[1].id).direction,QString("any"));
+        auto instance=appearanceProject({60,62});instance.score.tracks[0].notes[1].groupInstance+="new";instance.regenerate();QCOMPARE(AppearanceResolver(instance).context(instance.score.tracks[0].notes[1].id).direction,QString("any"));
+        auto overlap=appearanceProject({60,62});overlap.score.tracks[0].notes[0].duration=Blick*2;overlap.regenerate();QCOMPARE(AppearanceResolver(overlap).context(overlap.score.tracks[0].notes[1].id).direction,QString("any"));
+    }
+    void diatonicClassification(){
+        auto augmented=appearanceProject({68,71});QCOMPARE(AppearanceResolver(augmented).context(augmented.score.tracks[0].notes[1].id).interval,QString("small"));
+        augmented.appearance.intervalUnit="diatonic";augmented.appearance.degreeMode="harmonic-minor";const auto &notes=augmented.score.tracks[0].notes;
+        QCOMPARE(writtenPitch(augmented.appearance,notes[0])->name,QString("Ab4"));QCOMPARE(writtenPitch(augmented.appearance,notes[1])->name,QString("B4"));QCOMPARE(intervalDegree(augmented.appearance,notes[0],notes[1]).value(),2);QCOMPARE(AppearanceResolver(augmented).context(notes[1].id).interval,QString("step"));
+        auto enharmonic=appearanceProject({61,63});enharmonic.appearance.intervalUnit="diatonic";const auto &pair=enharmonic.score.tracks[0].notes;
+        enharmonic.appearance.noteSpellings[pair[0].id]="C#4";enharmonic.appearance.noteSpellings[pair[1].id]="D#4";QCOMPARE(intervalDegree(enharmonic.appearance,pair[0],pair[1]).value(),2);QCOMPARE(AppearanceResolver(enharmonic).context(pair[1].id).interval,QString("step"));
+        enharmonic.appearance.noteSpellings[pair[1].id]="Eb4";QCOMPARE(intervalDegree(enharmonic.appearance,pair[0],pair[1]).value(),3);QCOMPARE(AppearanceResolver(enharmonic).context(pair[1].id).interval,QString("small"));
+        auto chromatic=appearanceProject({60,61,62});chromatic.appearance.intervalUnit="diatonic";const auto &chromaticNotes=chromatic.score.tracks[0].notes;
+        auto unresolved=AppearanceResolver(chromatic).context(chromaticNotes[1].id);QCOMPARE(unresolved.interval,QString("any"));QVERIFY(!unresolved.intervalReason.isEmpty());
+        chromatic.appearance.noteSpellings[chromaticNotes[1].id]="C#4";QCOMPARE(AppearanceResolver(chromatic).context(chromaticNotes[1].id).interval,QString("any"));QCOMPARE(AppearanceResolver(chromatic).context(chromaticNotes[2].id).interval,QString("step"));
+        chromatic.appearance.noteSpellings[chromaticNotes[1].id]="C5";QVERIFY(!writtenPitch(chromatic.appearance,chromaticNotes[1]));
+        for(const auto &tonic:QStringList{"C","C#","Db","D","Eb","E","F#","Gb","G","Ab","A","Bb","B","B#","Cb","E#","Fb"})for(auto it=degreeModes().cbegin();it!=degreeModes().cend();++it){
+            Project::Appearance a;a.degreeTonic=tonic;a.degreeMode=it.key();const int base=parseWrittenPitch(tonic+"4")->midi;Note first;first.pitch=base;first.id="root";
+            for(int i=0;i<7;++i){Note n;n.pitch=base+it.value()[i];n.id=QString("degree%1").arg(i);QVERIFY(writtenPitch(a,n));QCOMPARE(intervalDegree(a,first,n).value(),i+1);}
+            Note octave;octave.pitch=base+12;octave.id="octave";QCOMPARE(intervalDegree(a,first,octave).value(),8);
+        }
+        Project::Appearance custom;custom.degreeMode="custom";custom.customDegreeScale={0,1,3,5,7,8,11};validateDegreeSettings(custom);Note n;n.pitch=61;n.id="custom";QCOMPARE(writtenPitch(custom,n)->name,QString("Db4"));
+        custom.degreeTonic="Cb";custom.customDegreeScale={0,1,2,3,4,5,6};n.pitch=65;const auto unusual=writtenPitch(custom,n);QVERIFY(unusual);QCOMPARE(parseWrittenPitch(unusual->name)->midi,n.pitch);
+        custom.customDegreeScale={0,2,2,5,7,9,11};QVERIFY_EXCEPTION_THROWN(validateDegreeSettings(custom),Failure);custom=Project::Appearance{};custom.degreeMode="unknown";QVERIFY_EXCEPTION_THROWN(validateDegreeSettings(custom),Failure);
+        QVERIFY(parseWrittenPitch(QString::fromUtf8("c♯4")));QCOMPARE(parseWrittenPitch("B#3")->midi,60);QCOMPARE(parseWrittenPitch("Cb4")->midi,59);QVERIFY(!parseWrittenPitch("C#b4"));QVERIFY(!parseWrittenPitch("H4"));QVERIFY(!parseWrittenPitch("C20"));
+        const auto basis=timingBasisHash(augmented);augmented.appearance.degreeTonic="D";augmented.appearance.stepDegreeMax=3;augmented.appearance.intervalUnit="semitones";QCOMPARE(timingBasisHash(augmented),basis);
+        auto json=appearanceJson(enharmonic.appearance);QCOMPARE(readAppearance(json),enharmonic.appearance);json["degreeTonic"]="H";QVERIFY_EXCEPTION_THROWN(readAppearance(json),Failure);
+    }
+    void advancedSpecialsRenderingAndExport() {
+        auto p=appearanceProject({60,0,62,0},{"a","cl","p a","br"});p.canvas.width=p.canvas.height=64;p.output.duration=2.5;p.output.fpsNum=100;
+        QTemporaryDir dir;QVERIFY(dir.isValid());
+        auto asset=[&](QString name,QColor color){QImage image(64,64,QImage::Format_RGBA8888);image.fill(color);const auto path=dir.filePath(name+".png");if(!image.save(path))throw Failure("Cannot save test PNG");p.assets[name]=path;};
+        asset("A",Qt::red);asset("closed",Qt::black);asset("rest",Qt::black);asset("breath",Qt::black);asset("A_strong_up_step",Qt::blue);
+        AppearanceResolver resolver(p);const auto &notes=p.score.tracks[0].notes;
+        QCOMPARE(resolver.context(notes[1].id).anchor,notes[2].id);QCOMPARE(resolver.context(notes[1].id).direction,QString("up"));QCOMPARE(resolver.context(notes[1].id).beat,QString("weak"));
+        const auto shared=resolver.at(p,resolveEvents(p.effective()),.6,true);QVERIFY(!shared.missing);QCOMPARE(shared.id,QString("closed"));QCOMPARE(shared.context.direction,QString("up"));
+        Scene generic(p);QVERIFY(generic.missingAppearanceAssets().isEmpty());QCOMPARE(generic.frame(.6).pixelColor(32,32),QColor(Qt::black));QCOMPARE(generic.frame(1.01).pixelColor(32,32),QColor(Qt::black));QCOMPARE(generic.frame(1.6).pixelColor(32,32),QColor(Qt::black));QCOMPARE(generic.frame(2.1).pixelColor(32,32),QColor(Qt::black));
+        for(const auto &shape:QStringList{"closed","rest","breath"}){
+            const auto selected=resolver.select(p,shape,{"down","large","strong",{}});QVERIFY(!selected.missing);QCOMPARE(selected.id,shape);
+        }
+        auto absent=p;absent.assets.clear();Scene missing(absent);QVERIFY(missing.selectionAt(.6).missing);QVERIFY(missing.missingAppearanceAssets().contains("closed_weak_up_step"));
+        if(!QStandardPaths::findExecutable("ffmpeg").isEmpty()){std::atomic_bool cancel=false;const auto rejected=exportVideo(absent,dir.filePath("missing.mov"),cancel);QVERIFY(!rejected.success);QVERIFY(rejected.error.contains("Fallback PNG"));QVERIFY(!QFileInfo::exists(dir.filePath("missing.mov")));}
+        asset("closed_any_up_any",Qt::green);asset("breath_any_up_any",Qt::yellow);asset("rest_any_up_any",Qt::gray);
+        Scene scene(p);QVERIFY(scene.missingAppearanceAssets().isEmpty());
+        QCOMPARE(scene.frame(.6).pixelColor(32,32),QColor(Qt::green));QCOMPARE(scene.frame(1.01).pixelColor(32,32),QColor(Qt::green));QCOMPARE(scene.frame(1.1).pixelColor(32,32),QColor(Qt::blue));QCOMPARE(scene.frame(1.6).pixelColor(32,32),QColor(Qt::yellow));QCOMPARE(scene.frame(2.1).pixelColor(32,32),QColor(Qt::gray));
+        QCOMPARE(scene.characterRect(.6),QRectF(0,0,64,64));
+        QFile encoded(p.assets["closed_any_up_any"]);QVERIFY(encoded.open(QIODevice::ReadOnly));auto broken=encoded.readAll();const int compressed=broken.indexOf("IDAT");QVERIFY(compressed>0);broken[compressed+4]=char(uchar(broken[compressed+4])^255);QFile damaged(dir.filePath("damaged.png"));QVERIFY(damaged.open(QIODevice::WriteOnly));damaged.write(broken);damaged.close();
+        auto damagedProject=p;damagedProject.assets["closed_weak_up_step"]=damaged.fileName();Scene damagedScene(damagedProject);QCOMPARE(damagedScene.frame(.6).pixelColor(32,32),QColor(Qt::green));QCOMPARE(damagedScene.selectionAt(.6).id,QString("closed_any_up_any"));
+        auto shifted=p;shifted.output.syncOffset=.2;Scene delayed(shifted);QCOMPARE(delayed.frame(.8).pixelColor(32,32),QColor(Qt::green));
+        auto split=p;const auto originalVowel=split.generated[3];split.split(originalVowel,1.3);QCOMPARE(Scene(split).frame(1.1).pixelColor(32,32),QColor(Qt::blue));QCOMPARE(Scene(split).frame(1.4).pixelColor(32,32),QColor(Qt::blue));QVector<Event> children;for(const auto &event:split.effective())if(event.provenance=="manual/split")children.append(event);QCOMPARE(children.size(),2);split.merge(children);QCOMPARE(Scene(split).frame(1.4).pixelColor(32,32),QColor(Qt::blue));
+        auto manual=p;auto vowel=manual.generated[3];vowel.shape="A";vowel.appearanceFixed=true;manual.edit(vowel);QCOMPARE(Scene(manual).frame(1.1).pixelColor(32,32),QColor(Qt::red));manual.regenerate();QCOMPARE(Scene(manual).frame(1.1).pixelColor(32,32),QColor(Qt::red));
+        auto correction=p;correction.timing.enabled=true;correction.timing.audioHash="test";const auto basis=timingBasisHash(correction);correction.appearance.enabled=false;correction.appearance.interval=false;QCOMPARE(timingBasisHash(correction),basis);correction.rules.consonants.overrides["ja:romaji:p"]="open";QVERIFY(timingBasisHash(correction)!=basis);
+        auto fallback=p;fallback.assets.remove("closed_any_up_any");QCOMPARE(Scene(fallback).frame(.6).pixelColor(32,32),QColor(Qt::black));
+        auto common=p;common.assets.remove("closed_any_up_any");common.assets["closed_weak_any_any"]=p.assets["breath_any_up_any"];QCOMPARE(Scene(common).selectionAt(.6).id,QString("closed_weak_any_any"));QCOMPARE(Scene(common).frame(.6).pixelColor(32,32),QColor(Qt::yellow));
+        auto exact=common;exact.assets["closed_weak_up_step"]=p.assets["A_strong_up_step"];QCOMPARE(Scene(exact).selectionAt(.6).id,QString("closed_weak_up_step"));QCOMPARE(Scene(exact).frame(.6).pixelColor(32,32),QColor(Qt::blue));
+        common.assets.remove("closed_weak_any_any");common.assets.remove("closed");common.fallback="A";QCOMPARE(Scene(common).selectionAt(.6).id,QString("A"));QCOMPARE(Scene(common).frame(.6).pixelColor(32,32),QColor(Qt::red));
+        auto lips=appearanceProject({60,62,60,62},{"a","b a","p a","m a"});lips.assets=p.assets;lips.assets.remove("closed_any_up_any");lips.canvas=p.canvas;Scene lipScene(lips);int closures=0;for(const auto &event:lips.generated)if(event.shape=="closed"){++closures;const auto t=(event.start+event.end)/2;QCOMPARE(lipScene.selectionAt(t).id,QString("closed"));QCOMPARE(lipScene.frame(t).pixelColor(32,32),QColor(Qt::black));}QCOMPARE(closures,3);
+
+        if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(out.mkpath("."));for(auto it=p.assets.begin();it!=p.assets.end();++it){const auto copy=out.filePath(it.key()+".png");QVERIFY(QImage(it.value()).save(copy));it.value()=copy;}saveProject(p,out.filePath("advanced.chosuta"));QVERIFY(Scene(p).frame(.6).save(out.filePath("closure-frame.png")));}
+        if(QStandardPaths::findExecutable("ffmpeg").isEmpty())QSKIP("FFmpeg absent");
+        p.output.format="mov";std::atomic_bool cancel=false;const auto movie=dir.filePath("advanced.mov");const auto exported=exportVideo(p,movie,cancel);QVERIFY2(exported.success,qPrintable(exported.error));QCOMPARE(exported.frames,250);
+        QProcess decode;decode.start("ffmpeg",{"-v","error","-i",movie,"-f","rawvideo","-pix_fmt","rgba","pipe:1"});QVERIFY(decode.waitForFinished());const auto rgba=decode.readAllStandardOutput();QCOMPARE(rgba.size(),64*64*4*250);
+        Scene expected(p);for(int frame:{0,49,50,99,100,108,109,149,150,199,200,249}){const auto image=expected.frame(frame/100.);QCOMPARE(rgba.mid(frame*64*64*4,64*64*4),QByteArray(reinterpret_cast<const char *>(image.constBits()),image.sizeInBytes()));}
+    }
+    void advancedPersistenceImportAndCache() {
+        QTemporaryDir dir;auto p=appearanceProject({60,62},{"d a","a"});p.appearance.interval=false;p.appearance.strongBeats["4/4"]={1};p.rules.consonants.overrides["ja:romaji:d"]="closed";p.regenerate();
+        QImage image(512,512,QImage::Format_RGBA8888);image.fill(Qt::cyan);const auto path=dir.filePath("素材 $(literal).png");QVERIFY(image.save(path));p.assets["A"]=p.assets["closed"]=path;
+        for(const auto &shape:QStringList{"A","I","U","E","O","closed","rest","breath"})for(const auto &beat:QStringList{"strong","weak"})for(const auto &direction:QStringList{"up","down"})for(const auto &interval:QStringList{"step","small","large"})p.assets[shape+"_"+beat+"_"+direction+"_"+interval]=path;
+        p.canvas.width=p.canvas.height=64;Scene scene(p);QCOMPARE(scene.imageDecodeCount(),1);QVERIFY(scene.imageCacheBytes()<=64*64*4);scene.frame(.6);QCOMPARE(scene.imageDecodeCount(),1);auto layout=p.canvas;layout.characterScale=.3;scene.setLayout(layout,{},false);scene.frame(.6);QCOMPARE(scene.imageDecodeCount(),1);
+        p.appearance.intervalUnit="diatonic";
+        const auto projectPath=dir.filePath("工程.chosuta");saveProject(p,projectPath);auto restored=loadProject(projectPath);QCOMPARE(restored.appearance,p.appearance);QCOMPARE(restored.rules.consonants,p.rules.consonants);QCOMPARE(restored.generated[0].phone,QString("ja:romaji:d"));QCOMPARE(restored.assets,p.assets);
+        auto raw=QFile(projectPath);QVERIFY(raw.open(QIODevice::ReadOnly));auto root=checkedJson(raw.readAll()).object();raw.close();
+        auto write=[&]{QFile file(projectPath);if(!file.open(QIODevice::WriteOnly))return false;return file.write(QJsonDocument(root).toJson())>0;};
+        const auto original=root;
+        for(int schema:{1,2,3,4,5,6,7,8,10}){root=original;root["schema"]=schema;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);}
+        for(const auto &field:QStringList{"appearance","canvas","subtitles","timingCorrection"}){root=original;root.remove(field);QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);}
+        root=original;auto obsolete=root["rules"].toObject();obsolete["consonants"]=QJsonObject{{"preset","legacy"},{"overrides",QJsonObject{}}};root["rules"]=obsolete;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        root=original;auto options=root["appearance"].toObject();options["direction"]="false";root["appearance"]=options;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        root=original;options=root["appearance"].toObject();options["stepMax"]=1.5;root["appearance"]=options;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        root=original;options=root["appearance"].toObject();options.remove("intervalUnit");root["appearance"]=options;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        root=original;options=root["appearance"].toObject();options["intervalUnit"]="interval-names";root["appearance"]=options;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        root=original;options=root["appearance"].toObject();options["intervalUnit"]=true;root["appearance"]=options;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        root=original;options=root["appearance"].toObject();options["strongBeats"]=QJsonObject{{"4/4",QJsonArray{1,1}}};root["appearance"]=options;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(projectPath),Failure);
+        QDir folder(dir.filePath("imports"));QVERIFY(folder.mkpath("child"));QVERIFY(image.save(folder.filePath("A.png")));QVERIFY(image.save(folder.filePath("A_any_any_any.png")));QVERIFY(image.save(folder.filePath("closed_Strong_UP_any.PnG")));QVERIFY(image.save(folder.filePath("unknown-name.png")));QVERIFY(image.save(folder.filePath("child/I.png")));QFile bad(folder.filePath("E.png"));QVERIFY(bad.open(QIODevice::WriteOnly));bad.write("not PNG");bad.close();
+        const auto plan=scanAssetDirectory(folder.path(),{{"closed_strong_up_any","old.png"}});QVERIFY(plan.error.isEmpty());QCOMPARE(plan.entries.size(),5);int conflicts=0,replace=0,invalid=0,unknown=0;for(const auto &entry:plan.entries){conflicts+=entry.status=="conflict";replace+=entry.status=="replace";invalid+=entry.status=="invalid";unknown+=entry.status=="unknown";}QCOMPARE(conflicts,2);QCOMPARE(replace,1);QCOMPARE(invalid,1);QCOMPARE(unknown,1);
+        std::atomic_bool cancelled=false;const auto aborted=scanAssetDirectory(folder.path(),{},&cancelled,[&](int){cancelled=true;});QVERIFY(aborted.cancelled);QVERIFY(aborted.entries.isEmpty());
+        QCOMPARE(normalizedAssetId("a_Weak_DOWN_Small").value(),QString("A_weak_down_small"));QVERIFY(!normalizedAssetId("A_strong_step_up"));
+        QCOMPARE(normalizedAssetId("a_Weak_RePeAt_ANY").value(),QString("A_weak_repeat_any"));QVERIFY(!normalizedAssetId("a_Weak_ANY_RePeAt"));QVERIFY(!normalizedAssetId("A__strong__up__step"));QVERIFY(!normalizedAssetId("A_weak_up_repeat"));QVERIFY(image.save(folder.filePath("A_weak_repeat_any.png")));const auto withRepeat=scanAssetDirectory(folder.path(),{});bool foundRepeat=false;for(const auto &entry:withRepeat.entries)if(entry.id=="A_weak_repeat_any"){foundRepeat=true;QCOMPARE(entry.status,QString("new"));}QVERIFY(foundRepeat);
     }
     void subtitleTimingAndSources() {
         auto p=basic();p.output.syncOffset=.25;p.output.audioOffset=7;
@@ -346,8 +492,8 @@ class CoreTest:public QObject {
         auto p=basic();QTemporaryDir dir;SubtitleTrack t;t.id="sub-track";t.name="訳 / Translation";t.style.color=QColor(12,180,220,190);t.style.x=.3;t.style.fontHeight=.07;t.alignLyrics=true;t.sourceTrack=p.score.tracks[0].id;
         SubtitleCue c;c.id="sub-cue";c.text="<literal> 中文\nかな English";auto spans=lyricSpans(p,t.sourceTrack);alignSubtitle(p,c,t.sourceTrack,spans[1],spans[2]);c.ownStyle=true;c.style.x=.7;c.style.bold=true;t.cues={c};p.subtitles={t};p.subtitlesEnabled=true;
         auto path=dir.filePath("字幕.chosuta");saveProject(p,path);auto q=loadProject(path);QVERIFY(q.subtitlesEnabled);QCOMPARE(q.subtitles,p.subtitles);q.regenerate();QCOMPARE(q.subtitles,p.subtitles);
-        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),5);
-        root["schema"]=3;root.remove("subtitles");QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();q=loadProject(path);QVERIFY(!q.subtitlesEnabled);QVERIFY(q.subtitles.isEmpty());
+        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),9);
+        root.remove("subtitles");QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
         p.subtitles[0].cues.append(c);QVERIFY_EXCEPTION_THROWN(validateSubtitles(p),Failure);p.subtitles[0].cues.last().id="another";QVERIFY_EXCEPTION_THROWN(validateSubtitles(p,true),Failure);
         p.subtitles[0].cues.removeLast();p.subtitles[0].cues[0].text=QString(4097,'x');QVERIFY_EXCEPTION_THROWN(validateSubtitles(p),Failure);p.subtitles[0].cues[0]=c;
         p.subtitles[0].style.fontHeight=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(validateSubtitles(p),Failure);p.subtitles[0].style=t.style;
@@ -376,7 +522,7 @@ class CoreTest:public QObject {
         Scene expected(p);for(int i=0;i<4;++i){auto image=expected.frame(i/4.);QCOMPARE(rgba.mid(i*320*180*4,320*180*4),QByteArray(reinterpret_cast<const char*>(image.constBits()),image.sizeInBytes()));}
         if(qEnvironmentVariableIsSet("CHOSUTA_SUBTITLE_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_SUBTITLE_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(transparent.save(out.filePath("closed.png")));p.assets[p.fallback]=out.filePath("closed.png");saveProject(p,out.filePath("original-subtitle.chosuta"));QVERIFY(expected.frame(.25).save(out.filePath("subtitle-frame.png")));QFile source(movie);QVERIFY(source.open(QIODevice::ReadOnly));QSaveFile destination(out.filePath("original-subtitle.mov"));QVERIFY(destination.open(QIODevice::WriteOnly));auto bytes=source.readAll();QCOMPARE(destination.write(bytes),bytes.size());QVERIFY(destination.commit());}
     }
-    void canvasAndMigration() {
+    void canvasAndPersistence() {
         QTemporaryDir dir;auto p=basic();
         QImage bg(80,40,QImage::Format_ARGB32);bg.fill(Qt::blue);{QPainter paint(&bg);paint.fillRect(0,0,20,40,Qt::yellow);}QVERIFY(bg.save(dir.filePath("背景.png")));
         QImage character(40,40,QImage::Format_ARGB32);character.fill(Qt::red);QVERIFY(character.save(dir.filePath("立绘.png")));
@@ -388,11 +534,8 @@ class CoreTest:public QObject {
         p.canvas.backgroundFit="stretch";Scene stretch(p);QCOMPARE(stretch.frame(0).pixelColor(0,0),QColor(Qt::yellow));
         auto path=dir.filePath("画布.chosuta");saveProject(p,path);auto restored=loadProject(path);
         QCOMPARE(restored.canvas.backgroundImage,p.canvas.backgroundImage);QCOMPARE(restored.canvas.characterScale,.25);QCOMPARE(restored.canvas.characterX,.75);QCOMPARE(restored.canvas.backgroundFit,QString("stretch"));QCOMPARE(restored.duration(),3.);QCOMPARE(restored.audioDuration,4.);QCOMPARE(restored.playbackReturnPosition,.25);
-        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),5);
-        auto legacy=root["output"].toObject();auto canvas=root["canvas"].toObject();for(auto key:QStringList{"width","height","background","transparent"})legacy[key]=canvas[key];
-        root["schema"]=1;root["output"]=legacy;root.remove("canvas");root.remove("audioDuration");root.remove("playbackReturnPosition");
-        QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();restored=loadProject(path);
-        QCOMPARE(restored.canvas.width,64);QCOMPARE(restored.canvas.background,QColor(Qt::green));QCOMPARE(restored.canvas.characterScale,1.);QVERIFY(restored.canvas.backgroundImage.isEmpty());
+        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),9);
+        root.remove("canvas");QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
         p.canvas.characterScale=0;QVERIFY_EXCEPTION_THROWN(validateCanvas(p.canvas),Failure);p.canvas.characterScale=.25;
         if(QStandardPaths::findExecutable("ffmpeg").isEmpty())QSKIP("FFmpeg absent");
         p.output.format="mov";p.output.duration=3;p.output.fpsNum=2;std::atomic_bool cancel=false;
