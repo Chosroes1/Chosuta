@@ -3,6 +3,7 @@
 #include <QWidget>
 #include "core/model.h"
 #include "core/appearance.h"
+#include "core/performance.h"
 #include <memory>
 #include "render/waveform.h"
 class QPlainTextEdit;
@@ -16,9 +17,13 @@ namespace chosuta {
         void setZoom(double zoom);
         void setCursor(double time);
         void setReturnPosition(double time);
+        void setCursorSnap(const QString &mode){cursorSnap=mode;}
+        double snappedCursor(double seconds,bool bypass=false)const;
         QRectF rulerRect()const;
         QRectF mouthLaneRect()const;
         QRectF waveformLaneRect()const;
+        QRectF performanceLaneRect()const;
+        void setPerformanceLane(int height,bool visible);
         void setWaveform(std::shared_ptr<const Waveform> wave,const QString &status);
         void setWaveformHeight(int height);
         QRectF subtitleLaneRect(int row)const;
@@ -44,6 +49,8 @@ namespace chosuta {
         double timeAtX(double x)const;
         signals:
         void selectionChanged();
+        void performanceSelected(QString id,double start,double end);
+        void performanceEdited(QString id,double start,double end);
         void seek(double seconds);
         void edited(QVector<chosuta::Event> events);
         void subtitleSelected(QString track,QString cue,bool editText);
@@ -68,6 +75,13 @@ namespace chosuta {
         private:
         Project project;
         std::unique_ptr<AppearanceResolver> appearance;
+        std::unique_ptr<PerformanceResolver> performance;
+        QString performanceId,cursorSnap="off";
+        QVector<double> syllableEdges;
+        QVector<double> performanceMarks;
+        bool performanceVisible=true,performanceDrag=false,performanceManual=false;
+        int performanceHeight=56,performanceDragMode=0;
+        double performanceStart=0,performanceEnd=0,performanceOrigin=0,performanceOldStart=0,performanceOldEnd=0;
         QVector<Event>events,beforeDrag;
         QStringList selected;
         QString dragging;
@@ -91,7 +105,8 @@ namespace chosuta {
         QPlainTextEdit *editor=nullptr;
         QString editingTrack,editingCue;
         int waveHeight()const {return project.audioPath.isEmpty()?0:waveformHeight;}
-        int baseHeight()const {return RulerHeight+waveHeight()+mouthHeight;}
+        int performanceLaneHeight()const {return project.appearance.enabled&&performanceVisible?performanceHeight:0;}
+        int baseHeight()const {return RulerHeight+waveHeight()+mouthHeight+performanceLaneHeight();}
         QRectF mouthContentRect()const;
         int subtitleHeight(int row)const;
         int resizeHit(double y)const;

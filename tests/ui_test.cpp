@@ -4,6 +4,11 @@
 #include "core/executable.h"
 #include <QScopeGuard>
 using namespace chosuta;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+using DropPoint=QPointF;
+#else
+using DropPoint=QPoint;
+#endif
 static void writeWaveformFixture(const QString &path){
     QByteArray pcm;QDataStream data(&pcm,QIODevice::WriteOnly);data.setByteOrder(QDataStream::LittleEndian);
     for(int i=0;i<32000;++i){double local=std::fmod(i/16000.,.5);data<<qint16(local>=.05&&local<.45?(i%32<16?12000:-12000):0);}
@@ -21,9 +26,39 @@ class UiTest:public QObject {
     QTemporaryDir settings;
     private slots:
     void initTestCase(){QVERIFY(settings.isValid());QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());}
-    void init(){Preferences p;const auto language=qEnvironmentVariable("CHOSUTA_TEST_UI_LANGUAGE");if(!language.isEmpty())p.language=language;savePreferences(p);}
+    void init(){setDefaultFfmpegExecutable({});Preferences p;const auto language=qEnvironmentVariable("CHOSUTA_TEST_UI_LANGUAGE");if(!language.isEmpty())p.language=language;savePreferences(p);}
+    void mediaToolSettings() {
+        auto cleanup=qScopeGuard([]{setDefaultFfmpegExecutable({});});
+        Window window;window.show();window.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(window.currentProject().generated.size(),4);
+        QTemporaryDir dir;const auto first=dir.filePath("工具 one/ffmpeg"),other=dir.filePath("工程 two/ffmpeg");
+        auto open=[&](bool accept,bool projectOverride){
+            QTimer::singleShot(0,&window,[&]{
+                auto d=window.findChild<QDialog*>("exportSettingsDialog");QVERIFY(d);
+                d->findChild<QLineEdit*>("defaultFfmpegPath")->setText(first);
+                d->findChild<QCheckBox*>("overrideFfmpeg")->setChecked(projectOverride);
+                d->findChild<QLineEdit*>("projectFfmpegPath")->setText(other);
+                if(accept)d->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();else d->reject();
+            });
+            window.findChild<QAction*>("exportSettingsAction")->trigger();
+        };
+        open(false,true);QCOMPARE(defaultFfmpegExecutable(),QString());QCOMPARE(window.currentProject().output.ffmpeg,QString("ffmpeg"));
+        open(true,false);QCOMPARE(defaultFfmpegExecutable(),first);QCOMPARE(window.currentProject().output.ffmpeg,QString("ffmpeg"));
+        QCOMPARE(resolveExecutable(window.currentProject().output.ffmpeg),first);
+        open(true,true);QCOMPARE(resolveExecutable(window.currentProject().output.ffmpeg),other);
+        auto saved=dir.filePath("tools.chosuta");saveProject(window.currentProject(),saved);QCOMPARE(loadProject(saved).output.ffmpeg,other);
+        Window second;second.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(second.currentProject().generated.size(),4);
+        QCOMPARE(resolveExecutable(second.currentProject().output.ffmpeg),first);
+        // Async check tests the entered value without committing it and remains cancellable.
+        QTimer::singleShot(0,&window,[&]{
+            auto d=window.findChild<QDialog*>("exportSettingsDialog");QVERIFY(d);
+            auto report=d->findChild<QPlainTextEdit*>("mediaToolsReport");auto check=d->findChild<QPushButton*>("checkMediaTools");
+            check->click();QVERIFY(!check->isEnabled());QTRY_VERIFY_WITH_TIMEOUT(check->isEnabled(),5000);
+            QVERIFY(report->toPlainText().contains(other));QVERIFY(report->toPlainText().contains("no version information"));d->reject();
+        });window.findChild<QAction*>("exportSettingsAction")->trigger();
+        QCOMPARE(defaultFfmpegExecutable(),first);
+    }
     void preferencesAndTransport() {
-        QCOMPARE(loadPreferences().language,QString("auto"));QVERIFY(!loadPreferences().returnOnPause);
+        QCOMPARE(loadPreferences().language,QString("auto"));QVERIFY(!loadPreferences().returnOnStop);
         QCOMPARE(resolveUiLanguage("auto",{"ja-JP"}),QString("ja"));QCOMPARE(resolveUiLanguage("auto",{"zh-Hant-TW"}),QString("zh"));QCOMPARE(resolveUiLanguage("auto",{"de-DE"}),QString("en"));QCOMPARE(resolveUiLanguage("en",{"zh-CN"}),QString("en"));
         Window window;window.show();window.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(window.currentProject().generated.size(),4);
         auto position=window.findChild<QDoubleSpinBox*>("playPosition");auto apply=window.findChild<QPushButton*>("apply");apply->setFocus();
@@ -32,11 +67,30 @@ class UiTest:public QObject {
         QKeyEvent repeat(QEvent::KeyPress,Qt::Key_Space,Qt::NoModifier,QString(),true,2);QApplication::sendEvent(apply,&repeat);QTest::qWait(40);QCOMPARE(position->value(),paused);
         QTest::keyClick(apply,Qt::Key_Space);QTRY_VERIFY(position->value()>paused+.03);QTest::keyClick(apply,Qt::Key_Space);
         // Preferences are persisted, and changing language rebuilds a translated UI.
-        QTimer::singleShot(0,&window,[&]{auto dialog=window.findChild<QDialog*>("preferencesDialog");QVERIFY(dialog);dialog->findChild<QComboBox*>("uiLanguageChoice")->setCurrentIndex(1);dialog->findChild<QComboBox*>("pauseMode")->setCurrentIndex(1);dialog->findChild<QDoubleSpinBox*>("returnPosition")->setValue(.1);dialog->accept();});
-        window.findChild<QAction*>("preferencesAction")->trigger();QCOMPARE(loadPreferences().language,QString("zh"));QVERIFY(loadPreferences().returnOnPause);QCOMPARE(window.currentProject().playbackReturnPosition,.1);
-        position=window.findChild<QDoubleSpinBox*>("playPosition");apply=window.findChild<QPushButton*>("apply");position->setValue(.4);QTest::keyClick(apply,Qt::Key_Space);QTRY_VERIFY(position->value()>.43);QTest::keyClick(apply,Qt::Key_Space);QCOMPARE(position->value(),.1);
+        QTimer::singleShot(0,&window,[&]{auto dialog=window.findChild<QDialog*>("preferencesDialog");QVERIFY(dialog);dialog->findChild<QComboBox*>("uiLanguageChoice")->setCurrentIndex(1);QVERIFY(!dialog->findChild<QComboBox*>("pauseMode"));dialog->accept();});
+        window.findChild<QAction*>("preferencesAction")->trigger();QCOMPARE(loadPreferences().language,QString("zh"));auto returning=window.findChild<QAction *>("returnOnStopAction");QVERIFY(returning);returning->setChecked(true);QVERIFY(loadPreferences().returnOnStop);QVERIFY(window.findChild<QMenu *>("transportMenu"));
+        position=window.findChild<QDoubleSpinBox*>("playPosition");apply=window.findChild<QPushButton*>("apply");
+        auto play=window.findChild<QPushButton *>("play");auto transport=window.findChild<QAction *>("transportToggleAction");QVERIFY(play);QVERIFY(transport);
+        QVERIFY(!window.findChild<QPushButton *>("stop"));QVERIFY(!window.findChild<QAction *>("transportStopAction"));
+        // All three entry points share both return modes, including mixed start/stop inputs.
+        QVector<std::function<void()>> inputs={
+            [&]{QTest::keyClick(apply,Qt::Key_Space);},
+            [&]{QTest::mouseClick(play,Qt::LeftButton);},
+            [&]{transport->trigger();}
+        };
+        for(bool enabled:{false,true}){
+            returning->setChecked(enabled);QCOMPARE(loadPreferences().returnOnStop,enabled);
+            for(int i=0;i<inputs.size();++i){
+                position->setValue(.2);inputs[i]();QTRY_VERIFY(position->value()>.23);
+                position->setValue(.6);QTRY_VERIFY(position->value()>.63);
+                inputs[(i+1)%inputs.size()]();double stopped=position->value();
+                if(enabled)QCOMPARE(stopped,.2);else QVERIFY(stopped>=.63);
+                QTest::qWait(40);QCOMPARE(position->value(),stopped);
+            }
+        }
+        position->setValue(.4);
         // Space remains an ordinary character in editable lyric/path text fields.
-        QLineEdit text(&window);text.setFocus();QTest::keyClick(&text,Qt::Key_Space);QCOMPARE(text.text(),QString(" "));QCOMPARE(position->value(),.1);
+        QLineEdit text(&window);text.setFocus();QTest::keyClick(&text,Qt::Key_Space);QCOMPARE(text.text(),QString(" "));QCOMPARE(position->value(),.4);
     }
     void advancedDictionaryWorkflow() {
         QTemporaryDir dir;
@@ -268,81 +322,111 @@ class UiTest:public QObject {
         QCOMPARE(t->mouthLaneRect().height(),96.);QCOMPARE(loadPreferences().mouthLaneHeight,96);
         if(qEnvironmentVariableIsSet("CHOSUTA_WAVEFORM_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_WAVEFORM_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(w.grab().save(out.filePath("waveform-ui.png")));}
     }
-    void advancedMouthWorkflow(){
-        QTemporaryDir dir;auto p=mouthUiProject();QImage image(64,64,QImage::Format_RGBA8888);image.fill(Qt::red);const auto imagePath=dir.filePath("任意名字 $(literal).png");QVERIFY(image.save(imagePath));p.assets["A"]=p.assets["closed"]=imagePath;
-        if(!QStandardPaths::findExecutable("ffmpeg").isEmpty()){p.audioPath=dir.filePath("timing.wav");writeWaveformFixture(p.audioPath);std::atomic_bool cancel=false;const auto wave=readWaveform(p.audioPath,"ffmpeg",cancel);QVERIFY(wave.wave);p.audioContentHash=wave.wave->hash;p.timing=correctWaveform(p,*wave.wave,cancel).timing;QCOMPARE(p.timing.sources.size(),4);}
-        const auto source=dir.filePath("advanced.chosuta");saveProject(p,source);Window w;w.resize(1200,850);w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),4);
-        if(!p.audioPath.isEmpty())QTRY_VERIFY(w.findChild<QPushButton *>("correctWaveformTiming")->isEnabled());
-        const auto originalTiming=timingCorrectionJson(w.currentProject());const auto originalGenerated=w.currentProject().generated;
-        auto scopeHint=w.findChild<QLabel *>("rulesAdvancedScopeHint");QVERIFY(scopeHint);QVERIFY(scopeHint->wordWrap());
-        const auto uiLanguage=resolveUiLanguage(loadPreferences().language,QLocale::system().uiLanguages());
-        QVERIFY(scopeHint->text().contains(uiLanguage=="zh"?QString::fromUtf8("高级差分"):uiLanguage=="ja"?QString::fromUtf8("高度な差分"):QString("advanced variants")));
-        if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){w.findChild<QTabWidget *>()->setCurrentWidget(scopeHint->parentWidget());QTest::qWait(20);QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(w.grab().save(out.filePath("rules-main-ui.png")));}
-        QTimer::singleShot(0,&w,[&]{
-            auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});
-            auto enabled=dialog->findChild<QCheckBox *>("mouthEnabled");const auto language=resolveUiLanguage(loadPreferences().language,QLocale::system().uiLanguages());QCOMPARE(enabled->text(),language=="zh"?QString::fromUtf8("启用高级差分"):language=="ja"?QString::fromUtf8("高度な差分を有効化"):QString("Enable advanced variants"));QTest::mouseClick(enabled,Qt::LeftButton,Qt::NoModifier,QPoint(10,enabled->height()/2));
-            auto intervalOn=dialog->findChild<QCheckBox *>("mouthIntervalEnabled");auto intervalChoice=dialog->findChild<QComboBox *>("mouthIntervalChoice");auto direction=dialog->findChild<QComboBox *>("mouthDirectionChoice");
-            QTest::qWait(20);
-            for(const auto &name:QStringList{"Direction","Interval","Beat"}){
-                auto on=dialog->findChild<QCheckBox *>("mouth"+name+"Enabled");auto choice=dialog->findChild<QComboBox *>("mouth"+name+"Choice");
-                QCOMPARE(on->parentWidget(),choice->parentWidget());
-                const int gap=choice->x()-(on->x()+on->width());QVERIFY(gap>=0&&gap<=8);
-            }
-            auto groups=dialog->findChild<QWidget *>("mouthDirectionGroup");auto nextGroup=dialog->findChild<QWidget *>("mouthIntervalGroup");QVERIFY(nextGroup->x()-(groups->x()+groups->width())>=16);
-            auto settingsPages=dialog->findChild<QTabWidget *>("mouthSettingsPages");settingsPages->setCurrentIndex(2);QVERIFY(!dialog->findChild<QCheckBox *>("mouthSimpleSpecialFallback"));
-            auto unit=dialog->findChild<QComboBox *>("mouthIntervalUnit");auto step=dialog->findChild<QSpinBox *>("mouthStepMax");auto small=dialog->findChild<QSpinBox *>("mouthSmallMax");
-            auto degreeStep=dialog->findChild<QSpinBox *>("mouthStepDegree");auto degreeSmall=dialog->findChild<QSpinBox *>("mouthSmallDegree");
-            QCOMPARE(unit->currentData().toString(),QString("semitones"));unit->setFocus();QTest::keyClick(unit,Qt::Key_Down);
-            QCOMPARE(unit->currentData().toString(),QString("diatonic"));QVERIFY(degreeStep->isVisible());QVERIFY(!step->isVisible());QCOMPARE(degreeStep->value(),2);QCOMPARE(degreeSmall->value(),4);
-            degreeStep->setValue(5);QCOMPARE(degreeSmall->value(),6);QCOMPARE(degreeSmall->minimum(),6);degreeStep->setValue(15);degreeSmall->setValue(29);QCOMPARE(degreeSmall->value(),29);
-            degreeStep->setValue(2);degreeSmall->setValue(4);
-            auto mode=dialog->findChild<QComboBox *>("mouthDegreeMode");auto tonic=dialog->findChild<QComboBox *>("mouthDegreeTonic");
-            for(const auto &name:QStringList{"major","minor","dorian","phrygian","lydian","mixolydian","locrian","harmonic-minor","melodic-minor","harmonic-major","custom"})QVERIFY(mode->findData(name)>=0);
-            tonic->setCurrentIndex(tonic->findData("D"));mode->setCurrentIndex(mode->findData("dorian"));
-            dialog->findChild<QToolButton *>("mouthSpellingToggle")->click();auto spellings=dialog->findChild<QTableWidget *>("mouthSpellingTable");QCOMPARE(spellings->rowCount(),4);
-            spellings->item(0,4)->setText("C5");auto apply=dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply);QTest::mouseClick(apply,Qt::LeftButton);QVERIFY(dialog->isVisible());QVERIFY(!dialog->findChild<QLabel *>("mouthSettingsStatus")->text().isEmpty());
-            spellings->item(0,4)->setText("C4");spellings->item(2,4)->setText("f#4");
-            mode->setCurrentIndex(mode->findData("custom"));auto custom=dialog->findChild<QLineEdit *>("mouthCustomDegreeScale");custom->setText("0,2,4");QTest::mouseClick(apply,Qt::LeftButton);QVERIFY(dialog->isVisible());
-            custom->setFocus();custom->selectAll();QTest::keyClicks(custom,"0,1,3,5,7,8,10");QTest::keyClick(custom,Qt::Key_Tab);mode->setCurrentIndex(mode->findData("dorian"));
-            unit->setFocus();QTest::keyClick(unit,Qt::Key_Up);QCOMPARE(unit->currentData().toString(),QString("semitones"));QVERIFY(step->isVisible());QVERIFY(!degreeStep->isVisible());QCOMPARE(step->value(),2);QCOMPARE(small->value(),4);
-            step->setValue(3);small->setValue(5);QTest::keyClick(unit,Qt::Key_Down);QCOMPARE(degreeStep->value(),2);QCOMPARE(degreeSmall->value(),4);QTest::keyClick(unit,Qt::Key_Up);QCOMPARE(step->value(),3);QCOMPARE(small->value(),5);step->setValue(2);small->setValue(4);QTest::keyClick(unit,Qt::Key_Down);
-            QTest::qWait(20);QVERIFY(spellings->height()>=160);QVERIFY(dialog->findChild<QLabel *>("mouthSettingsStatus")->text().isEmpty());
-            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(dialog->grab().save(out.filePath("interval-settings-ui.png")));}
-            settingsPages->setCurrentIndex(0);
-            QCOMPARE(dialog->findChildren<QToolButton *>(QRegularExpression("mouthSlot[AIUEO]")).size(),5);
-            QVERIFY(intervalChoice->findData("repeat")<0);QVERIFY(direction->findData("repeat")>=0);
-            direction->setCurrentIndex(direction->findData("repeat"));QVERIFY(intervalOn->isChecked());QVERIFY(intervalChoice->isEnabled());QCOMPARE(intervalChoice->currentData().toString(),QString("step"));
-            QVERIFY(!direction->currentText().contains('/'));QVERIFY(dialog->findChild<QLabel *>("mouthSelectorHint")->text().contains(language=="zh"?QString::fromUtf8("同音反复"):language=="ja"?QString::fromUtf8("同音反復"):QString("repeated notes")));
-            intervalChoice->setCurrentIndex(intervalChoice->findData("any"));
-            auto repeatPath=dialog->findChild<QLineEdit *>("mouthImagePath");repeatPath->setText(imagePath);QTest::mouseClick(dialog->findChild<QPushButton *>("mouthAssignImage"),Qt::LeftButton);
-            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(dialog->grab().save(out.filePath("unison-selection-ui.png")));}
-            direction->setCurrentIndex(direction->findData("up"));QVERIFY(intervalChoice->isEnabled());QCOMPARE(intervalChoice->currentData().toString(),QString("any"));intervalChoice->setCurrentIndex(intervalChoice->findData("step"));
-            QTest::mouseClick(intervalOn,Qt::LeftButton,Qt::NoModifier,QPoint(10,intervalOn->height()/2));QVERIFY(!intervalChoice->isEnabled());QCOMPARE(intervalChoice->currentData().toString(),QString("any"));
-            auto path=dialog->findChild<QLineEdit *>("mouthImagePath");auto assign=dialog->findChild<QPushButton *>("mouthAssignImage");path->setText(imagePath);QTest::mouseClick(assign,Qt::LeftButton);QCOMPARE(path->text(),imagePath);
-            direction->setCurrentIndex(direction->findData("down"));QVERIFY(path->text().isEmpty());direction->setCurrentIndex(direction->findData("up"));QCOMPARE(path->text(),imagePath);
-            QTest::mouseClick(intervalOn,Qt::LeftButton,Qt::NoModifier,QPoint(10,intervalOn->height()/2));QCOMPARE(intervalChoice->currentData().toString(),QString("step"));QVERIFY(path->text().isEmpty());path->setText(imagePath);QTest::mouseClick(assign,Qt::LeftButton);
-            auto statePages=dialog->findChild<QTabWidget *>("mouthStatePages");QTest::mouseClick(statePages->tabBar(),Qt::LeftButton,Qt::NoModifier,statePages->tabBar()->tabRect(1).center());QVERIFY(dialog->findChild<QToolButton *>("mouthSlotclosed")->isVisible());
-            path->setText(imagePath);QTest::mouseClick(assign,Qt::LeftButton);QCOMPARE(direction->currentData().toString(),QString("up"));QCOMPARE(intervalChoice->currentData().toString(),QString("step"));
-            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QTest::qWait(20);QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(dialog->grab().save(out.filePath("advanced-special-ui.png")));statePages->setCurrentIndex(0);QVERIFY(dialog->grab().save(out.filePath("advanced-vowels-ui.png")));}
-            QTest::mouseClick(dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply),Qt::LeftButton);
-        });
-        w.findChild<QAction *>("advancedMouthAction")->trigger();QVERIFY(w.currentProject().appearance.enabled);
-        QCOMPARE(w.currentProject().appearance.intervalUnit,QString("diatonic"));QCOMPARE(w.currentProject().appearance.degreeMode,QString("dorian"));QCOMPARE(w.currentProject().appearance.degreeTonic,QString("D"));QCOMPARE(w.currentProject().appearance.noteSpellings.value(w.currentProject().score.tracks[0].notes[2].id),QString("F#4"));
-        QCOMPARE(w.currentProject().assets.value("A_strong_repeat_any"),imagePath);
-        QCOMPARE(w.currentProject().assets.value("A_strong_up_any"),imagePath);QCOMPARE(w.currentProject().assets.value("A_strong_up_step"),imagePath);QCOMPARE(w.currentProject().assets.value("closed_strong_up_step"),imagePath);
-        QCOMPARE(timingCorrectionJson(w.currentProject()),originalTiming);QCOMPARE(w.currentProject().generated.size(),originalGenerated.size());for(int i=0;i<originalGenerated.size();++i){QCOMPARE(w.currentProject().generated[i].start,originalGenerated[i].start);QCOMPARE(w.currentProject().generated[i].shape,originalGenerated[i].shape);}
-        auto timeline=w.findChild<Timeline *>("timeline");timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QVERIFY(!w.currentProject().appearance.enabled);QVERIFY(!w.currentProject().assets.contains("A_strong_up_step"));QCOMPARE(timingCorrectionJson(w.currentProject()),originalTiming);QTest::keySequence(timeline,QKeySequence::Redo);QVERIFY(w.currentProject().appearance.enabled);
-        auto checkbox=w.findChild<QCheckBox *>("advancedMouthEnabled");w.findChild<QTabWidget *>()->setCurrentWidget(checkbox->parentWidget());QTest::mouseClick(checkbox,Qt::LeftButton,Qt::NoModifier,QPoint(10,checkbox->height()/2));QVERIFY(!w.currentProject().appearance.enabled);QVERIFY(w.currentProject().assets.contains("A_strong_up_step"));QCOMPARE(timingCorrectionJson(w.currentProject()),originalTiming);
-        const auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);const auto loaded=loadProject(saved);QCOMPARE(loaded.appearance,w.currentProject().appearance);QCOMPARE(loaded.assets,w.currentProject().assets);
-        QTimer::singleShot(0,&w,[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});auto pages=dialog->findChild<QTabWidget *>("mouthSettingsPages");pages->setCurrentIndex(2);auto table=dialog->findChild<QTableWidget *>("mouthAccentTemplates");table->item(0,1)->setText("99");QTest::mouseClick(dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply),Qt::LeftButton);QVERIFY(dialog->isVisible());QVERIFY(!dialog->findChild<QLabel *>("mouthSettingsStatus")->text().isEmpty());dialog->reject();});
-        w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().appearance,loaded.appearance);
+    void acceptedSettingsAndStableLayout(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.appearance.enabled=true;p.performance.groups.append(VariantGroup{"power","Power"});p.performance.roles["emphasis"]="power";
+        PerformanceSegment manual;manual.id="protected";manual.anchor="seconds";manual.start=.1;manual.end=.3;manual.targets={"emphasis"};putPerformanceSegment(p,manual);
+        auto file=dir.filePath("settings.chosuta");saveProject(p,file);Window w;w.resize(1280,1000);w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().generated.size(),4);
+        auto edit=[&](double value){QTimer::singleShot(0,&w,[&,value]{auto d=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(d);d->findChild<QDoubleSpinBox *>("performancesupport")->setValue(value);d->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});w.findChild<QAction *>("advancedMouthAction")->trigger();};
+        edit(1.25);QTRY_VERIFY(w.centralWidget()->isEnabled());QVERIFY(performanceCurrent(w.currentProject()));QCOMPARE(w.currentProject().performance.settings.music.support,1.25);QCOMPARE(w.currentProject().performance.manual.size(),1);QVERIFY(!w.findChild<QWidget *>("performanceDraftBar")->isVisible());
+        auto timeline=w.findChild<Timeline *>("timeline");timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QCOMPARE(w.currentProject().performance.settings.music.support,1.);QVERIFY(w.currentProject().performance.generated.isEmpty());QTest::keySequence(timeline,QKeySequence::Redo);QVERIFY(performanceCurrent(w.currentProject()));
+        // A pending Apply can be cancelled without committing settings or results.
+        auto before=performanceJson(w.currentProject());edit(2.);w.findChild<QPushButton *>("cancelTask")->click();QTRY_VERIFY(w.centralWidget()->isEnabled());QCOMPARE(performanceJson(w.currentProject()),before);
+        auto h=w.findChild<QSplitter *>("workspaceSplitter"),v=w.findChild<QSplitter *>("timelineSplitter");h->setSizes({410,800});v->setSizes({610,290});QTest::qWait(20);auto hs=h->sizes(),vs=v->sizes();auto dimensions=w.size();
+        w.findChild<QPushButton *>("generatePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());QCOMPARE(h->sizes(),hs);QCOMPARE(v->sizes(),vs);QCOMPARE(w.size(),dimensions);
+        w.findChild<QPushButton *>("performanceReview2")->click();QTest::qWait(20);QCOMPARE(h->sizes(),hs);QCOMPARE(v->sizes(),vs);
+        // Automatic selections prefill their group instead of retaining a prior manual template.
+        w.findChild<QComboBox *>("performanceMode")->setCurrentIndex(3);
+        QTest::mouseClick(timeline,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(timeline->xAtTime(.6)),qRound(timeline->performanceLaneRect().center().y())));
+        QCOMPARE(w.findChild<QComboBox *>("performanceMode")->currentData().toString(),QString("hold"));
+        QCOMPARE(w.findChild<QComboBox *>("performanceTarget0")->currentData().toString(),"group:"+PerformanceResolver(w.currentProject()).groupAt(.6));
+        QVERIFY(w.findChild<QLabel *>("performanceEditHelp"));
+        QTest::qWait(30);auto rangeStart=w.findChild<QDoubleSpinBox *>("performanceStart");QVERIFY(rangeStart->height()>=rangeStart->minimumSizeHint().height());
+        if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");w.grab().save(out.filePath("manual-and-transport.png"));}
+    }
+    void cursorSnapping(){
+        auto p=mouthUiProject();p.score.time.tempos={{0,120},{2*Blick,60}};p.score.time.meters={{0,6,8},{1,3,4}};p.output.syncOffset=.1;p.regenerate();
+        Timeline t;t.resize(1000,300);t.setProject(p);t.show();QSignalSpy seeks(&t,&Timeline::seek);t.setCursorSnap("beat");
+        QCOMPARE(t.snappedCursor(.36),.35);QCOMPARE(t.snappedCursor(1.38),1.6);QCOMPARE(t.snappedCursor(2.7),3.1);QCOMPARE(t.snappedCursor(.36,true),.36);
+        auto point=QPoint(qRound(t.xAtTime(.38)),qRound(t.rulerRect().center().y()));QTest::mouseClick(&t,Qt::LeftButton,Qt::NoModifier,point);QCOMPARE(seeks.last()[0].toDouble(),.35);
+        QTest::mouseClick(&t,Qt::LeftButton,Qt::AltModifier,point);QVERIFY(std::abs(seeks.last()[0].toDouble()-.35)>.01);
+        t.setCursorSnap("syllable");PerformanceResolver resolver(p);auto spans=lyricSpans(p,p.score.tracks.front().id);QVERIFY(!spans.isEmpty());auto edge=resolver.mappedBlick(spans.front().end,p.score.tracks.front().id,true);QCOMPARE(t.snappedCursor(edge-.01),edge);
+        t.setCursorSnap("off");QCOMPARE(t.snappedCursor(.38),.38);
+        Window w;w.show();auto combo=w.findChild<QComboBox *>("cursorSnap");combo->setCurrentIndex(combo->findData("syllable"));QCOMPARE(loadPreferences().cursorSnap,QString("syllable"));
+    }
+    void arbitraryPngDropAndMapping(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.performance.groups.append(VariantGroup{"power","Power"});auto file=dir.filePath("drop.chosuta");saveProject(p,file);QImage image(48,48,QImage::Format_RGBA8888);image.fill(Qt::magenta);QString one=dir.filePath("任意名前 1.png"),two=dir.filePath("任意名前 2.png");QVERIFY(image.save(one));QVERIFY(image.save(two));Window w;w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().generated.size(),4);
+        auto drop=[](QWidget *target,const QStringList &paths){QMimeData mime;QList<QUrl> urls;for(const auto &path:paths)urls.append(QUrl::fromLocalFile(path));mime.setUrls(urls);QDragEnterEvent enter(DropPoint(10,10),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(target,&enter);if(!enter.isAccepted())return false;QDropEvent event({10,10},Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(target,&event);return event.isAccepted();};
+        QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{if(d->isVisible())d->reject();});auto slot=d->findChild<QToolButton *>("mouthSlotA");QVERIFY(drop(slot,{one}));QCOMPARE(d->findChild<QLineEdit *>("mouthImagePath")->text(),one);
+            auto table=d->findChild<QTableWidget *>("mouthImportTable");QVERIFY(drop(table->viewport(),{one,two}));QTRY_COMPARE(table->rowCount(),2);
+            for(int row=0;row<2;++row){auto group=qobject_cast<QComboBox *>(table->cellWidget(row,1));group->setCurrentIndex(group->findData("power"));auto mouth=qobject_cast<QComboBox *>(table->cellWidget(row,2));mouth->setCurrentIndex(mouth->findData("A"));}
+            d->findChild<QPushButton *>("mouthApplyImport")->click();QVERIFY(d->findChild<QLabel *>("mouthSettingsStatus")->text().contains(QString::fromUtf8("同一"))||d->findChild<QLabel *>("mouthSettingsStatus")->text().contains("same slot")||d->findChild<QLabel *>("mouthSettingsStatus")->text().contains(QString::fromUtf8("同じ")));
+            auto mouth=qobject_cast<QComboBox *>(table->cellWidget(1,2));mouth->setCurrentIndex(mouth->findData("O"));d->findChild<QPushButton *>("mouthApplyImport")->click();QVERIFY(w.currentProject().assets.isEmpty());
+            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");d->grab().save(out.filePath("mapped-import.png"));}
+            d->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().assets.value("power/A"),one);QCOMPARE(w.currentProject().assets.value("power/O"),two);QCOMPARE(w.currentProject().assets.value("A"),one);
+        auto timeline=w.findChild<Timeline *>("timeline");timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QVERIFY(w.currentProject().assets.isEmpty());
+        // Main-window drops route to the same review; cancellation leaves the project alone.
+        QVERIFY(drop(&w,{one}));QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(d);d->reject();});QTest::qWait(50);QVERIFY(w.currentProject().assets.isEmpty());
+        // Dropping a project observes the same unsaved-edit confirmation as File/Open.
+        w.findChild<QCheckBox *>("advancedMouthEnabled")->setChecked(true);auto originalScore=w.currentProject().score.raw;
+        auto svp=QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp";QVERIFY(drop(&w,{svp}));
+        QTimer::singleShot(0,&w,[&]{auto question=qobject_cast<QMessageBox *>(QApplication::activeModalWidget());QVERIFY(question);question->button(QMessageBox::Cancel)->click();});QTest::qWait(50);QCOMPARE(w.currentProject().score.raw,originalScore);QVERIFY(w.currentProject().appearance.enabled);
+        Window opened;opened.show();QVERIFY(drop(&opened,{svp}));QTRY_COMPARE(opened.currentProject().generated.size(),4);QCOMPARE(opened.findChild<QDoubleSpinBox *>("playPosition")->value(),0.);
+        QMimeData remote;remote.setUrls({QUrl("https://example.invalid/image.png")});QDragEnterEvent rejected(DropPoint(10,10),Qt::CopyAction,&remote,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(&w,&rejected);QVERIFY(!rejected.isAccepted());
+    }
+    void performanceTemplateEditing(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.appearance.enabled=true;p.performance.groups.append(VariantGroup{"power","Power"});p.performance.roles["emphasis"]="power";
+        PerformanceSegment m;m.id="arch";m.anchor="seconds";m.start=0;m.end=2;m.mode="arch";m.targets={"normal","emphasis","normal"};m.cuts={.35,.7};putPerformanceSegment(p,m);auto before=PerformanceResolver(p);auto file=dir.filePath("template.chosuta");saveProject(p,file);Window w;w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().performance.manual.size(),1);auto timeline=w.findChild<Timeline *>("timeline");
+        auto select=[&]{QTest::mouseClick(timeline,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(timeline->xAtTime(.2)),qRound(timeline->performanceLaneRect().center().y())));};select();w.findChild<QDoubleSpinBox *>("playPosition")->setValue(1);w.findChild<QPushButton *>("splitPerformance")->click();QCOMPARE(w.currentProject().performance.manual.size(),2);
+        select();w.findChild<QPushButton *>("mergePerformance")->click();QCOMPARE(w.currentProject().performance.manual.size(),1);QCOMPARE(w.currentProject().performance.manual[0].mode,QString("custom"));auto merged=PerformanceResolver(w.currentProject());for(int i=0;i<200;++i)QCOMPARE(merged.groupAt(i*.01),before.groupAt(i*.01));
+        select();w.findChild<QPushButton *>("restorePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());QCOMPARE(w.currentProject().performance.manual.size(),1);w.findChild<QPushButton *>("performanceReview2")->click();QVERIFY(w.currentProject().performance.manual.isEmpty());QVERIFY(!w.currentProject().performance.generated.isEmpty());
+    }
+    void performanceV2Controls(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.appearance.enabled=true;auto file=dir.filePath("controls.chosuta");saveProject(p,file);Window w;w.resize(1200,900);w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().generated.size(),4);
+        QTimer::singleShot(0,&w,[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(1);
+            auto state=dialog->findChild<QComboBox *>("tonalityState"),tonic=dialog->findChild<QComboBox *>("tonalityTonic"),mode=dialog->findChild<QComboBox *>("tonalityMode");state->setCurrentIndex(state->findData("specified"));tonic->setCurrentIndex(tonic->findData("Bb"));mode->setCurrentIndex(mode->findData("minor"));
+            auto basis=dialog->findChild<QComboBox *>("performanceTimeBasis");auto support=dialog->findChild<QDoubleSpinBox *>("performancesupport");QCOMPARE(support->value(),1.);basis->setCurrentIndex(1);QCOMPARE(support->value(),.5);support->setValue(.8);basis->setCurrentIndex(0);QCOMPARE(support->value(),1.);support->setValue(1.25);basis->setCurrentIndex(1);QCOMPARE(support->value(),.8);
+            auto unit=dialog->findChild<QComboBox *>("mouthIntervalUnit");auto leap=dialog->findChild<QSpinBox *>("performanceleapDistance");QCOMPARE(leap->value(),5);unit->setCurrentIndex(1);QCOMPARE(leap->value(),4);leap->setValue(5);unit->setCurrentIndex(0);QCOMPARE(leap->value(),5);
+            dialog->findChild<QPushButton *>("addPerformanceRule")->click();auto rules=dialog->findChild<QTableWidget *>("performanceRules");rules->item(0,3)->setText("7");unit->setCurrentIndex(1);QCOMPARE(rules->item(0,3)->text(),QString("4"));rules->item(0,3)->setText("6");unit->setCurrentIndex(0);QCOMPARE(rules->item(0,3)->text(),QString("7"));basis->setCurrentIndex(0);
+            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");QVERIFY(dialog->grab().save(out.filePath("v2-controls.png")));}
+            dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});
+        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_VERIFY(w.centralWidget()->isEnabled());auto &a=w.currentProject().appearance;QCOMPARE(a.degreeTonic,QString("Bb"));QCOMPARE(a.degreeMode,QString("minor"));auto settings=w.currentProject().performance.settings;QCOMPARE(settings.music.support,1.25);QCOMPARE(settings.seconds.support,.8);QCOMPARE(settings.leapDegrees,5);QCOMPARE(settings.rules[0].threshold,7.);QCOMPARE(settings.rules[0].thresholdDegrees,6.);
+        auto display=w.findChild<QComboBox *>("performanceTimeDisplay");auto start=w.findChild<QDoubleSpinBox *>("performanceStart"),end=w.findChild<QDoubleSpinBox *>("performanceEnd");start->setValue(.5);end->setValue(1.5);display->setCurrentIndex(1);QCOMPARE(start->value(),.5);QCOMPARE(end->value(),1.5);
+        auto text=w.findChild<QLineEdit *>("performanceEndMusic");QTest::keyClick(text,Qt::Key_A,Qt::ControlModifier);QTest::keyClicks(text,"1:3:0");w.findChild<QPushButton *>("applyPerformance")->click();QCOMPARE(w.currentProject().performance.manual.size(),1);QCOMPARE(w.currentProject().performance.manual[0].start,.5);QCOMPARE(w.currentProject().performance.manual[0].end,1.);display->setCurrentIndex(0);QCOMPARE(end->value(),1.);
+        QTimer::singleShot(0,&w,[&]{auto dialog=qobject_cast<QDialog *>(QApplication::activeModalWidget());QVERIFY(dialog);auto state=dialog->findChild<QComboBox *>("tonalityState");state->setCurrentIndex(state->findData("disabled"));dialog->accept();});w.findChild<QPushButton *>("performanceTonality")->click();QCOMPARE(w.currentProject().performance.tonalities.size(),1);QVERIFY(w.currentProject().performance.tonalities[0].key.isEmpty());
+        auto boundary=w.findChild<QComboBox *>("performanceBoundaryMode");boundary->setCurrentIndex(boundary->findData("section-break"));w.findChild<QPushButton *>("applyPerformanceBoundary")->click();QCOMPARE(w.currentProject().performance.boundaries.size(),1);QCOMPARE(w.currentProject().performance.boundaries[0].mode,QString("section-break"));
+        auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);auto reopened=loadProject(saved);QCOMPARE(reopened.performance.settings,settings);QCOMPARE(reopened.appearance.degreeTonic,QString("Bb"));
+    }
+    void performanceWorkflow(){
+        QTemporaryDir dir;auto p=mouthUiProject();const auto source=dir.filePath("performance.chosuta");saveProject(p,source);Window w;w.resize(1200,850);w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),4);
+        auto timing=timingCorrectionJson(w.currentProject());
+        QTimer::singleShot(0,&w,[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QCheckBox *>("mouthEnabled")->setChecked(true);
+            QTimer::singleShot(0,dialog,[&]{auto prompt=dialog->findChild<QInputDialog *>();QVERIFY(prompt);prompt->setTextValue("Power");prompt->accept();});dialog->findChild<QPushButton *>("addVariantGroup")->click();QCOMPARE(dialog->findChild<QListWidget *>("variantGroups")->count(),2);
+            auto role=dialog->findChild<QComboBox *>("performanceRoleemphasis");role->setCurrentIndex(1);
+            auto tabs=dialog->findChild<QTabWidget *>("mouthSettingsPages");tabs->setCurrentIndex(1);dialog->findChild<QComboBox *>("tonalityState")->setCurrentIndex(1);auto tonic=dialog->findChild<QComboBox *>("tonalityTonic");tonic->setCurrentIndex(tonic->findData("D"));auto mode=dialog->findChild<QComboBox *>("tonalityMode");mode->setCurrentIndex(mode->findData("dorian"));dialog->findChild<QCheckBox *>("performanceSaveDefaults")->setChecked(true);
+            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");dialog->grab().save(out.filePath("performance-rules.png"));tabs->setCurrentIndex(0);dialog->grab().save(out.filePath("variant-groups.png"));}
+            dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});
+        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_VERIFY(w.currentProject().appearance.enabled);QCOMPARE(w.currentProject().appearance.degreeMode,QString("dorian"));QCOMPARE(w.currentProject().performance.groups.size(),2);QCOMPARE(timingCorrectionJson(w.currentProject()),timing);
+        auto timeline=w.findChild<Timeline *>("timeline");QCOMPARE(timeline->performanceLaneRect().height(),56.);auto generated=w.currentProject().generated.size();
+        w.findChild<QPushButton *>("generatePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());QVERIFY(!w.currentProject().performance.generated.isEmpty());
+        w.findChild<QPushButton *>("performanceReview0")->click();w.findChild<QPushButton *>("performanceReview1")->click();w.findChild<QPushButton *>("performanceReview3")->click();QVERIFY(!w.currentProject().performance.generated.isEmpty());
+        w.findChild<QPushButton *>("generatePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());w.findChild<QPushButton *>("performanceReview2")->click();QVERIFY(!w.currentProject().performance.generated.isEmpty());QVERIFY(performanceCurrent(w.currentProject()));QCOMPARE(w.currentProject().generated.size(),generated);QCOMPARE(timingCorrectionJson(w.currentProject()),timing);
+        w.findChild<QDoubleSpinBox *>("performanceStart")->setValue(.1);w.findChild<QDoubleSpinBox *>("performanceEnd")->setValue(1.8);w.findChild<QComboBox *>("performanceMode")->setCurrentIndex(3);w.findChild<QPushButton *>("applyPerformance")->click();QCOMPARE(w.currentProject().performance.manual.size(),1);auto before=performanceJson(w.currentProject());
+        // Protected manual segments survive explicit generation and one-step undo.
+        w.findChild<QPushButton *>("generatePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());w.findChild<QPushButton *>("performanceReview2")->click();QCOMPARE(w.currentProject().performance.manual.size(),1);
+        // Restoring automatic is also a draft; cancellation retains the manual layer.
+        w.findChild<QPushButton *>("restorePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());QCOMPARE(w.currentProject().performance.manual.size(),1);w.findChild<QPushButton *>("performanceReview3")->click();QCOMPARE(w.currentProject().performance.manual.size(),1);
+        auto saved=dir.filePath("edited.chosuta");saveProject(w.currentProject(),saved);QCOMPARE(performanceJson(loadProject(saved)),performanceJson(w.currentProject()));
+        const double position=w.findChild<QDoubleSpinBox *>("playPosition")->value();QTest::mouseClick(timeline,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(timeline->xAtTime(.2)),qRound(timeline->performanceLaneRect().center().y())));QCOMPARE(w.findChild<QDoubleSpinBox *>("playPosition")->value(),position);
+        w.findChild<QPushButton *>("deletePerformance")->click();QCOMPARE(w.currentProject().performance.manual.size(),0);timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QCOMPARE(w.currentProject().performance.manual.size(),1);
+        if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));w.grab().save(out.filePath("performance-workspace.png"));}
+        auto advanced=w.findChild<QCheckBox *>("advancedMouthEnabled");advanced->setChecked(false);QCOMPARE(timeline->performanceLaneRect().height(),0.);QCOMPARE(w.currentProject().performance.manual.size(),1);advanced->setChecked(true);QCOMPARE(timeline->performanceLaneRect().height(),56.);
     }
     void consonantRuleWorkflow(){
         QTemporaryDir dir;auto p=mouthUiProject(true);auto edited=p.generated[0];edited.shape="O";p.edit(edited);
         if(!QStandardPaths::findExecutable("ffmpeg").isEmpty()){p.audioPath=dir.filePath("timing.wav");writeWaveformFixture(p.audioPath);std::atomic_bool cancel=false;const auto wave=readWaveform(p.audioPath,"ffmpeg",cancel);QVERIFY(wave.wave);p.audioContentHash=wave.wave->hash;p.timing=correctWaveform(p,*wave.wave,cancel).timing;QCOMPARE(p.timing.sources.size(),3);}
         const auto source=dir.filePath("consonants.chosuta");saveProject(p,source);Window w;w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),5);if(!p.audioPath.isEmpty())QTRY_VERIFY(w.findChild<QPushButton *>("correctWaveformTiming")->isEnabled());
         QTimer::singleShot(0,&w,[&]{
-            auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(1);auto editor=dialog->findChild<QWidget *>("consonantEditor");QVERIFY(editor->isHidden());QTest::mouseClick(dialog->findChild<QToolButton *>("consonantCustomize"),Qt::LeftButton);QVERIFY(editor->isVisible());
+            auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(2);auto editor=dialog->findChild<QWidget *>("consonantEditor");QVERIFY(editor->isHidden());QTest::mouseClick(dialog->findChild<QToolButton *>("consonantCustomize"),Qt::LeftButton);QVERIFY(editor->isVisible());
             QVERIFY(!dialog->findChild<QComboBox *>("consonantPreset"));
             auto language=dialog->findChild<QComboBox *>("consonantLanguage");language->setCurrentIndex(language->findData("ja"));auto table=dialog->findChild<QTableWidget *>("consonantTable");
             auto rowFor=[&](const QString &phone){for(int i=0;i<table->rowCount();++i)if(table->item(i,0)->text()==phone)return i;return -1;};
@@ -353,25 +437,18 @@ class UiTest:public QObject {
         });
         w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_COMPARE(w.currentProject().rules.consonants.overrides.value("ja:romaji:d"),QString("closed"));QCOMPARE(w.currentProject().generated[0].shape,QString("closed"));QVERIFY(w.currentProject().timing.sources.isEmpty());QCOMPARE(w.currentProject().overrides[edited.id].event.shape,QString("O"));QCOMPARE(shapeAt(w.currentProject(),w.currentProject().effective(),.02),QString("O"));
         const auto current=w.currentProject().rules.consonants;
-        QTimer::singleShot(0,&w,[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(1);QTest::mouseClick(dialog->findChild<QToolButton *>("consonantCustomize"),Qt::LeftButton);QTest::mouseClick(dialog->findChild<QPushButton *>("consonantResetAll"),Qt::LeftButton);dialog->reject();});w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().rules.consonants,current);
+        QTimer::singleShot(0,&w,[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(2);QTest::mouseClick(dialog->findChild<QToolButton *>("consonantCustomize"),Qt::LeftButton);QTest::mouseClick(dialog->findChild<QPushButton *>("consonantResetAll"),Qt::LeftButton);dialog->reject();});w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().rules.consonants,current);
         const auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);QCOMPARE(loadProject(saved).rules.consonants,current);
         auto timeline=w.findChild<Timeline *>("timeline");timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QVERIFY(w.currentProject().rules.consonants.overrides.isEmpty());QCOMPARE(w.currentProject().generated[0].shape,QString("A"));QCOMPARE(w.currentProject().timing.sources.size(),p.timing.sources.size());
     }
     void mouthFolderImportWorkflow(){
-        QTemporaryDir dir;auto p=mouthUiProject();QImage image(128,128,QImage::Format_RGBA8888);image.fill(Qt::green);const auto original=dir.filePath("original.png");QVERIFY(image.save(original));p.assets={{"A",original},{"O",original},{"closed",original}};
-        QDir folder(dir.filePath("PNG 中文 $(literal)"));QVERIFY(folder.mkpath("child"));for(const auto &name:QStringList{"A.png","A_any_any_any.png","O.png","a_Strong_UP_Step.PnG","closed_any_up_any.png","unknown-name.png"})QVERIFY(image.save(folder.filePath(name)));QVERIFY(image.save(folder.filePath("child/I.png")));QFile bad(folder.filePath("I_weak_down_large.png"));QVERIFY(bad.open(QIODevice::WriteOnly));bad.write("bad PNG");bad.close();
-        const auto source=dir.filePath("folder.chosuta");saveProject(p,source);Window w;w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),4);
-        bool commit=false;
-        auto editFolder=[&]{
-            auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(3);dialog->findChild<QLineEdit *>("mouthImportDirectory")->setText(folder.path());QTest::mouseClick(dialog->findChild<QPushButton *>("mouthScanDirectory"),Qt::LeftButton);auto table=dialog->findChild<QTableWidget *>("mouthImportTable");QTRY_COMPARE(table->rowCount(),7);
-            int enabled=0;for(int row=0;row<table->rowCount();++row){auto item=table->item(row,0);if(item->flags().testFlag(Qt::ItemIsUserCheckable)){++enabled;if(item->data(Qt::UserRole).toString()=="O"){QCOMPARE(item->checkState(),Qt::Unchecked);item->setCheckState(Qt::Checked);}else QCOMPARE(item->checkState(),Qt::Checked);}}
-            QCOMPARE(enabled,3);QTest::mouseClick(dialog->findChild<QPushButton *>("mouthApplyDirectory"),Qt::LeftButton);QCOMPARE(w.currentProject().assets,p.assets);
-            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QTest::qWait(20);QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(dialog->grab().save(out.filePath("folder-import-ui.png")));}
-            if(commit)QTest::mouseClick(dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply),Qt::LeftButton);else dialog->reject();
-        };
-        QTimer::singleShot(0,&w,editFolder);w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().assets,p.assets);
-        commit=true;QTimer::singleShot(0,&w,editFolder);w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().assets.value("A"),original);QCOMPARE(w.currentProject().assets.value("O"),folder.filePath("O.png"));QCOMPARE(w.currentProject().assets.value("A_strong_up_step"),folder.filePath("a_Strong_UP_Step.PnG"));QCOMPARE(w.currentProject().assets.value("closed_any_up_any"),folder.filePath("closed_any_up_any.png"));QCOMPARE(w.currentProject().assets.size(),5);
-        auto timeline=w.findChild<Timeline *>("timeline");timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QCOMPARE(w.currentProject().assets,p.assets);
+        QTemporaryDir dir;auto p=mouthUiProject();QImage image(64,64,QImage::Format_RGBA8888);image.fill(Qt::cyan);QDir folder(dir.filePath("PNG 中文 $(literal)"));QVERIFY(folder.mkpath("Power"));QVERIFY(folder.mkpath("Soft"));QVERIFY(image.save(folder.filePath("Power/A.png")));QVERIFY(image.save(folder.filePath("Soft/O.png")));
+        const auto source=dir.filePath("folder.chosuta");saveProject(p,source);Window w;w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),4);bool commit=false;
+        auto editFolder=[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(3);dialog->findChild<QLineEdit *>("mouthImportFolder")->setText(folder.path());dialog->findChild<QPushButton *>("mouthScanFolder")->click();auto table=dialog->findChild<QTableWidget *>("mouthImportTable");QTRY_COMPARE(table->rowCount(),2);dialog->findChild<QPushButton *>("mouthApplyImport")->click();QCOMPARE(w.currentProject().assets,p.assets);
+            if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");dialog->grab().save(out.filePath("group-import.png"));}
+            if(commit)dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();else dialog->reject();};
+        QTimer::singleShot(0,&w,editFolder);w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().performance.groups.size(),1);
+        commit=true;QTimer::singleShot(0,&w,editFolder);w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().performance.groups.size(),3);QCOMPARE(w.currentProject().assets.size(),2);auto timeline=w.findChild<Timeline *>("timeline");timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QCOMPARE(w.currentProject().assets,p.assets);
     }
     void editWorkflow() {
         Window window;

@@ -69,23 +69,6 @@ namespace chosuta {
         choice->addItem("日本語","ja");
         choice->setCurrentIndex(choice->findData(preferences.language));
         form->addRow(trText("Interface language"),choice);
-        auto mode=new QComboBox;
-        mode->setObjectName("pauseMode");
-        mode->addItem(trText("Resume from pause"),false);
-        mode->addItem(trText("Return to marker"),true);
-        mode->setCurrentIndex(preferences.returnOnPause?1:0);
-        form->addRow(trText("Pause behavior"),mode);
-        auto marker=new QDoubleSpinBox;
-        marker->setObjectName("returnPosition");
-        marker->setRange(0,21600);
-        marker->setDecimals(3);
-        marker->setValue(project.playbackReturnPosition);
-        form->addRow(trText("Return position (seconds)"),marker);
-        auto here=new QPushButton(trText("Set return point"));
-        form->addRow(here);
-        connect(here,&QPushButton::clicked,&dialog,[=,this] {
-            marker->setValue(playTime);
-        });
         auto buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
         form->addRow(buttons);
         connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);
@@ -93,7 +76,6 @@ namespace chosuta {
         if(dialog.exec()!=QDialog::Accepted)return;
         Preferences next=preferences;
         next.language=choice->currentData().toString();
-        next.returnOnPause=mode->currentData().toBool();
         try {
             savePreferences(next);
         }catch(const Failure&e) {
@@ -101,9 +83,6 @@ namespace chosuta {
             return;
         }
         preferences=next;
-        if(project.playbackReturnPosition!=marker->value())change(trText("Set return point"),[value=marker->value()](Project&p) {
-            p.playbackReturnPosition=value;
-        });
         auto resolved=resolveUiLanguage(preferences.language,QLocale::system().uiLanguages());
         if(resolved!=uiLanguage) {
             const int tab=tabs->currentIndex();

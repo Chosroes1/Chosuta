@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
 #include "core/appearance.h"
+#include "core/performance.h"
+#include "core/performance_analysis.h"
 #include "render/render.h"
 #include "render/waveform.h"
+#include "render/audio.h"
 #include <QGuiApplication>
 #include <csignal>
 #include <iostream>
@@ -41,10 +44,11 @@ int main(int argc,char**argv) {
     option("custom-dictionary","Chosuta custom pronunciation settings JSON","path");
     parser.addOption({"japanese-kanji","Enable optional estimated Japanese kanji readings"});
     parser.addOption({"no-japanese-kanji","Disable optional Japanese kanji readings"});
-    option("assets","Scan one PNG directory using basic or SHAPE_BEAT_DIRECTION_INTERVAL names; --force permits replacing mappings","directory");
+    option("assets","Scan basic mouth PNGs; --force permits replacing mappings","directory");
+    option("variant-assets","Import direct subfolders as variant groups; basic names in each group","directory");
     parser.addOption({"advanced-mouth","Enable score-driven advanced images"});
     parser.addOption({"simple-mouth","Use simple images (retain advanced settings)"});
-    option("mouth-directions","on | off","switch");option("mouth-intervals","on | off","switch");option("mouth-beats","on | off","switch");
+    option("key","Optional tonic and mode, e.g. C maj or D Dorian","key");option("performance-json","Replace performance settings/groups/segments from JSON","file");option("generate-performance","Generate and apply automatic performance",{});option("performance-info","Print performance JSON",{});option("performance-analysis","Save score analysis diagnostics to JSON","file");
     option("consonant-settings","Consonant settings JSON; regenerate using its overrides","path");
     option("size","WIDTHxHEIGHT","resolution");
     option("fps","Integer or NUM/DEN","rate");
@@ -70,10 +74,19 @@ int main(int argc,char**argv) {
     parser.addOption( {
         "force","Explicitly permit replacing an existing output"
     });
+    parser.addOption({"check-media-tools","Check FFmpeg/ffprobe startup and current export capabilities; JSON output"});
     parser.process(app);
     std::signal(SIGINT,cancelSignal);
     std::signal(SIGTERM,cancelSignal);
     try {
+        if(parser.isSet("check-media-tools")){
+            const auto info=inspectMediaTools(parser.isSet("ffmpeg")?parser.value("ffmpeg"):QString("ffmpeg"),cancelled);
+            QJsonObject result{{"ready",info.ready()},{"ffmpeg",info.ffmpeg},{"ffprobe",info.ffprobe},
+                {"ffmpegVersion",info.ffmpegVersion},{"ffprobeVersion",info.ffprobeVersion},
+                {"errors",QJsonArray::fromStringList(info.errors)},{"missingEncoders",QJsonArray::fromStringList(info.missingEncoders)},
+                {"missingFilters",QJsonArray::fromStringList(info.missingFilters)},{"cancelled",info.cancelled}};
+            std::cout<<QJsonDocument(result).toJson().toStdString();return info.cancelled?130:info.ready()?0:1;
+        }
         auto args=parser.positionalArguments();
         if(args.size()<2)parser.showHelp(1);
         QString command=args[0],input=args[1];
@@ -181,8 +194,8 @@ int main(int argc,char**argv) {
         if(parser.isSet("advanced-mouth")&&parser.isSet("simple-mouth"))throw Failure("Conflicting mouth modes");
         if(parser.isSet("advanced-mouth"))p.appearance.enabled=true;
         if(parser.isSet("simple-mouth"))p.appearance.enabled=false;
-        auto mouthFlag=[&](const char *key,bool &value){if(!parser.isSet(key))return;const auto text=parser.value(key);if(text!="on"&&text!="off")throw Failure("Mouth switch must be on or off");value=text=="on";};
-        mouthFlag("mouth-directions",p.appearance.direction);mouthFlag("mouth-intervals",p.appearance.interval);mouthFlag("mouth-beats",p.appearance.beat);
+        if(parser.isSet("key")){auto key=parseTonality(parser.value("key"));if(!key)throw Failure("Invalid key");p.appearance.tonalityEnabled=true;p.appearance.degreeTonic=key->first;p.appearance.degreeMode=key->second;}
+        if(parser.isSet("performance-json")){QFile f(parser.value("performance-json"));if(!f.open(QIODevice::ReadOnly)||f.size()>64*1024*1024)throw Failure("Cannot read performance JSON");readPerformance(p,checkedJson(f.readAll()).object());}
         if(parser.isSet("consonant-settings")){QFile file(parser.value("consonant-settings"));if(!file.open(QIODevice::ReadOnly)||file.size()>65536)throw Failure("Cannot read consonant settings (limit 64 KiB)");p.rules.consonants=readConsonants(checkedJson(file.readAll()).object());}
         if(parser.isSet("dictionary"))p.rules.englishDictionary=QFileInfo(parser.value("dictionary")).absoluteFilePath();
         if(parser.isSet("custom-dictionary")) {
@@ -263,6 +276,7 @@ int main(int argc,char**argv) {
                 else std::cerr<<(entry.status+": skipped "+entry.path).toStdString()<<"\n";
             }
         }
+        if(parser.isSet("variant-assets")){auto plan=scanVariantDirectory(parser.value("variant-assets"),p,"base",&cancelled);if(plan.cancelled)return 130;if(!plan.error.isEmpty())throw Failure(plan.error);for(auto e:plan.entries){if(e.status=="invalid"||e.status=="conflict")throw Failure(e.status+": "+e.path);if(e.status=="new"||(e.status=="replace"&&parser.isSet("force")))p.assets[e.id]=e.path;else std::cerr<<(e.status+": skipped "+e.path).toStdString()<<"\n";}for(auto g:plan.groups)p.performance.groups.append(g);validatePerformance(p);}
         auto integer=[&](QString name,int &value){if(parser.isSet(name)){bool ok=false;const int n=parser.value(name).toInt(&ok);if(!ok)throw Failure("Invalid "+name);value=n;}};
         auto real=[&](QString name,double &value){if(parser.isSet(name)){bool ok=false;const double n=parser.value(name).toDouble(&ok);if(!ok||!std::isfinite(n))throw Failure("Invalid "+name);value=n;}};
         if(parser.isSet("size")) {
@@ -309,6 +323,9 @@ int main(int argc,char**argv) {
             std::cout<<result.accepted<<" corrected score sources; "<<result.protectedSources<<" protected, "<<result.unclear<<" unclear, "<<result.conflicts<<" conflicting\n";
         }
         if(command=="revert"){p.timing.sources.clear();p.timing.enabled=false;}
+        if(parser.isSet("generate-performance")){auto draft=generatePerformance(p,&cancelled);if(draft.cancelled)return 130;if(!draft.error.isEmpty())throw Failure(draft.error);applyPerformanceDraft(p,draft);}
+        if(parser.isSet("performance-analysis")){auto path=parser.value("performance-analysis");if(QFileInfo::exists(path)&&!parser.isSet("force"))throw Failure("Analysis output exists; choose another path or --force");auto data=QJsonDocument(performanceAnalysisJson(p,&cancelled)).toJson();QSaveFile f(path);if(!f.open(QIODevice::WriteOnly)||f.write(data)!=data.size()||!f.commit())throw Failure("Cannot save performance analysis");}
+        if(parser.isSet("performance-info"))QTextStream(stdout)<<QJsonDocument(performanceJson(p)).toJson();
         if(command=="generate"||command=="correct"||command=="revert") {
             if(QFileInfo::exists(args[2])&&!parser.isSet("force"))throw Failure("Output exists; use --force");
             saveProject(p,args[2]);

@@ -8,6 +8,8 @@ param(
     [ValidateSet('MSVC', 'MinGW')][string]$Toolchain = 'MSVC',
     [string]$IcuRuntimeDir = '',
     [string]$FfmpegDir = '',
+    [switch]$BothVariants,
+    [switch]$CreateZip,
     [string]$BuildDir = 'build-windows',
     [string]$StageDir = 'out/windows/Chosuta',
     [ValidateRange(1, 64)][int]$Jobs = 4
@@ -117,10 +119,16 @@ $IcuDlls = @(Get-ChildItem -LiteralPath $IcuRuntimeDir -Filter '*.dll' -File | W
 foreach ($Pattern in @('^(lib)?icuuc', '^(lib)?icu(in|i18n)', '^(lib)?icu(dt|data)')) {
     if (@($IcuDlls | Where-Object { $_.Name -match $Pattern }).Count -eq 0) { throw "ICU DLL component missing ($Pattern) in $IcuRuntimeDir." }
 }
-if (Test-Path -LiteralPath $StageDir) {
-    if (-not (Test-Path -LiteralPath $StageDir -PathType Container) -or @(Get-ChildItem -LiteralPath $StageDir -Force).Count -gt 0) {
-        throw "StageDir must be empty: $StageDir. Choose a new -StageDir; existing files will not be deleted."
+if ($BothVariants -and -not $FfmpegDir) { throw '-BothVariants requires -FfmpegDir (existing BtbN GPL shared bin directory).' }
+$Stages = @([pscustomobject]@{ Path = $StageDir; Bundled = [bool]$FfmpegDir })
+if ($BothVariants) { $Stages += [pscustomobject]@{ Path = "${StageDir}-no-ffmpeg"; Bundled = $false } }
+foreach ($Stage in $Stages) {
+    if (Test-Path -LiteralPath $Stage.Path) {
+        if (-not (Test-Path -LiteralPath $Stage.Path -PathType Container) -or @(Get-ChildItem -LiteralPath $Stage.Path -Force).Count -gt 0) {
+            throw "StageDir must be empty: $($Stage.Path). Existing files will not be deleted."
+        }
     }
+    if ($CreateZip -and (Test-Path -LiteralPath "$($Stage.Path).zip")) { throw "Archive already exists: $($Stage.Path).zip" }
 }
 if ($FfmpegDir) {
     $FfmpegDir = (Resolve-Path -LiteralPath $FfmpegDir).Path
@@ -149,83 +157,116 @@ try {
     }
     Invoke-Native 'build' 'cmake' @('--build', $BuildDir, '--parallel', "$Jobs")
     Invoke-Native 'CTest' 'ctest' @('--test-dir', $BuildDir, '--output-on-failure')
-    Invoke-Native 'install application and notices' 'cmake' @('--install', $BuildDir, '--prefix', $StageDir)
-    $BinDir = Join-Path $StageDir 'bin'
-    $ValidationDir = Join-Path $StageDir 'validation'
-    New-Item -ItemType Directory -Path $ValidationDir -Force | Out-Null
-    $RuntimeFlag = '--no-compiler-runtime'
-    if ($Toolchain -eq 'MinGW') { $RuntimeFlag = '--compiler-runtime' }
-    # MSVC uses the existing official VC++ x64 Redistributable on the target.
-    # Do not copy arbitrary compiler runtime DLLs out of Visual Studio.
-    Invoke-Native 'deploy Qt GUI and multimedia' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $BinDir, (Join-Path $BinDir 'chosuta.exe'))
-    Invoke-Native 'deploy Qt CLI' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $BinDir, (Join-Path $BinDir 'chosuta-cli.exe'))
-    foreach ($Dll in $IcuDlls) { Copy-Checked $Dll.FullName $BinDir }
-    $PlatformDir = Join-Path $BinDir 'platforms'
-    New-Item -ItemType Directory -Path $PlatformDir -Force | Out-Null
-    $Offscreen = Join-Path $QtPrefix 'plugins/platforms/qoffscreen.dll'
-    Require-File $Offscreen
-    Copy-Checked $Offscreen $PlatformDir
-    Require-File (Join-Path $PlatformDir 'qwindows.dll')
-    "[Paths]`nPrefix=.`nPlugins=.`n" | Set-Content -LiteralPath (Join-Path $BinDir 'qt.conf') -Encoding ASCII
-    Copy-LocalNotices $QtPrefix 'Qt'
-    Copy-LocalNotices $IcuPrefix 'ICU'
-    $FfmpegVersion = ''
-    if ($FfmpegDir) {
-        $VersionOutput = & (Join-Path $FfmpegDir 'ffmpeg.exe') -version
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot query selected FFmpeg.' }
-        $FfmpegVersion = $VersionOutput -join "`n"
-        if ($FfmpegVersion -match '--enable-nonfree') { throw 'FFmpeg --enable-nonfree builds cannot be deployed by this project.' }
-        foreach ($Name in @('ffmpeg.exe', 'ffprobe.exe')) { Copy-Checked (Join-Path $FfmpegDir $Name) $BinDir }
-        foreach ($Dll in @(Get-ChildItem -LiteralPath $FfmpegDir -Filter '*.dll' -File)) { Copy-Checked $Dll.FullName $BinDir }
-        Copy-LocalNotices (Split-Path -Parent $FfmpegDir) 'FFmpeg'
-        $FfmpegVersion | Set-Content -LiteralPath (Join-Path $ValidationDir 'ffmpeg-version.txt') -Encoding UTF8
-    }
-    Copy-Item -LiteralPath (Join-Path $BuildDir 'Testing/Temporary/LastTest.log') -Destination (Join-Path $ValidationDir 'ctest.log')
-    Copy-Item -LiteralPath (Join-Path $BuildDir 'build-info.json') -Destination $ValidationDir
-    $DeployVersion = & $DeployTool --version
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot query windeployqt version.' }
-
-    # Test with SDK/plugin/PATH overrides removed; qt.conf must find local plugins.
-    foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $null, 'Process') }
-    $env:PATH = "$BinDir;$env:SystemRoot\System32;$env:SystemRoot"
-    Invoke-SelfTest 'cli' (Join-Path $BinDir 'chosuta-cli.exe') @('--version')
-    $env:QT_QPA_PLATFORM = 'offscreen'
-    Invoke-SelfTest 'gui-offscreen' (Join-Path $BinDir 'chosuta.exe') @('--smoke-test')
-    $env:QT_QPA_PLATFORM = 'windows'
-    Invoke-SelfTest 'gui-windows' (Join-Path $BinDir 'chosuta.exe') @('--smoke-test')
-
-    $Files = @(Get-ChildItem -LiteralPath $BinDir -File -Recurse | Sort-Object FullName | ForEach-Object {
-        [ordered]@{
-            path = $_.FullName.Substring($BinDir.Length + 1).Replace('\', '/')
-            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            fileVersion = $_.VersionInfo.FileVersion
+    foreach ($Stage in $Stages) {
+        $StageDir = $Stage.Path
+        $BundleMedia = $Stage.Bundled
+        foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], 'Process') }
+        $env:PATH = "$QtBin;$IcuRuntimeDir;$FfmpegDir;$($SavedEnvironment['PATH'])"
+        $env:QT_PLUGIN_PATH = Join-Path $QtPrefix 'plugins'
+        Invoke-Native 'install application and notices' 'cmake' @('--install', $BuildDir, '--prefix', $StageDir)
+        $BinDir = Join-Path $StageDir 'bin'
+        $ValidationDir = Join-Path $StageDir 'validation'
+        New-Item -ItemType Directory -Path $ValidationDir -Force | Out-Null
+        $RuntimeFlag = '--no-compiler-runtime'
+        if ($Toolchain -eq 'MinGW') { $RuntimeFlag = '--compiler-runtime' }
+        # MSVC uses the existing official VC++ x64 Redistributable on the target.
+        # Do not copy arbitrary compiler runtime DLLs out of Visual Studio.
+        Invoke-Native 'deploy Qt GUI and multimedia' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $BinDir, (Join-Path $BinDir 'chosuta.exe'))
+        Invoke-Native 'deploy Qt CLI' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $BinDir, (Join-Path $BinDir 'chosuta-cli.exe'))
+        foreach ($Dll in $IcuDlls) { Copy-Checked $Dll.FullName $BinDir }
+        $PlatformDir = Join-Path $BinDir 'platforms'
+        New-Item -ItemType Directory -Path $PlatformDir -Force | Out-Null
+        $Offscreen = Join-Path $QtPrefix 'plugins/platforms/qoffscreen.dll'
+        Require-File $Offscreen
+        Copy-Checked $Offscreen $PlatformDir
+        Require-File (Join-Path $PlatformDir 'qwindows.dll')
+        "[Paths]`nPrefix=.`nPlugins=.`n" | Set-Content -LiteralPath (Join-Path $BinDir 'qt.conf') -Encoding ASCII
+        Copy-LocalNotices $QtPrefix 'Qt'
+        Copy-LocalNotices $IcuPrefix 'ICU'
+        $FfmpegVersion = ''
+        $MediaDir = Join-Path $BinDir 'tools/ffmpeg'
+        if ($BundleMedia) {
+            New-Item -ItemType Directory -Path $MediaDir -Force | Out-Null
+            $VersionOutput = & (Join-Path $FfmpegDir 'ffmpeg.exe') -version
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot query selected FFmpeg.' }
+            $FfmpegVersion = $VersionOutput -join "`n"
+            if ($FfmpegVersion -match '--enable-nonfree') { throw 'FFmpeg --enable-nonfree builds cannot be deployed by this project.' }
+            $ProbeVersion = & (Join-Path $FfmpegDir 'ffprobe.exe') -version
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot query selected ffprobe.' }
+            if (($ProbeVersion -join "`n") -match '--enable-nonfree') { throw 'ffprobe --enable-nonfree builds cannot be deployed by this project.' }
+            $ProbeVersion | Set-Content -LiteralPath (Join-Path $ValidationDir 'ffprobe-version.txt') -Encoding UTF8
+            foreach ($Name in @('ffmpeg.exe', 'ffprobe.exe')) { Copy-Checked (Join-Path $FfmpegDir $Name) $MediaDir }
+            foreach ($Dll in @(Get-ChildItem -LiteralPath $FfmpegDir -Filter '*.dll' -File)) { Copy-Checked $Dll.FullName $MediaDir }
+            Copy-LocalNotices (Split-Path -Parent $FfmpegDir) 'FFmpeg'
+            $FfmpegVersion | Set-Content -LiteralPath (Join-Path $ValidationDir 'ffmpeg-version.txt') -Encoding UTF8
         }
-    })
-    $Manifest = [ordered]@{
-        version = $BuildInfo.chosutaVersion
-        target = 'Windows x64'
-        build = $BuildInfo
-        windeployqt = ($DeployVersion -join "`n")
-        ffmpegBundled = [bool]$FfmpegDir
-        msvcRuntime = 'Official VC++ x64 Redistributable must already be installed for MSVC builds.'
-        ctest = 'passed; see validation/ctest.log for any skipped optional/private-sample cases'
-        deployedCli = 'passed'
-        deployedOffscreenGui = 'passed'
-        deployedWindowsGuiStartup = 'passed (not interactive/audio acceptance)'
-        files = $Files
-    }
-    $Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StageDir 'runtime-manifest.json') -Encoding UTF8
-    @'
+        Copy-Item -LiteralPath (Join-Path $BuildDir 'Testing/Temporary/LastTest.log') -Destination (Join-Path $ValidationDir 'ctest.log')
+        Copy-Item -LiteralPath (Join-Path $BuildDir 'build-info.json') -Destination $ValidationDir
+        $DeployVersion = & $DeployTool --version
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot query windeployqt version.' }
+    
+        # Test with SDK/plugin/PATH overrides removed; qt.conf must find local plugins.
+        foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $null, 'Process') }
+        $env:PATH = "$BinDir;$env:SystemRoot\System32;$env:SystemRoot"
+        if ($BundleMedia) {
+            Invoke-SelfTest 'media-capabilities' (Join-Path $BinDir 'chosuta-cli.exe') @('--check-media-tools', '--ffmpeg', 'bin/tools/ffmpeg/ffmpeg.exe')
+        }
+        Invoke-SelfTest 'cli' (Join-Path $BinDir 'chosuta-cli.exe') @('--version')
+        $env:QT_QPA_PLATFORM = 'offscreen'
+        Invoke-SelfTest 'gui-offscreen' (Join-Path $BinDir 'chosuta.exe') @('--smoke-test')
+        $env:QT_QPA_PLATFORM = 'windows'
+        Invoke-SelfTest 'gui-windows' (Join-Path $BinDir 'chosuta.exe') @('--smoke-test')
+    
+        $Files = @(Get-ChildItem -LiteralPath $BinDir -File -Recurse | Sort-Object FullName | ForEach-Object {
+            [ordered]@{
+                path = $_.FullName.Substring($BinDir.Length + 1).Replace('\', '/')
+                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                fileVersion = $_.VersionInfo.FileVersion
+                bytes = $_.Length
+            }
+        })
+        $Manifest = [ordered]@{
+            version = $BuildInfo.chosutaVersion
+            target = 'Windows x64'
+            build = $BuildInfo
+            windeployqt = ($DeployVersion -join "`n")
+            ffmpegBundled = $BundleMedia
+            variant = $(if ($BundleMedia) { 'with-ffmpeg' } else { 'no-ffmpeg' })
+            mediaToolsDirectory = $(if ($BundleMedia) { 'bin/tools/ffmpeg' } else { $null })
+            runtimeBytes = ($Files | Measure-Object -Property bytes -Sum).Sum
+            mediaToolsBytes = $(if ($BundleMedia) { ($Files | Where-Object { $_.path.StartsWith('tools/ffmpeg/') } | Measure-Object -Property bytes -Sum).Sum } else { 0 })
+            mediaCapabilities = $(if ($BundleMedia) { 'passed; see validation/media-capabilities.stdout.log (not codec/GUI playback acceptance)' } else { 'not bundled' })
+            msvcRuntime = 'Official VC++ x64 Redistributable must already be installed for MSVC builds.'
+            ctest = 'passed; see validation/ctest.log for any skipped optional/private-sample cases'
+            deployedCli = 'passed'
+            deployedOffscreenGui = 'passed'
+            deployedWindowsGuiStartup = 'passed (not interactive/audio acceptance)'
+            files = $Files
+        }
+        $Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StageDir 'runtime-manifest.json') -Encoding UTF8
+        @'
 Chosuta local Windows build
 Start bin\chosuta.exe directly. Keep the whole directory, including DLLs and plugins.
 MSVC builds require the official VC++ x64 Redistributable to be installed.
-FFmpeg/ffprobe are optional. Use export settings to choose FFmpeg if not bundled/in PATH.
+FFmpeg/ffprobe are optional command-line tools, isolated under bin/tools/ffmpeg.
+For no-ffmpeg builds, choose ffmpeg.exe in Export Settings; keep ffprobe.exe and
+its shared DLLs beside it. Qt media DLLs/plugins must remain in the application.
+Missing FFmpeg disables video export and waveform decoding/correction.
+Missing ffprobe requires manual audio duration. Editing/saving still work.
 See runtime-manifest.json and validation/ for this machine's actual results.
 The dependency notices collected here do not replace a complete redistribution
 source/NOTICE review of the specific Qt, ICU and media dependencies you deploy.
 '@ | Set-Content -LiteralPath (Join-Path $StageDir 'RUN.txt') -Encoding ASCII
-    Write-Host "Ready: $(Join-Path $BinDir 'chosuta.exe')"
-    Write-Host "Evidence: $(Join-Path $StageDir 'runtime-manifest.json')"
+        Write-Host "Ready: $(Join-Path $BinDir 'chosuta.exe')"
+        Write-Host "Evidence: $(Join-Path $StageDir 'runtime-manifest.json')"
+    }
+    # Archive only after every requested deployment has passed. Never overwrite.
+    if ($CreateZip) {
+        foreach ($Stage in $Stages) {
+            Compress-Archive -LiteralPath $Stage.Path -DestinationPath "$($Stage.Path).zip" -CompressionLevel Optimal
+            Write-Host "Archive: $($Stage.Path).zip"
+        }
+    }
 } finally {
     foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], 'Process') }
 }

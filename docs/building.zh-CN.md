@@ -13,7 +13,7 @@ ctest --test-dir build --output-on-failure
 
 核心库依赖 Qt Core/Gui 和 ICU i18n/uc/data；GUI 另依赖 Widgets/Concurrent/Multimedia，Qt Network 为传递依赖；测试需要 Qt Test。关闭测试可用 `-DBUILD_TESTING=OFF`，产品运行不依赖 Qt Test 或 Python。
 
-视频导出需系统 FFmpeg 或导出设置中指定的 FFmpeg 路径；附加音频时长探测及测试使用 ffprobe；优先查找所选 FFmpeg 同目录，之后查 PATH。缺少 ffprobe 时音频仍可附加，时长需手动设置。MP4 需要 libx264，WebM 需要 libvpx-vp9；配音分别需要 AAC/libopus；透明 MOV 需要 qtrle。缺少编码器只禁用对应导出，不影响编辑。0.5.0 的可选波形同样复用 FFmpeg 解码；缺少 FFmpeg 时波形不可用，工程生成/编辑/保存仍可用。没有新增模型或运行依赖。生产 Qt 音频后端仅在试听时初始化；无音频启动不接触声卡。
+视频导出需系统 FFmpeg 或导出设置中指定的 FFmpeg 路径；附加音频时长探测及测试使用 ffprobe；优先查找所选 FFmpeg 同目录，之后查应用的 tools/ffmpeg、应用目录及 PATH。缺少 ffprobe 时音频仍可附加，时长需手动设置。MP4 需要 libx264，WebM 需要 libvpx-vp9；配音分别需要 AAC/libopus；透明 MOV 需要 qtrle。缺少编码器只禁用对应导出，不影响编辑。0.5.0 的可选波形同样复用 FFmpeg 解码；缺少 FFmpeg 时波形不可用，工程生成/编辑/保存仍可用。没有新增模型或运行依赖。生产 Qt 音频后端仅在试听时初始化；无音频启动不接触声卡。
 
 没有桌面时：
 
@@ -84,3 +84,27 @@ CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/
 0.6.4 只接受单下划线高级命名，schema9 只读写当前格式；旧 schema、旧辅音预设、旧同音槽及缺字段补值已删除。回归还覆盖无旧预设控件、取消/恢复自定义辅音、当前工程保存重开/撤销与波形校正保留。
 
 0.6.4 的特殊图回归新增通用/基础/全局回退、精确图优先、B/P/M上/下行闭口，以及不存在额外许可控件；实际tachie素材短片验证闭口时不空白。schema仍为9。
+
+## 0.8.0 谱面演出v2回归
+
+当前schema11，原有CLI/Widgets构建方式及运行依赖不变。新增核心入口`performance_analysis.*`按原谱路由计算背景与有限动机候选，`performance_rules.cpp`输出确定性的演出区段；渲染不重新分析。`--performance-analysis <file>`可保存本地诊断。
+
+`core`增加音乐时值下的120/220 BPM与移调稳定性、微小起音扰动、短音动机/窄音域反例、持续回落与高位落点、控制音高排除、分句/段落区别、单位配置严格读写及全曲/局部等价检查。`ui-workflow`的`performanceV2Controls`操作主音/调式、时间/距离单位记忆、自定义规则、区域禁用、时间显示与锚定、边界和保存重开。既有人工保护、校正和编码边界检查继续运行。
+
+```sh
+cmake --build build --parallel 4
+ctest --test-dir build --output-on-failure
+CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/chosuta-ui-tests performanceV2Controls performanceWorkflow performanceTemplateEditing
+```
+
+没有新增运行库、模型、词典或下载步骤。Linux离屏与原创结构测试不代替Windows、真实桌面、其他歌曲或主观自然表现验收。
+
+## 0.8.1 操作回归
+
+保持schema11与原依赖。UI新增 `acceptedSettingsAndStableLayout`、`cursorSnapping`、`arbitraryPngDropAndMapping`，验证高级设置一次应用/取消/撤销/人工保护，草稿前后分区尺寸，任意文件名PNG拖放映射、重复目标拒绝及未保存工程确认，拍号/变速下的标尺吸附。`preferencesAndTransport` 已按后续纠正验证空格/画布按钮/菜单的统一播放／停止、返回开关开关两态、播放中seek不改起播点及无重复停止入口；原时间轴行高拖动继续检查。核心 `variantFolderAndCache` 增补任意文件名、坏图、重复路径/槽位和取消。仍使用正常CMake/CTest入口；真实桌面跨应用拖放与Windows另需原生验收。
+
+## 0.8.2 媒体工具与双版本 Windows 部署
+
+`src/core/executable.*` 统一全局配置、工具目录／应用目录／PATH 查找及 ffprobe 同目录定位；显式工程路径优先。`src/render/audio.*` 提供有超时、输出上限和取消的能力检查，GUI 后台调用，CLI `--check-media-tools` 输出 JSON。当前检查覆盖已有 MP4／WebM／QTRLE MOV 与 PCM 波形所需编码器／滤镜，不宣称新增封装或实际剪辑器兼容。
+
+新增 `mediaToolResolution`／`mediaToolSettings` 回归覆盖优先级、Unicode 路径、本机保存／取消、工程覆盖及缺失报告；测试使用隔离 QSettings。Windows 脚本的 `-BothVariants -CreateZip` 从同一次编译分别部署附带工具和 no-ffmpeg 目录，详见 [Windows 构建](windows.zh-CN.md)。Linux 验证不能代替 Windows／PowerShell 原生验证；不会自动下载 BtbN 或其他依赖。

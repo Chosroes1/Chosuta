@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "window.h"
+#include "core/executable.h"
 #include <QtConcurrent/QtConcurrentRun>
 namespace chosuta {
 Window::~Window(){
     if(cancel)cancel->store(true);
-    waveformWatcher.waitForFinished();correctionWatcher.waitForFinished();loadWatcher.waitForFinished();audioWatcher.waitForFinished();exportWatcher.waitForFinished();
+    performanceWatcher.waitForFinished();waveformWatcher.waitForFinished();correctionWatcher.waitForFinished();loadWatcher.waitForFinished();audioWatcher.waitForFinished();exportWatcher.waitForFinished();
 }
 void Window::updateTimelineMinimum(){
     if(!timelineScroll||!timeline)return;
-    const int fixedHeight=qRound(timeline->rulerRect().height()+timeline->mouthLaneRect().height()+timeline->waveformLaneRect().height());
+    const int fixedHeight=qRound(timeline->rulerRect().height()+timeline->mouthLaneRect().height()+timeline->waveformLaneRect().height()+timeline->performanceLaneRect().height());
     const int subtitleHeight=project.subtitlesEnabled&&!project.subtitles.isEmpty()?qRound(timeline->subtitleLaneRect(0).height())+4:16;
     // Reserve the viewport as well as its frame and horizontal scrollbar.
     timelineScroll->setMinimumHeight(fixedHeight+subtitleHeight+2*timelineScroll->frameWidth()+timelineScroll->horizontalScrollBar()->sizeHint().height());
+    // Commit the new constraint before the next handle press; deferred layout can
+    // otherwise move the handle between mouse press and drag.
+    timelineScroll->parentWidget()->layout()->activate();
+    timelineSplitter->refresh();
 }
 void Window::refreshWaveform(){
     if(!timeline||!waveformControls)return;
@@ -30,7 +35,7 @@ void Window::refreshWaveform(){
 void Window::ensureWaveform(){
     if(busy||mouthSettingsOpen||project.audioPath.isEmpty())return;
     QFileInfo info(project.audioPath);
-    QString key=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+project.output.ffmpeg;
+    QString key=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+resolveExecutable(project.output.ffmpeg);
     if(waveformKey==key)return;
     waveformKey=key;waveform.reset();waveformMessage=trText("Preparing waveform…");timeline->setWaveform({},waveformMessage);
     cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;auto path=project.audioPath;auto executable=project.output.ffmpeg;double duration=project.audioDuration;

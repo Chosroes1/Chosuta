@@ -54,3 +54,9 @@ Windows 构建依赖的具体许可证、附带媒体库和源码义务以其实
 
 
 0.6.1 的乐理度数、调式拼写及同音反复规则为 Chosuta 原创 C++ 代码，无新增库/数据包。仅参考 [music21 官方音程说明](https://music21.org/music21docs/usersGuide/usersGuide_18_intervals.html) 和 [官方音阶文档](https://music21.org/music21docs/moduleReference/moduleScale.html)核对字母度数与半音距离、教会调式概念；未复制其实现、安装或集成 music21。
+
+### 0.8.2 外部工具隔离与 no-ffmpeg
+
+本次新增配置／检测／双版本部署为 Chosuta 原创代码，无新增库或模型，未下载或捆绑新的第三方二进制。Windows 脚本允许用户提供已有 BtbN GPL shared（或其他满足功能／许可要求的构建），不自行裁剪；两个工具和供应商 bin 中 DLL 放在 `bin/tools/ffmpeg/`，Qt 媒体 DLL 仍由 windeployqt 独立部署。两个工具都检查 nonfree 标记；构建信息、文件大小／哈希和当地可得许可随附带版记录。此检查和收集不是对供应商全部传递依赖及对应源码义务的自动审计。
+
+no-ffmpeg 版不复制该外部工具目录或其许可附件，但仍捆绑所选 Qt／ICU 及 Qt 媒体后端，需要履行这些实际组件的义务。BtbN 构建脚本的许可证不能替代其生成的 FFmpeg／编解码库许可证。当前未生成 Windows 分发包，具体第三方版本和来源以实际部署清单及发布时的对应源码材料为准。

@@ -29,6 +29,7 @@ namespace chosuta {
         // path-deduplicated cache on demand; inactive combinations are never decoded.
         if(available.contains(p.fallback))imageFor(p.fallback);
         const auto first=selectionAt(0);if(!first.missing)imageFor(first.id);
+        if(appearance.plan())diagnostics.append(appearance.plan()->diagnostics);
         prepareSubtitles();
         for(const auto &missing:missingAppearanceAssets())diagnostics.append("Missing advanced asset: "+missing);
     }
@@ -55,18 +56,12 @@ namespace chosuta {
         QStringList missing;if(!project.appearance.enabled)return missing;
         auto check=[&](const AssetSelection &selection){if(selection.missing&&!missing.contains(selection.id)&&missing.size()<64)missing.append(selection.id);};
         const double duration=project.duration(),offset=project.output.syncOffset;
-        double previous=0;
-        for(const auto &event:events){
-            const double start=event.start+offset,end=event.end+offset;
-            if(end<=0||start>=duration)continue;
-            const double gapEnd=std::min(duration,start);
-            if(gapEnd>previous){
-                check(selectionAt((previous+gapEnd)/2));
-                check(selectionAt(std::nextafter(gapEnd,previous)));
-            }
-            check(appearance.event(project,event,&available));previous=std::max(previous,end);
-        }
-        if(previous<duration){check(selectionAt((previous+duration)/2));check(selectionAt(std::nextafter(duration,previous)));}
+        QVector<double> boundaries={0,duration};
+        for(const auto &event:events){boundaries<<event.start+offset<<event.end+offset;
+            const auto policy=project.rules.special.value("rest");if(policy.mode=="timed")boundaries<<event.end+offset+policy.holdSeconds;}
+        if(const auto plan=appearance.plan())for(const auto &slice:plan->slices())boundaries<<slice.start<<slice.end;
+        std::sort(boundaries.begin(),boundaries.end());
+        for(int i=0;i+1<boundaries.size();++i){double a=std::max(0.,boundaries[i]),b=std::min(duration,boundaries[i+1]);if(b>a){check(selectionAt(a));check(selectionAt((a+b)/2));}}
         return missing;
     }
     QImage Scene::frame(double seconds,QSize size)const {

@@ -194,19 +194,76 @@ namespace chosuta {
         qint64 audioBytes=-1,audioModified=0;
         QMap<QString,SourceTiming> sources;
     };
+    struct VariantGroup {
+        QString id="base",name="Base";
+        bool operator==(const VariantGroup &)const=default;
+    };
+    struct PerformanceSegment {
+        QString id,anchor="beats",track,firstSource,lastSource;
+        qint64 startBlick=0,endBlick=0;
+        double start=0,end=0; // Video-time snapshot, or an absolute interval.
+        QString mode="hold";
+        QStringList targets={"normal"}; // Role names, or group:<stable group ID>.
+        QVector<double> cuts;
+        double phaseStart=0,phaseEnd=1; // Preserve template phase when splitting/cropping.
+        bool protect=true;
+        QString reason;
+        bool operator==(const PerformanceSegment &)const=default;
+    };
+    struct PerformanceBoundary {
+        QString source,mode="break"; // break / join / section-break / section-join; source is the following note identity.
+        bool operator==(const PerformanceBoundary &)const=default;
+    };
+    struct TonalityRegion {
+        qint64 start=0,end=0;
+        QString key; // Empty explicitly disables tonal assistance in this region.
+        bool operator==(const TonalityRegion &)const=default;
+    };
+    struct PerformanceRule {
+        bool enabled=true;
+        QString condition="leap",target="emphasis",track;
+        double threshold=5,minBeats=1;
+        int priority=0;
+        double thresholdSeconds=2.5,thresholdDegrees=4,minSeconds=0;
+        bool operator==(const PerformanceRule &)const=default;
+    };
+    enum class PerformanceTimeBasis { Music, Seconds };
+    struct PerformanceTiming {
+        double window=4,background=16,lookahead=2,support=1,confirm=.5;
+        double minimum=1,emphasis=2,exit=1,breath=2,phrase=1,reset=4,release=2;
+        bool operator==(const PerformanceTiming &)const=default;
+    };
+    struct PerformanceSettings {
+        PerformanceTimeBasis timeBasis=PerformanceTimeBasis::Music;
+        PerformanceTiming music,seconds={2,8,1,.5,.25,.5,1,.5,1,.5,2,1};
+        bool leap=true,progression=true,motif=true,section=true,release=true,continuity=true;
+        int leapSemitones=5,leapDegrees=4,progressionSemitones=4,progressionDegrees=3;
+        int nearSemitones=2,nearDegrees=2,contrastSemitones=3,contrastDegrees=3;
+        double efficiency=.5,highShare=.6,motifShare=.3,activityRatio=1.5,wideningRatio=1.5,motifTolerance=.2;
+        QVector<PerformanceRule> rules;
+        const PerformanceTiming &timing()const{return timeBasis==PerformanceTimeBasis::Music?music:seconds;}
+        bool operator==(const PerformanceSettings &)const=default;
+    };
+    struct Performance {
+        QVector<VariantGroup> groups={{"base","Base"}};
+        QMap<QString,QString> roles={{"relaxed","base"},{"normal","base"},{"emphasis","base"}};
+        PerformanceSettings settings;
+        QVector<PerformanceSegment> generated,manual;
+        QVector<PerformanceBoundary> boundaries,suggestions;
+        QVector<TonalityRegion> tonalities;
+        QString basisHash; // Accepted automatic plan basis; never regenerated during rendering.
+    };
     struct Project {
         struct Appearance {
-            bool enabled=false,direction=true,interval=true,beat=true;
-            int stepMax=2,smallMax=4;
+            bool enabled=false,tonalityEnabled=false;
             QString intervalUnit="semitones";
-            int stepDegreeMax=2,smallDegreeMax=4;
             QString degreeTonic="C",degreeMode="major";
             QVector<int> customDegreeScale={0,2,4,5,7,9,11};
             QMap<QString,QString> noteSpellings; // Expanded Note identity -> written pitch, e.g. C#4 / Db4.
-            QString closureAnchor="next",breathAnchor="previous",restAnchor="previous";
             QMap<QString,QVector<int>> strongBeats; // signature -> 1-based denominator beats
             bool operator==(const Appearance &)const=default;
         } appearance;
+        Performance performance;
         Score score;
         QStringList selected;
         QMap<QString,int> priorities;

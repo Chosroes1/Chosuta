@@ -29,7 +29,6 @@ namespace chosuta {
         return modes;
     }
     void validateDegreeSettings(const Project::Appearance &a){
-        if(a.stepDegreeMax<2||a.stepDegreeMax>15||a.smallDegreeMax<=a.stepDegreeMax||a.smallDegreeMax>29)throw Failure("Invalid diatonic degree thresholds");
         static const QRegularExpression tonicPattern("^[A-G](?:#{1,3}|b{1,3})?$");
         if(!tonicPattern.match(a.degreeTonic).hasMatch()||!parseWrittenPitch(a.degreeTonic+"4"))throw Failure("Invalid tonic spelling");
         if(a.degreeMode!="custom"&&!degreeModes().contains(a.degreeMode))throw Failure("Invalid diatonic mode");

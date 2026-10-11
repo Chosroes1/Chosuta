@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "model.h"
+#include "performance.h"
+#include <memory>
 namespace chosuta {
-    struct AppearanceContext {
-        QString direction="any",interval="any",beat="any",anchor;
-        QString intervalReason={};
-    };
+    struct AppearanceContext {QString group="base",anchor,intervalReason;};
     struct AssetSelection {
         QString shape,id;
         AppearanceContext context;
@@ -15,21 +14,21 @@ namespace chosuta {
     void validateAppearance(const Project::Appearance &);
     QJsonObject appearanceJson(const Project::Appearance &);
     Project::Appearance readAppearance(const QJsonValue &);
-    QString appearanceId(const QString &shape,const AppearanceContext &);
     std::optional<QString> normalizedAssetId(const QString &name);
     class AppearanceResolver {
-        QHash<QString,AppearanceContext> contexts;
-        QHash<QString,qint64> ends;
+        std::shared_ptr<PerformanceResolver> performance;
         public:
         AppearanceResolver()=default;
         explicit AppearanceResolver(const Project &);
-        AppearanceContext context(const QString &source)const {return contexts.value(source);}
         AssetSelection event(const Project &,const Event &,const QSet<QString> *available=nullptr)const;
         AssetSelection at(const Project &,const QVector<Event> &,double seconds,bool disjoint=false,const QSet<QString> *available=nullptr)const;
-        AssetSelection select(const Project &,QString shape,AppearanceContext context,bool fixed=false,const QSet<QString> *available=nullptr)const;
+        AssetSelection select(const Project &,QString shape,AppearanceContext context={},bool fixed=false,const QSet<QString> *available=nullptr)const;
+        const PerformanceResolver *plan()const{return performance.get();}
     };
-    struct AssetImportEntry {QString path,id,status,message;};
-    struct AssetImportPlan {QVector<AssetImportEntry> entries;bool cancelled=false;QString error;};
+    struct AssetImportEntry {QString path,id,status,message,group;};
+    struct AssetImportPlan {QVector<AssetImportEntry> entries;bool cancelled=false;QString error;QVector<VariantGroup> groups;};
     void configureImageReaderLimit();
+    AssetImportPlan scanAssetFiles(const QStringList &,const QMap<QString,QString> &,const std::atomic_bool *cancel=nullptr,Progress progress={});
     AssetImportPlan scanAssetDirectory(const QString &,const QMap<QString,QString> &,const std::atomic_bool *cancel=nullptr,Progress progress={});
+    AssetImportPlan scanVariantDirectory(const QString &,const Project &,const QString &singleGroup,const std::atomic_bool *cancel=nullptr,Progress progress={});
 }

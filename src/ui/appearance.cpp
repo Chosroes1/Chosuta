@@ -1,261 +1,116 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "window.h"
+#include "file_drop.h"
+#include "tonality_selector.h"
 #include "core/appearance.h"
 #include "core/intervals.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <QImageReader>
 namespace chosuta {
-    void Window::showMouthSettings() {
-        if(busy||mouthSettingsOpen)return;
-        QScopedValueRollback<bool> settingsGuard(mouthSettingsOpen,true);
-        stopPlayback();
-        auto t=[this](const char *en,const char *zh,const char *ja){
-            return QString::fromUtf8(uiLanguage=="zh"?zh:uiLanguage=="ja"?ja:en);
-        };
-        QDialog dialog(this);
-        dialog.setObjectName("mouthSettingsDialog");
-        dialog.setWindowTitle(trText("Advanced variant settings"));
-        dialog.resize(860,650);
-        Project draft=project;
-        auto root=new QVBoxLayout(&dialog);
-        auto enabled=new QCheckBox(trText("Enable advanced variants"));
-        enabled->setObjectName("mouthEnabled");
-        enabled->setChecked(draft.appearance.enabled);
-        root->addWidget(enabled);
-        auto pages=new QTabWidget;
-        pages->setObjectName("mouthSettingsPages");
-        root->addWidget(pages);
-        auto mouthPage=new QWidget;
-        auto mouthLayout=new QVBoxLayout(mouthPage);
-        pages->addTab(mouthPage,t("Variant images","差分素材","差分画像"));
-        auto selectors=new QHBoxLayout;
-        mouthLayout->addLayout(selectors);
-        auto directionOn=new QCheckBox(t("Direction","方向","方向"));
-        directionOn->setObjectName("mouthDirectionEnabled");
-        directionOn->setChecked(draft.appearance.direction);
-        auto intervalOn=new QCheckBox(t("Interval","幅度","音程"));
-        intervalOn->setObjectName("mouthIntervalEnabled");
-        intervalOn->setChecked(draft.appearance.interval);
-        auto beatOn=new QCheckBox(t("Beat","强弱拍","拍の強弱"));
-        beatOn->setObjectName("mouthBeatEnabled");
-        beatOn->setChecked(draft.appearance.beat);
-        auto directionChoice=new QComboBox;
-        directionChoice->setObjectName("mouthDirectionChoice");
-        auto intervalChoice=new QComboBox;
-        intervalChoice->setObjectName("mouthIntervalChoice");
-        auto beatChoice=new QComboBox;
-        beatChoice->setObjectName("mouthBeatChoice");
-        for(auto choice:{
-            directionChoice,intervalChoice,beatChoice
-        })choice->addItem(t("Any / shared","通用 / 不区分","共通 / 区別しない"),"any");
-        directionChoice->addItem(t("Up","上行","上行"),"up");
-        directionChoice->addItem(t("Down","下行","下行"),"down");
-        intervalChoice->addItem(t("Step","级进","順次進行"),"step");
-        intervalChoice->addItem(t("Small leap","小跳","小さな跳躍"),"small");
-        intervalChoice->addItem(t("Large leap","大跳","大きな跳躍"),"large");
-        directionChoice->addItem(t("Repeated note","同音反复","同音反復"),"repeat");
-        directionChoice->setItemData(directionChoice->findData("repeat"),t("For repeated notes, select Any / shared in the interval selector.","同音反复请将幅度选为“通用 / 不区分”。没有对应图时自动使用通用图，闭口、休息、呼吸也适用。","同音反復では音程を「共通 / 区別しない」にしてください。"),Qt::ToolTipRole);
-        beatChoice->addItem(t("Strong","强拍","強拍"),"strong");
-        beatChoice->addItem(t("Weak","弱拍","弱拍"),"weak");
-        for(auto choice:{
-            directionChoice,intervalChoice,beatChoice
-        })choice->setCurrentIndex(1);
-        auto addSelectorGroup=[&](QCheckBox *on,QComboBox *choice,const QString &name){
-            auto group=new QWidget;
-            group->setObjectName(name);
-            auto layout=new QHBoxLayout(group);
-            layout->setContentsMargins(0,0,0,0);
-            layout->setSpacing(6);
-            on->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Preferred);
-            layout->addWidget(on);
-            layout->addWidget(choice,1);
-            selectors->addWidget(group,1);
-        };
-        selectors->setSpacing(20);
-        addSelectorGroup(directionOn,directionChoice,"mouthDirectionGroup");
-        addSelectorGroup(intervalOn,intervalChoice,"mouthIntervalGroup");
-        addSelectorGroup(beatOn,beatChoice,"mouthBeatGroup");
-        auto hint=new QLabel(t("Selectors choose the combination to edit. Playback classifies each note from the score. Uncheck a dimension to use shared images. For repeated notes, select Any / shared for the interval. Missing variants use shared images, including closed, rest and breath.",
-        "选择按钮只切换正在编辑的组合；播放按工程逐音判断。取消某维勾选后使用该维的通用图。同音反复请将幅度选为“通用 / 不区分”。没有对应图时自动使用通用图，闭口、休息、呼吸也适用。","選択欄は編集する組合せを切り替えます。再生時は譜面から音符ごとに判定します。無効な次元には共通画像を使います。同音反復では音程を「共通 / 区別しない」にしてください。閉口・休止・ブレスも、対応画像がなければ共通画像を使います。"));
-        hint->setObjectName("mouthSelectorHint");
-        hint->setWordWrap(true);
-        mouthLayout->addWidget(hint);
-        auto summary=new QLabel;
-        summary->setObjectName("mouthCombinationSummary");
-        mouthLayout->addWidget(summary);
-        auto states=new QTabWidget;
-        states->setObjectName("mouthStatePages");
-        mouthLayout->addWidget(states);
-        QMap<QString,QToolButton *> shapeButtons;
-        auto group=new QButtonGroup(&dialog);
-        group->setExclusive(true);
-        const QStringList vowels={
-            "A","I","U","E","O"
-        },specials={
-            "closed","rest","breath"
-        };
-        auto shapeName=[&](const QString &shape){
-            return shape=="closed"?t("Closed","闭口","閉口"):shape=="rest"?t("Rest","休息","休止"):shape=="breath"?t("Breath","呼吸","ブレス"):shape;
-        };
-        auto addSlots=[&](const QStringList &shapes,const QString &title){
-            auto scroll=new QScrollArea;
-            scroll->setWidgetResizable(true);
-            auto widget=new QWidget;
-            auto layout=new QHBoxLayout(widget);
-            for(const auto &shape:shapes){
-                auto button=new QToolButton;
-                button->setObjectName("mouthSlot"+shape);
-                button->setCheckable(true);
-                button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-                button->setIconSize({
-                    88,88
-                });
-                button->setMinimumSize(105,130);
-                layout->addWidget(button);
-                shapeButtons[shape]=button;
-                group->addButton(button);
-            }
-            layout->addStretch();
-            scroll->setWidget(widget);
-            states->addTab(scroll,title);
-        };
-        addSlots(vowels,t("Vowels","发声口形","母音"));
-        addSlots(specials,t("Special states","特殊口形","特殊な口形"));
-        QString selected="A";
-        shapeButtons[selected]->setChecked(true);
-        auto pathRow=new QHBoxLayout;
-        mouthLayout->addLayout(pathRow);
-        auto path=new QLineEdit;
-        path->setObjectName("mouthImagePath");
-        path->setPlaceholderText(t("PNG path for the selected slot","选中槽位的 PNG 路径","選択した枠の PNG パス"));
-        pathRow->addWidget(path);
-        auto browse=new QPushButton(t("Choose PNG","选择 PNG","PNG を選択"));
-        pathRow->addWidget(browse);
-        auto assign=new QPushButton(t("Import into slot","导入此槽","この枠に読込"));
-        assign->setObjectName("mouthAssignImage");
-        pathRow->addWidget(assign);
-        auto clear=new QPushButton(t("Clear slot","清除此槽","この枠をクリア"));
-        clear->setObjectName("mouthClearImage");
-        pathRow->addWidget(clear);
-        auto mouthStatus=new QLabel;
-        mouthStatus->setWordWrap(true);
-        mouthStatus->setObjectName("mouthImageStatus");
-        mouthLayout->addWidget(mouthStatus);
-        mouthLayout->addStretch();
-        auto currentContext=[&]{
-            return AppearanceContext{
-                directionOn->isChecked()?directionChoice->currentData().toString():QString("any"),intervalOn->isChecked()?intervalChoice->currentData().toString():QString("any"),
-                beatOn->isChecked()?beatChoice->currentData().toString():QString("any"),{
-                }
-            };
-        };
-        auto currentId=[&]{
-            return appearanceId(selected,currentContext());
-        };
-        auto refreshSlots=[&]{
-            const auto c=currentContext();
-            summary->setText(t("Editing: %1 · %2 · %3","正在编辑：%1 · %2 · %3","編集中：%1 · %2 · %3").arg(beatOn->isChecked()?beatChoice->currentText():t("Any beat",
-            "不区分强弱拍","拍共通"),directionOn->isChecked()?directionChoice->currentText():t("Any direction","不区分方向","方向共通"),intervalOn->isChecked()?intervalChoice->currentText():t("Any interval",
-            "不区分幅度","音程共通")));
-            const auto &visible=states->currentIndex()==0?vowels:specials;
-            for(const auto &shape:visible){
-                const auto id=appearanceId(shape,c),file=draft.assets.value(id);
-                QImage thumbnail;
-                if(!file.isEmpty()){
-                    QImageReader reader(file);
-                    const auto size=reader.size();
-                    if(size.isValid()&&qint64(size.width())*size.height()*4<=256LL*1024*1024){
-                        auto target=size;
-                        target.scale(88,88,Qt::KeepAspectRatio);
-                        reader.setScaledSize(target);
-                        thumbnail=reader.read();
-                    }
-                }
-                shapeButtons[shape]->setIcon(thumbnail.isNull()?QIcon():QIcon(QPixmap::fromImage(thumbnail)));
-                shapeButtons[shape]->setText(shapeName(shape)+"\n"+(file.isEmpty()?t("Not assigned","未设置","未設定"):thumbnail.isNull()?t("Unreadable","读取失败","読込失敗"):QFileInfo(file).fileName()));
-                shapeButtons[shape]->setToolTip(id+".png\n"+file);
-            }
-            path->setText(draft.assets.value(currentId()));
-            AppearanceResolver resolver;
-            auto previewProject=draft;
-            previewProject.appearance.enabled=true;
-            const auto result=resolver.select(previewProject,selected,c);
-            mouthStatus->setText(currentId()+".png\n"+(result.missing?t("No matching, shared, or fallback image. Assign an image.",
-            "没有可用的匹配图、通用图或全局回退图，请设置图片。","一致する画像・共通画像・代替画像がありません。画像を設定してください。"):t("Resolved image: ","实际使用图片：","使用画像：")+result.id+"\n"+draft.assets.value(result.id)));
-        };
-        auto updateSelector=[&](QCheckBox *on,QComboBox *choice){
-            QSignalBlocker block(choice);
-            if(!on->isChecked()){
-                if(choice->currentData()!="any")choice->setProperty("lastChoice",choice->currentData());
-                choice->setCurrentIndex(0);
-            }
-            else if(choice->currentIndex()==0){
-                const auto old=choice->property("lastChoice").toString();
-                choice->setCurrentIndex(old.isEmpty()?1:choice->findData(old));
-            }
-            choice->setEnabled(on->isChecked());
-        };
-        updateSelector(directionOn,directionChoice);
-        updateSelector(intervalOn,intervalChoice);
-        updateSelector(beatOn,beatChoice);
-        for(auto choice:{
-            directionChoice,intervalChoice,beatChoice
-        })connect(choice,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[&]{
-            refreshSlots();
-        });
-        connect(directionOn,&QCheckBox::toggled,&dialog,[&](bool value){
-            draft.appearance.direction=value;
-            updateSelector(directionOn,directionChoice);
-            refreshSlots();
-        });
-        connect(intervalOn,&QCheckBox::toggled,&dialog,[&](bool value){
-            draft.appearance.interval=value;
-            updateSelector(intervalOn,intervalChoice);
-            refreshSlots();
-        });
-        connect(beatOn,&QCheckBox::toggled,&dialog,[&](bool value){
-            draft.appearance.beat=value;
-            updateSelector(beatOn,beatChoice);
-            refreshSlots();
-        });
-        connect(enabled,&QCheckBox::toggled,&dialog,[&](bool value){
-            draft.appearance.enabled=value;
-        });
-        connect(states,&QTabWidget::currentChanged,&dialog,[&](int index){
-            selected=index==0?"A":"closed";
-            shapeButtons[selected]->setChecked(true);
-            refreshSlots();
-        });
-        for(auto it=shapeButtons.cbegin();it!=shapeButtons.cend();++it)connect(it.value(),&QToolButton::clicked,&dialog,[&,shape=it.key()]{
-            selected=shape;
-            refreshSlots();
-        });
-        connect(browse,&QPushButton::clicked,&dialog,[&]{
-            const auto file=QFileDialog::getOpenFileName(&dialog,t("Choose PNG","选择 PNG","PNG を選択"),path->text(),"PNG (*.png)");
-            if(!file.isEmpty())path->setText(file);
-        });
-        connect(assign,&QPushButton::clicked,&dialog,[&]{
-            const auto file=QFileInfo(path->text()).absoluteFilePath();
-            QImageReader reader(file,"png");
-            const auto size=reader.size();
-            if(!size.isValid()||qint64(size.width())*size.height()*4>256LL*1024*1024){
-                mouthStatus->setText(t("Invalid or oversized PNG","PNG 无效或超过单图上限","PNG が無効か画像サイズが上限を超えています"));
-                return;
-            }
-            auto target=size;
-            target.scale(88,88,Qt::KeepAspectRatio);
-            reader.setScaledSize(target);
-            if(reader.read().isNull()){
-                mouthStatus->setText(reader.errorString());
-                return;
-            }
-            draft.assets[currentId()]=file;
-            refreshSlots();
-        });
-        connect(clear,&QPushButton::clicked,&dialog,[&]{
-            draft.assets.remove(currentId());
-            refreshSlots();
-        });
+void Window::showMouthSettings(const QStringList &droppedPaths){
+    if(busy||mouthSettingsOpen)return;QScopedValueRollback<bool> guard(mouthSettingsOpen,true);stopPlayback();
+    auto t=[this](const char *en,const char *zh,const char *ja){return QString::fromUtf8(uiLanguage=="zh"?zh:uiLanguage=="ja"?ja:en);};
+    QDialog dialog(this);dialog.setObjectName("mouthSettingsDialog");dialog.setWindowTitle(trText("Advanced variant settings"));dialog.resize(980,720);
+    Project draft=project;auto root=new QVBoxLayout(&dialog);
+    auto enabled=new QCheckBox(trText("Enable advanced variants"));enabled->setObjectName("mouthEnabled");enabled->setChecked(draft.appearance.enabled);root->addWidget(enabled);
+    connect(enabled,&QCheckBox::toggled,&dialog,[&](bool v){draft.appearance.enabled=v;});
+    auto pages=new QTabWidget;pages->setObjectName("mouthSettingsPages");root->addWidget(pages);
+    auto material=new QWidget;auto ml=new QHBoxLayout(material);pages->addTab(material,t("Variant images","差分素材","差分画像"));
+    auto left=new QVBoxLayout;ml->addLayout(left,1);auto groupList=new QListWidget;groupList->setObjectName("variantGroups");left->addWidget(groupList);
+    auto groupButtons=new QGridLayout;left->addLayout(groupButtons);
+    auto makeButton=[&](const QString &label,const QString &name){auto b=new QPushButton(label);b->setObjectName(name);return b;};
+    auto add=makeButton(t("Add group","添加组","グループ追加"),"addVariantGroup"),copy=makeButton(t("Copy group","复制组","複製"),"copyVariantGroup"),rename=makeButton(t("Rename","重命名","名前変更"),"renameVariantGroup"),remove=makeButton(t("Remove…","删除…","削除…"),"removeVariantGroup");
+    groupButtons->addWidget(add,0,0);groupButtons->addWidget(copy,0,1);groupButtons->addWidget(rename,1,0);groupButtons->addWidget(remove,1,1);
+    auto right=new QVBoxLayout;ml->addLayout(right,3);auto hint=new QLabel(t("A variant group holds a consistent pose with different mouths. Missing slots use the base group, then global fallback. Choosing a group only changes the editing target.","差分组保存动作/神态一致、口形不同的完整图片。缺槽自动回基础组同口形，再回全局图。切换分组只改变编辑对象。","差分グループは同じ動作・表情の口形画像です。未設定の枠は基本グループ、全体の代替画像の順に使います。"));hint->setWordWrap(true);right->addWidget(hint);
+    QString selected="A",groupId="base";QMap<QString,QToolButton *> slotButtons;auto states=new QTabWidget;states->setObjectName("mouthStatePages");right->addWidget(states);
+    auto mouthName=[&](const QString &s){return s=="closed"?t("Closed","闭口","閉口"):s=="rest"?t("Rest","休息","休止"):s=="breath"?t("Breath","呼吸","ブレス"):s;};
+    auto addSlots=[&](const QStringList &names,const QString &label){auto area=new QScrollArea;area->setWidgetResizable(true);auto panel=new QWidget;auto layout=new QHBoxLayout(panel);for(const auto &name:names){auto b=new QToolButton;b->setObjectName("mouthSlot"+name);b->setMinimumSize(110,142);b->setIconSize({82,82});b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);b->setCheckable(true);layout->addWidget(b);slotButtons[name]=b;}layout->addStretch();area->setWidget(panel);states->addTab(area,label);};
+    addSlots({"A","I","U","E","O"},t("Vowels","发声口形","母音"));addSlots({"closed","rest","breath"},t("Special states","特殊口形","特殊な口形"));
+    auto pathRow=new QHBoxLayout;right->addLayout(pathRow);auto path=new QLineEdit;path->setObjectName("mouthImagePath");pathRow->addWidget(path);
+    auto browse=makeButton(t("Choose PNG","选择 PNG","PNG を選択"),"mouthBrowseImage"),assign=makeButton(t("Assign slot","导入此槽","この枠に設定"),"mouthAssignImage"),clear=makeButton(t("Clear slot","清除此槽","枠をクリア"),"mouthClearImage");pathRow->addWidget(browse);pathRow->addWidget(assign);pathRow->addWidget(clear);
+    auto imageStatus=new QLabel;imageStatus->setObjectName("mouthImageStatus");imageStatus->setWordWrap(true);right->addWidget(imageStatus);
+    auto mappings=new QFormLayout;right->addLayout(mappings);QMap<QString,QComboBox *> roleChoices;
+    for(const auto &role:QStringList{"relaxed","normal","emphasis"}){auto box=new QComboBox;box->setObjectName("performanceRole"+role);roleChoices[role]=box;mappings->addRow(role=="relaxed"?t("Restrained","收敛","控えめ"):role=="normal"?t("Normal","常态","通常"):t("Emphasis","强调","強調"),box);connect(box,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[&,box,role]{if(box->currentIndex()>=0)draft.performance.roles[role]=box->currentData().toString();});}
+    right->addStretch();
+    auto refreshSlots=[&]{for(auto it=slotButtons.cbegin();it!=slotButtons.cend();++it){const auto id=variantAssetId(groupId,it.key());const auto file=draft.assets.value(id);const bool own=!file.isEmpty();QString display=file;if(display.isEmpty())display=draft.assets.value(it.key());if(display.isEmpty())display=draft.assets.value(draft.fallback);
+            QImageReader reader(display);auto size=display.isEmpty()?QSize{}:reader.size();if(size.isValid()){size.scale(82,82,Qt::KeepAspectRatio);reader.setScaledSize(size);it.value()->setIcon(QPixmap::fromImage(reader.read()));}else it.value()->setIcon(QIcon());
+            it.value()->setText(mouthName(it.key())+"\n"+(own?t("Assigned","已配图","設定済み"):!display.isEmpty()?t("Fallback","回退","代替"):t("Missing","缺图","未設定")));it.value()->setToolTip(display);it.value()->setChecked(it.key()==selected);}
+        path->setText(draft.assets.value(variantAssetId(groupId,selected)));remove->setEnabled(groupId!="base");};
+    QMap<QString,QString> removedTargets;std::function<void()> refreshRuleTargets;auto refreshGroups=[&]{if(refreshRuleTargets)refreshRuleTargets();QSignalBlocker block(groupList);groupList->clear();for(const auto &g:draft.performance.groups){auto item=new QListWidgetItem(g.name,groupList);item->setData(Qt::UserRole,g.id);if(g.id==groupId)groupList->setCurrentItem(item);}for(auto it=roleChoices.cbegin();it!=roleChoices.cend();++it){QSignalBlocker b(it.value());it.value()->clear();for(const auto &g:draft.performance.groups)it.value()->addItem(g.name,g.id);it.value()->setCurrentIndex(it.value()->findData(draft.performance.roles.value(it.key())));}refreshSlots();};
+    connect(groupList,&QListWidget::currentItemChanged,&dialog,[&](QListWidgetItem *item){if(item){groupId=item->data(Qt::UserRole).toString();refreshSlots();}});
+    connect(states,&QTabWidget::currentChanged,&dialog,[&](int i){selected=i?"closed":"A";refreshSlots();});
+    for(auto it=slotButtons.cbegin();it!=slotButtons.cend();++it)connect(it.value(),&QToolButton::clicked,&dialog,[&,name=it.key()]{selected=name;refreshSlots();});
+    auto newGroup=[&](bool duplicate){bool ok=false;QString name=QInputDialog::getText(&dialog,t("Variant group","差分组","差分グループ"),t("Name","名称","名前"),QLineEdit::Normal,duplicate?variantGroupName(draft,groupId)+" (2)":QString{},&ok);if(!ok||name.trimmed().isEmpty())return;const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);draft.performance.groups.append({id,name.trimmed()});if(duplicate)for(const auto &slot:slotButtons.keys()){auto file=draft.assets.value(variantAssetId(groupId,slot));if(!file.isEmpty())draft.assets[variantAssetId(id,slot)]=file;}groupId=id;refreshGroups();};
+    connect(add,&QPushButton::clicked,&dialog,[&]{newGroup(false);});connect(copy,&QPushButton::clicked,&dialog,[&]{newGroup(true);});
+    connect(rename,&QPushButton::clicked,&dialog,[&]{bool ok=false;auto name=QInputDialog::getText(&dialog,t("Rename group","重命名组","グループ名変更"),t("Name","名称","名前"),QLineEdit::Normal,variantGroupName(draft,groupId),&ok);if(ok&&!name.trimmed().isEmpty()){for(auto &g:draft.performance.groups)if(g.id==groupId)g.name=name.trimmed();refreshGroups();}});
+    connect(remove,&QPushButton::clicked,&dialog,[&]{if(groupId=="base")return;QStringList names,ids;for(const auto &g:draft.performance.groups)if(g.id!=groupId){names<<g.name;ids<<g.id;}bool ok=false;auto choice=QInputDialog::getItem(&dialog,t("Replace removed group","替换被删除的组","削除するグループの置換"),t("Replace every use with:","全部引用替换为：","すべての参照を置換："),names,0,false,&ok);if(ok){removedTargets["group:"+groupId]="group:"+ids[names.indexOf(choice)];removeVariantGroup(draft,groupId,ids[names.indexOf(choice)]);groupId="base";refreshGroups();}});
+    connect(browse,&QPushButton::clicked,&dialog,[&]{auto f=QFileDialog::getOpenFileName(&dialog,trText("PNG"),path->text(),"PNG (*.png)");if(!f.isEmpty())path->setText(f);});
+    connect(assign,&QPushButton::clicked,&dialog,[&]{QImageReader reader(path->text());const auto size=reader.size();if(!size.isValid()||reader.format().toLower()!="png"||qint64(size.width())*size.height()*4>256LL*1024*1024){imageStatus->setText(t("Invalid PNG","PNG 无效","無効な PNG"));return;}auto thumbnail=size;thumbnail.scale(82,82,Qt::KeepAspectRatio);reader.setScaledSize(thumbnail);if(reader.read().isNull()){imageStatus->setText(reader.errorString());return;}
+        bool mismatch=false;for(const auto &slot:slotButtons.keys()){auto otherPath=draft.assets.value(variantAssetId(groupId,slot));if(otherPath.isEmpty())continue;QImageReader other(otherPath);if(other.size().isValid()&&other.size()!=size)mismatch=true;}
+        draft.assets[variantAssetId(groupId,selected)]=QFileInfo(path->text()).absoluteFilePath();refreshSlots();imageStatus->setText(mismatch?t("Assigned; canvas sizes differ in this group.","已配图；本组画布尺寸不同，请预览人物定位。","設定済み。グループ内で画像サイズが異なります。"):t("Assigned","已配图","設定済み"));});
+    connect(clear,&QPushButton::clicked,&dialog,[&]{draft.assets.remove(variantAssetId(groupId,selected));refreshSlots();});refreshGroups();
+    auto automatic=new QScrollArea;automatic->setWidgetResizable(true);auto autoContent=new QWidget;automatic->setWidget(autoContent);auto al=new QFormLayout(autoContent);pages->addTab(automatic,t("Automatic performance","自动演出","自動演出"));
+    auto settingsHint=new QLabel(t("Apply updates automatic performance immediately. Protected manual segments stay. Quarter note = 1. No audio analysis.","应用时自动更新工程演出，保留受保护人工段，可撤销；无需另点生成。四分音符=1，不分析音频。","適用時に自動演出を更新します。保護した手動区間は維持され、元に戻せます。四分音符=1。音声解析なし。"));settingsHint->setWordWrap(true);al->addRow(settingsHint);
+    auto &ps=draft.performance.settings;
+    auto key=new TonalitySelector(draft.appearance,false,t);key->setObjectName("performanceKey");al->addRow(key);
+    auto timeUnit=new QComboBox;timeUnit->setObjectName("performanceTimeBasis");timeUnit->addItem(t("Musical duration (quarter = 1)","音乐时值（四分音符=1）","音楽時間（四分音符=1）"),"music");timeUnit->addItem(t("Elapsed score seconds","谱面经过时间（秒）","楽譜の経過秒"),"seconds");timeUnit->setCurrentIndex(ps.timeBasis==PerformanceTimeBasis::Music?0:1);al->addRow(t("Duration basis","时长依据","時間の単位"),timeUnit);
+    auto unit=new QComboBox;unit->setObjectName("mouthIntervalUnit");unit->addItem(t("Semitones","半音数","半音数"),"semitones");unit->addItem(t("Written degrees","音程度数（按音名）","音程度数"),"diatonic");unit->setCurrentIndex(unit->findData(draft.appearance.intervalUnit));al->addRow(t("Pitch distance basis","音高距离依据","音高差の単位"),unit);
+    auto settingsFlag=[&](const QString &label,const QString &name,bool &value){auto b=new QCheckBox(label);b->setObjectName(name);b->setChecked(value);al->addRow(b);connect(b,&QCheckBox::toggled,&dialog,[&value](bool v){value=v;});};
+    settingsFlag(t("A1: leap arrival","强调：跳进到达（A1）","A1：跳躍の到達"),"performanceLeap",ps.leap);
+    settingsFlag(t("A1: cumulative ascent","强调：累计上行（A1）","A1：上行の累積"),"performanceProgression",ps.progression);
+    settingsFlag(t("A2: repeated high motif","强调：高区重复动机（A2）","A2：高音域の反復動機"),"performanceMotif",ps.motif);
+    settingsFlag(t("A3: elevated section","强调：段落展开（A3）","A3：セクションの展開"),"performanceSection",ps.section);
+    settingsFlag(t("R1: evidence-based release","收敛：持续回落＋节奏放宽＋结束边界（R1）","R1：根拠のある収束"),"performanceRelease",ps.release);
+    auto releaseHelp=new QLabel(t("A1–A3 select Emphasis; R1 selects Restrained. Release needs a sustained lower register, two wider onset gaps and an ending boundary together, with no active emphasis evidence. Tonic, long notes or phrase endings alone do not trigger release. Group names are user-defined.","A1–A3 对应强调，R1 对应收敛。收敛须同时具备：音区持续低于背景、连续两次起音间距放宽、临近结束边界，且没有正在成立的强调依据。主音、长音或句尾本身不触发收敛。差分组名称（如 A、B）由你定义，并无固定强弱含义。","A1–A3 は強調、R1 は抑制です。低音域の持続・2回連続の発音間隔の拡大・終端境界がそろい、強調の根拠がない場合に収束します。主音・長音・句末だけでは収束しません。グループ名は任意です。"));releaseHelp->setWordWrap(true);releaseHelp->setObjectName("performanceRuleHelp");al->addRow(releaseHelp);
+    settingsFlag(t("Retain targets, turns and short breaths","目标、回绕与短换气保持","到達音・折返し・短い息継ぎを維持"),"performanceContinuity",ps.continuity);
+    auto details=new QWidget;auto detailForm=new QFormLayout(details);auto detailsToggle=new QToolButton;detailsToggle->setText(t("Detailed thresholds and note spelling","详细阈值与音名","詳細な閾値と音名"));detailsToggle->setCheckable(true);detailsToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);detailsToggle->setArrowType(Qt::RightArrow);al->addRow(detailsToggle);al->addRow(details);details->hide();connect(detailsToggle,&QToolButton::toggled,&dialog,[=](bool show){details->setVisible(show);detailsToggle->setArrowType(show?Qt::DownArrow:Qt::RightArrow);});
+    QVector<std::function<void()>> refreshParameters;int commonRow=al->rowCount()-2;
+    auto duration=[&](const QString &name,const QString &label,double PerformanceTiming::*field,bool common=false){auto box=new QDoubleSpinBox;box->setObjectName("performance"+name);box->setDecimals(3);box->setRange(.001,128);if(common)al->insertRow(commonRow++,label,box);else detailForm->addRow(label,box);
+        auto refresh=[&,box,field]{QSignalBlocker block(box);box->setValue(ps.timing().*field);box->setSuffix(ps.timeBasis==PerformanceTimeBasis::Music?t(" quarters"," 四分音符"," 四分音符"):t(" s"," 秒"," 秒"));};refreshParameters.append(refresh);refresh();connect(box,qOverload<double>(&QDoubleSpinBox::valueChanged),&dialog,[&,field](double v){(ps.timeBasis==PerformanceTimeBasis::Music?ps.music:ps.seconds).*field=v;});};
+    duration("window",t("Local window","局部观察窗","局所観察範囲"),&PerformanceTiming::window,true);
+    duration("minimum",t("Minimum hold","最低画面保持","最短維持"),&PerformanceTiming::minimum,true);
+    duration("breath",t("Short breath carry","短换气延续上限","短い息継ぎの維持上限"),&PerformanceTiming::breath,true);
+    duration("background",t("Background lookback","背景回看窗","背景参照範囲"),&PerformanceTiming::background);
+    duration("lookahead",t("Local lookahead","局部前看上限","局所先読み上限"),&PerformanceTiming::lookahead);
+    duration("support",t("Sounding support","目标累计发声支持","到達音の発声時間"),&PerformanceTiming::support);
+    duration("confirm",t("Change confirmation","变化确认","変化の確認"),&PerformanceTiming::confirm);
+    duration("emphasis",t("Emphasis hold","强调最低保持","強調の最短維持"),&PerformanceTiming::emphasis);
+    duration("exit",t("Departure confirmation","回落确认","下降の確認"),&PerformanceTiming::exit);
+    duration("phrase",t("Phrase gap","明显分句间隙","フレーズの休止"),&PerformanceTiming::phrase);
+    duration("reset",t("Section reset gap","段落重置间隙","セクションを区切る休止"),&PerformanceTiming::reset);
+    duration("release",t("Release support","收敛支持时长","収束の支持時間"),&PerformanceTiming::release);
+    auto distance=[&](const QString &name,const QString &label,int &semitones,int &degrees,int minSemi,int minDegree){auto box=new QSpinBox;box->setObjectName("performance"+name);detailForm->addRow(label,box);auto refresh=[&,box,minSemi,minDegree]{QSignalBlocker block(box);bool d=unit->currentData()=="diatonic";box->setRange(d?minDegree:minSemi,48);box->setValue(d?degrees:semitones);box->setSuffix(d?t(" degree"," 度"," 度"):t(" semitones"," 半音"," 半音"));};refreshParameters.append(refresh);refresh();connect(box,qOverload<int>(&QSpinBox::valueChanged),&dialog,[&,unit](int v){(unit->currentData()=="diatonic"?degrees:semitones)=v;});};
+    distance("leapDistance",t("Leap","显著跳进","跳躍"),ps.leapSemitones,ps.leapDegrees,1,2);
+    distance("progressionDistance",t("Net ascent","累计上行距离","上行距離"),ps.progressionSemitones,ps.progressionDegrees,1,2);
+    distance("contrastDistance",t("Register contrast","音区明显改变","音域の変化"),ps.contrastSemitones,ps.contrastDegrees,1,2);
+    distance("nearDistance",t("Target radius","同目标半径","同じ到達音の範囲"),ps.nearSemitones,ps.nearDegrees,0,1);
+    auto ratio=[&](const QString &name,const QString &label,double &value,double minimum,double maximum){auto box=new QDoubleSpinBox;box->setObjectName("performance"+name);box->setDecimals(3);box->setRange(minimum,maximum);box->setValue(value);detailForm->addRow(label,box);connect(box,qOverload<double>(&QDoubleSpinBox::valueChanged),&dialog,[&value](double n){value=n;});refreshParameters.append([box,&value]{QSignalBlocker block(box);box->setValue(value);});};
+    ratio("efficiency",t("Net / total motion","净运动／累计运动","純移動／総移動"),ps.efficiency,.001,1);
+    ratio("highShare",t("High-register share","高区发声占比","高音域の割合"),ps.highShare,.001,1);
+    ratio("motifShare",t("Motif high-target share","动机高目标占比","動機の高音割合"),ps.motifShare,.001,1);
+    ratio("activityRatio",t("Activity increase ratio","起音活动增加比例","活動増加比"),ps.activityRatio,1,64);
+    ratio("wideningRatio",t("Onset widening ratio","起音间距放宽比例","発音間隔の拡大比"),ps.wideningRatio,1,64);
+    ratio("motifTolerance",t("Rhythm similarity tolerance","动机节奏容差","動機のリズム許容差"),ps.motifTolerance,0,1);
+    auto scale=new QLineEdit;scale->setObjectName("mouthCustomScale");QStringList scaleValues;for(int n:draft.appearance.customDegreeScale)scaleValues<<QString::number(n);scale->setText(scaleValues.join(' '));detailForm->addRow(t("Custom seven-note offsets","自定义七音偏移（选择自定义调式）","独自7音の半音位置"),scale);
+    connect(scale,&QLineEdit::textChanged,&dialog,[key](const QString &text){QVector<int> values;for(auto token:text.split(QRegularExpression("[,，\\s]+"),Qt::SkipEmptyParts)){bool ok=false;int n=token.toInt(&ok);if(!ok)return;values.append(n);}if(values.size()==7&&values.front()==0&&values.last()<12&&std::adjacent_find(values.begin(),values.end(),std::greater_equal<int>())==values.end())key->setCustomScale(values);});
+    auto spellingButton=makeButton(t("Written note names…","逐音音名…","音符名の指定…"),"performanceSpellings");detailForm->addRow(spellingButton);
+    connect(spellingButton,&QPushButton::clicked,&dialog,[&]{
+        QDialog d(&dialog);d.setWindowTitle(spellingButton->text());d.resize(740,540);auto l=new QVBoxLayout(&d);auto page=new QSpinBox;l->addWidget(page);auto table=new QTableWidget(0,4);table->setHorizontalHeaderLabels({t("Track","轨道","トラック"),t("Beat","拍位","拍位置"),t("MIDI pitch","MIDI 音高","MIDI 音高"),t("Written name (e.g. C#4)","音名（如 C#4）","音名（例 C#4）")});table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);l->addWidget(table);auto buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);l->addWidget(buttons);
+        QVector<QPair<QString,Note>> notes;for(const auto &track:draft.score.tracks)if(draft.selected.contains(track.id))for(const auto &n:track.notes)notes.append({track.name,n});auto names=draft.appearance.noteSpellings;page->setRange(1,std::max(1,(int(notes.size())+255)/256));page->setPrefix(t("Page ","页 ","ページ "));bool filling=false;
+        auto fill=[&]{filling=true;table->setRowCount(0);for(int i=(page->value()-1)*256;i<std::min(int(notes.size()),page->value()*256);++i){int r=table->rowCount();table->insertRow(r);const auto &n=notes[i].second;QStringList values={notes[i].first,draft.score.time.beatLabel(n.onset),QString::number(n.pitch),names.value(n.id)};for(int c=0;c<4;++c){auto cell=new QTableWidgetItem(values[c]);if(c<3)cell->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);cell->setData(Qt::UserRole,n.id);cell->setData(Qt::UserRole+1,n.pitch);table->setItem(r,c,cell);}}filling=false;};
+        connect(page,qOverload<int>(&QSpinBox::valueChanged),&d,[&]{fill();});connect(table,&QTableWidget::itemChanged,&d,[&](QTableWidgetItem *item){if(filling||item->column()!=3)return;QSignalBlocker block(table);auto text=item->text().trimmed();auto written=parseWrittenPitch(text);auto id=item->data(Qt::UserRole).toString();if(text.isEmpty())names.remove(id);else names[id]=text;item->setBackground(text.isEmpty()||(written&&written->midi==item->data(Qt::UserRole+1).toInt())?QBrush():QBrush(QColor("#ffd5d5")));});
+        connect(buttons,&QDialogButtonBox::accepted,&d,[&]{for(const auto &entry:notes){auto text=names.value(entry.second.id);auto name=parseWrittenPitch(text);if(!text.isEmpty()&&(!name||name->midi!=entry.second.pitch)){QMessageBox::warning(&d,t("Invalid note name","音名无效","音名が無効"),text);return;}}d.accept();});connect(buttons,&QDialogButtonBox::rejected,&d,&QDialog::reject);fill();if(d.exec()==QDialog::Accepted)draft.appearance.noteSpellings=names;
+    });
+    auto customRules=new QTableWidget(0,7);customRules->setObjectName("performanceRules");customRules->setHorizontalHeaderLabels({t("On","启用","有効"),t("Priority","优先级","優先度"),t("Condition","条件","条件"),t("Threshold","阈值","閾値"),t("Min quarters","最少四分音符","最短四分音符"),t("Target","目标","対象"),t("Track","轨道","トラック")});customRules->setMinimumHeight(230);detailForm->addRow(customRules);
+    auto addRule=[&](const PerformanceRule &rule){int row=customRules->rowCount();customRules->insertRow(row);auto on=new QTableWidgetItem;on->setData(Qt::UserRole,QVariantList{rule.threshold,rule.thresholdSeconds,rule.thresholdDegrees,rule.minBeats,rule.minSeconds});on->setCheckState(rule.enabled?Qt::Checked:Qt::Unchecked);customRules->setItem(row,0,on);
+        for(auto pair:{qMakePair(1,QString::number(rule.priority)),qMakePair(3,QString::number(rule.condition=="long"&&ps.timeBasis==PerformanceTimeBasis::Seconds?rule.thresholdSeconds:QStringList{"leap","up","down"}.contains(rule.condition)&&draft.appearance.intervalUnit=="diatonic"?rule.thresholdDegrees:rule.threshold)),qMakePair(4,QString::number(ps.timeBasis==PerformanceTimeBasis::Music?rule.minBeats:rule.minSeconds))})customRules->setItem(row,pair.first,new QTableWidgetItem(pair.second));
+        auto condition=new QComboBox;for(const auto &c:QStringList{"leap","up","down","long","degree","outside","tonic","strong","high"})condition->addItem(c=="leap"?t("Leap distance","跳进距离","跳躍距離"):c=="up"?t("Net ascent","净上行距离","上行距離"):c=="down"?t("Net descent","净下行距离","下行距離"):c=="long"?t("Duration","时值","長さ"):c=="degree"?t("Scale degree","音级","音級"):c=="outside"?t("Outside scale","调外音","音階外音"):c=="tonic"?t("Tonic","主音","主音"):c=="strong"?t("Strong beat","强拍","強拍"):t("MIDI pitch at least","MIDI 音高至少","MIDI 音高の下限"),c);condition->setCurrentIndex(condition->findData(rule.condition));customRules->setCellWidget(row,2,condition);
+        auto thresholdItem=customRules->item(row,3);auto updateThreshold=[condition,thresholdItem]{bool used=!QStringList{"tonic","outside","strong"}.contains(condition->currentData().toString());thresholdItem->setFlags(used?Qt::ItemIsSelectable|Qt::ItemIsEnabled|Qt::ItemIsEditable:Qt::NoItemFlags);thresholdItem->setForeground(used?QBrush():QBrush(Qt::transparent));};connect(condition,&QComboBox::currentIndexChanged,&dialog,updateThreshold);updateThreshold();
+        auto target=new QComboBox;for(const auto &r:QStringList{"relaxed","normal","emphasis"})target->addItem(r=="relaxed"?t("Relaxed","收敛","抑制"):r=="normal"?t("Normal","常态","通常"):t("Emphasis","强调","強調"),r);for(const auto &g:draft.performance.groups)target->addItem(g.name,"group:"+g.id);target->setCurrentIndex(target->findData(rule.target));customRules->setCellWidget(row,5,target);
+        auto track=new QComboBox;track->addItem(t("All","全部","すべて"),"");for(const auto &v:draft.score.tracks)track->addItem(v.name,v.id);track->setCurrentIndex(track->findData(rule.track));customRules->setCellWidget(row,6,track);};
+    for(const auto &rule:ps.rules)addRule(rule);auto ruleButtons=new QWidget;auto rbl=new QHBoxLayout(ruleButtons);auto addRuleButton=makeButton(t("Add rule","添加规则","規則追加"),"addPerformanceRule"),deleteRule=makeButton(t("Remove rule","删除规则","規則削除"),"deletePerformanceRule");rbl->addWidget(addRuleButton);rbl->addWidget(deleteRule);detailForm->addRow(ruleButtons);connect(addRuleButton,&QPushButton::clicked,&dialog,[&]{addRule(PerformanceRule{});});connect(deleteRule,&QPushButton::clicked,&dialog,[&]{if(customRules->currentRow()>=0)customRules->removeRow(customRules->currentRow());});
+    auto ruleHint=new QLabel(t("Higher priority runs first; ties use row order. Rules still respect automatic hold limits. Tonic/degree conditions require an explicit key. A tonic is not automatically quiet.","优先级数值大者先匹配，同级按行顺序；仍遵守自动保持。音级条件需要明确调性，主音不自动等于收敛。","優先度の大きい規則が先。同値は行順。音級条件には調性が必要です。主音を必ず弱くしません。"));ruleHint->setWordWrap(true);detailForm->addRow(ruleHint);
+    auto defaults=new QCheckBox(t("Save general settings and all-track role rules as new-project defaults","将通用参数与全轨道档位规则保存为新工程默认","共通設定・全トラックの役割規則を新規既定に保存"));defaults->setObjectName("performanceSaveDefaults");al->addRow(defaults);
         auto consonantPage=new QWidget;
         auto consonantLayout=new QVBoxLayout(consonantPage);
         pages->addTab(consonantPage,t("Consonant rules","辅音规则","子音規則"));
@@ -367,407 +222,69 @@ namespace chosuta {
             fillConsonants();
         });
         consonantLayout->addStretch();
-        auto analysisPage=new QScrollArea;
-        analysisPage->setWidgetResizable(true);
-        auto analysisContent=new QWidget;
-        auto analysisLayout=new QFormLayout(analysisContent);
-        analysisPage->setWidget(analysisContent);
-        pages->addTab(analysisPage,t("Classification","姿态规则","姿勢の規則"));
-        auto step=new QSpinBox;
-        step->setObjectName("mouthStepMax");
-        step->setRange(1,24);
-        step->setValue(draft.appearance.stepMax);
-        auto small=new QSpinBox;
-        small->setObjectName("mouthSmallMax");
-        small->setRange(draft.appearance.stepMax+1,48);
-        small->setValue(draft.appearance.smallMax);
-        const auto semitoneSuffix=t(" semitones"," 半音"," 半音");
-        step->setSuffix(semitoneSuffix);
-        small->setSuffix(semitoneSuffix);
-        auto unit=new QComboBox;
-        unit->setObjectName("mouthIntervalUnit");
-        unit->addItem(t("Semitones","半音","半音"),"semitones");
-        unit->addItem(t("Diatonic degrees","乐理度数","楽理に基づく度数"),"diatonic");
-        unit->setCurrentIndex(unit->findData(draft.appearance.intervalUnit));
-        analysisLayout->addRow(t("Threshold units","阈值设置方式","閾値の設定方法"),unit);
-        auto degreeStep=new QSpinBox;
-        degreeStep->setObjectName("mouthStepDegree");
-        degreeStep->setRange(2,15);
-        degreeStep->setValue(draft.appearance.stepDegreeMax);
-        auto degreeSmall=new QSpinBox;
-        degreeSmall->setObjectName("mouthSmallDegree");
-        degreeSmall->setRange(draft.appearance.stepDegreeMax+1,29);
-        degreeSmall->setValue(draft.appearance.smallDegreeMax);
-        const auto degreeSuffix=t(" degrees"," 度"," 度");
-        degreeStep->setSuffix(degreeSuffix);
-        degreeSmall->setSuffix(degreeSuffix);
-        auto stepEditor=new QStackedWidget;
-        stepEditor->addWidget(step);
-        stepEditor->addWidget(degreeStep);
-        auto smallEditor=new QStackedWidget;
-        smallEditor->addWidget(small);
-        smallEditor->addWidget(degreeSmall);
-        analysisLayout->addRow(t("Step maximum","级进上限","順次進行の上限"),stepEditor);
-        analysisLayout->addRow(t("Small leap maximum","小跳上限","小さな跳躍の上限"),smallEditor);
-        auto degreeExtra=new QWidget;
-        degreeExtra->setObjectName("mouthDegreeSettings");
-        auto degreeLayout=new QVBoxLayout(degreeExtra);
-        degreeLayout->setContentsMargins(0,0,0,0);
-        auto toneForm=new QFormLayout;
-        degreeLayout->addLayout(toneForm);
-        auto tonic=new QComboBox;
-        tonic->setObjectName("mouthDegreeTonic");
-        for(const auto &letter:QStringList{"C","D","E","F","G","A","B"})for(const auto &accidental:QStringList{"b","","#"})tonic->addItem(letter+accidental,letter+accidental);
-        if(tonic->findData(draft.appearance.degreeTonic)<0)tonic->addItem(draft.appearance.degreeTonic,draft.appearance.degreeTonic);
-        tonic->setCurrentIndex(tonic->findData(draft.appearance.degreeTonic));
-        toneForm->addRow(t("Tonic","主音","主音"),tonic);
-        auto mode=new QComboBox;
-        mode->setObjectName("mouthDegreeMode");
-        mode->addItem(t("Natural major / Ionian","自然大调 / 伊奥尼亚","自然長音階 / イオニアン"),"major");
-        mode->addItem(t("Natural minor / Aeolian","自然小调 / 爱奥利亚","自然短音階 / エオリアン"),"minor");
-        mode->addItem(t("Dorian","多利亚","ドリアン"),"dorian");
-        mode->addItem(t("Phrygian","弗里几亚","フリジアン"),"phrygian");
-        mode->addItem(t("Lydian","利底亚","リディアン"),"lydian");
-        mode->addItem(t("Mixolydian","混合利底亚","ミクソリディアン"),"mixolydian");
-        mode->addItem(t("Locrian","洛克里亚","ロクリアン"),"locrian");
-        mode->addItem(t("Harmonic minor","和声小调","和声短音階"),"harmonic-minor");
-        mode->addItem(t("Melodic minor (ascending scale)","旋律小调（上行音阶）","旋律短音階（上行音階）"),"melodic-minor");
-        mode->addItem(t("Harmonic major","和声大调","和声長音階"),"harmonic-major");
-        mode->addItem(t("Custom seven-note scale","自定义七声音阶","カスタム七音音階"),"custom");
-        mode->setCurrentIndex(mode->findData(draft.appearance.degreeMode));
-        toneForm->addRow(t("Mode","调式","旋法"),mode);
-        auto customRow=new QWidget;
-        auto customLayout=new QHBoxLayout(customRow);
-        customLayout->setContentsMargins(0,0,0,0);
-        customLayout->addWidget(new QLabel(t("Scale offsets","音阶半音位置","音階の半音位置")));
-        auto customScale=new QLineEdit;
-        customScale->setObjectName("mouthCustomDegreeScale");
-        QStringList offsets;for(int n:draft.appearance.customDegreeScale)offsets.append(QString::number(n));
-        customScale->setText(offsets.join(','));
-        customLayout->addWidget(customScale,1);
-        degreeLayout->addWidget(customRow);
-        customRow->setVisible(draft.appearance.degreeMode=="custom");
-        auto spellingHint=new QLabel;
-        spellingHint->setObjectName("mouthSpellingStatus");
-        spellingHint->setWordWrap(true);
-        degreeLayout->addWidget(spellingHint);
-        auto spellingToggle=new QToolButton;
-        spellingToggle->setObjectName("mouthSpellingToggle");
-        spellingToggle->setText(t("Adjust written note names","校正音名","音名を補正"));
-        spellingToggle->setCheckable(true);
-        degreeLayout->addWidget(spellingToggle);
-        auto spellingTable=new QTableWidget(0,5);
-        spellingTable->setObjectName("mouthSpellingTable");
-        spellingTable->setHorizontalHeaderLabels({t("Track","轨道","トラック"),t("Score position","谱面位置","譜面位置"),t("Pitch","音高","音高"),t("Mode spelling","调式音名","旋法による音名"),t("Override (blank = mode)","指定音名（空白按调式）","指定音名（空欄は旋法）")});
-        spellingTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-        spellingTable->setMinimumHeight(160);
-        spellingTable->setMaximumHeight(230);
-        spellingTable->hide();
-        degreeLayout->addWidget(spellingTable);
-        QSet<QString> singingSources;
-        for(const auto &event:project.generated)if(event.articulation=="vowel"||event.articulation=="extend"||(event.articulation.isEmpty()&&QStringList{"A","I","U","E","O"}.contains(event.shape)))singingSources.insert(event.source);
-        auto refreshSpellings=[&](bool rebuild=true){
-            const QSignalBlocker block(spellingTable);
-            if(rebuild)spellingTable->setRowCount(0);
-            int missing=0,total=0;
-            auto inferred=draft.appearance;inferred.noteSpellings.clear();
-            for(const auto &track:project.score.tracks)if(!track.muted&&project.selected.contains(track.id))for(const auto &note:track.notes)if(!note.muted&&singingSources.contains(note.id)){
-                ++total;if(!writtenPitch(draft.appearance,note))++missing;
-                if(!rebuild||!spellingToggle->isChecked())continue;
-                const int row=spellingTable->rowCount();spellingTable->insertRow(row);
-                const auto name=writtenPitch(inferred,note);
-                const QStringList values={track.name,project.score.time.beatLabel(note.onset),QString::number(note.pitch),name?name->name:t("Not in scale","非调内音","音階外の音"),draft.appearance.noteSpellings.value(note.id)};
-                for(int column=0;column<values.size();++column){auto item=new QTableWidgetItem(values[column]);if(column!=4)item->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);spellingTable->setItem(row,column,item);}
-                spellingTable->item(row,4)->setData(Qt::UserRole,note.id);
-                spellingTable->item(row,4)->setData(Qt::UserRole+1,note.pitch);
-            }
-            spellingHint->setText(t("%1 / %2 note names unresolved. Enter names such as C#4 or Db4; unmatched spans use shared interval images. No key detection; use natural minor for descending melodic-minor spelling.",
-                "%1 / %2 个音名待指定。可填 C#4、Db4；未确定音名的跨度用通用幅度。不自动识别调式；旋律小调下行可选自然小调或逐音指定。",
-                "%1 / %2 音の音名が未指定です。C#4、Db4 などを入力し、未確定の音程は共通画像を使います。旋法は自動判定しません。旋律短音階の下行には自然短音階または個別指定を使います。").arg(missing).arg(total));
-        };
-        connect(spellingToggle,&QToolButton::toggled,&dialog,[&](bool value){spellingTable->setVisible(value);refreshSpellings();});
-        connect(spellingTable,&QTableWidget::itemChanged,&dialog,[&](QTableWidgetItem *item){
-            if(item->column()!=4)return;
-            const auto id=item->data(Qt::UserRole).toString(),text=item->text().trimmed();
-            if(text.isEmpty())draft.appearance.noteSpellings.remove(id);
-            else {
-                const auto parsed=parseWrittenPitch(text);
-                if(!parsed||parsed->midi!=item->data(Qt::UserRole+1).toInt()){
-                    draft.appearance.noteSpellings[id]=text;
-                    spellingHint->setText(t("Written name must match the note pitch; fix it before applying.","指定音名必须与当前音高一致，请修正后再应用。","指定音名は現在の音高と一致する必要があります。修正してから適用してください。"));
-                    return;
-                }
-                draft.appearance.noteSpellings[id]=parsed->name;
-            }
-            status->clear();
-            refreshSpellings(false);
-        });
-        auto readCustomScale=[&]{
-            QVector<int> values;
-            for(const auto &field:customScale->text().split(QRegularExpression("[,，\\s]+"),Qt::SkipEmptyParts)){bool ok=false;const int n=field.toInt(&ok);if(!ok)throw Failure(t("Invalid scale offsets","音阶位置无效","音階の位置が無効です"));values.append(n);}
-            if(values.size()!=7||values.front()!=0)throw Failure(t("Enter seven ascending offsets from 0 to 11, starting at zero.","请填写以 0 开头的七个递增半音位置（0–11）。","0 から始まる昇順の七つの半音位置（0–11）を入力してください。"));
-            for(int i=0;i<values.size();++i)if(values[i]<0||values[i]>11||(i&&values[i]<=values[i-1]))throw Failure(t("Scale offsets must ascend within 0–11.","音阶半音位置须在 0–11 内递增。","音階の半音位置は 0–11 の範囲で昇順にしてください。"));
-            return values;
-        };
-        connect(customScale,&QLineEdit::editingFinished,&dialog,[&]{try{draft.appearance.customDegreeScale=readCustomScale();status->clear();refreshSpellings();}catch(const std::exception &error){status->setText(QString::fromUtf8(error.what()));}});
-        connect(tonic,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[&]{draft.appearance.degreeTonic=tonic->currentData().toString();status->clear();refreshSpellings();});
-        connect(mode,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[&]{draft.appearance.degreeMode=mode->currentData().toString();customRow->setVisible(draft.appearance.degreeMode=="custom");status->clear();refreshSpellings();});
-        analysisLayout->addRow(degreeExtra);
-        auto showUnit=[&]{
-            const int index=unit->currentData()=="diatonic"?1:0;
-            stepEditor->setCurrentIndex(index);smallEditor->setCurrentIndex(index);degreeExtra->setVisible(index==1);
-        };
-        showUnit();refreshSpellings();
-        connect(unit,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[&]{draft.appearance.intervalUnit=unit->currentData().toString();showUnit();});
-        connect(step,qOverload<int>(&QSpinBox::valueChanged),&dialog,[&](int value){draft.appearance.stepMax=value;small->setMinimum(value+1);});
-        connect(small,qOverload<int>(&QSpinBox::valueChanged),&dialog,[&](int value){draft.appearance.smallMax=value;});
-        connect(degreeStep,qOverload<int>(&QSpinBox::valueChanged),&dialog,[&](int value){draft.appearance.stepDegreeMax=value;degreeSmall->setMinimum(value+1);});
-        connect(degreeSmall,qOverload<int>(&QSpinBox::valueChanged),&dialog,[&](int value){draft.appearance.smallDegreeMax=value;});
-        auto intervalHint=new QLabel(t("Diatonic degrees count written letter positions across octaves. Repeated notes are a direction choice and use the shared interval; altered unisons also use the shared interval. Each mode keeps its own thresholds; direction follows score pitch. Tone and spellings are saved in this project.",
-            "乐理度数按音名字母及八度计算。同音反复在方向栏设置，使用通用幅度；增减一度也用通用幅度。两种判定各保留阈值，方向仍按谱面音高；调式和音名保存到当前工程。",
-            "度数は音名とオクターブから数えます。同音反復は方向欄で設定し、音程共通の画像を使います。増減1度も音程共通です。両方式の閾値を保持し、方向は譜面の音高を使います。旋法と音名は現在のプロジェクトに保存します。"));
-        intervalHint->setObjectName("mouthIntervalUnitHint");intervalHint->setWordWrap(true);analysisLayout->addRow(intervalHint);
-        auto addAnchor=[&](const QString &label,const QString &name,QString &value){
-            auto choice=new QComboBox;
-            choice->setObjectName(name);
-            choice->addItem(t("Previous singing note","前一发声音符","前の発声音符"),"previous");
-            choice->addItem(t("Next singing note","后一发声音符","次の発声音符"),"next");
-            choice->addItem(t("Neutral","通用姿态","共通姿勢"),"neutral");
-            choice->setCurrentIndex(choice->findData(value));
-            analysisLayout->addRow(label,choice);
-            auto target=&value;
-            connect(choice,qOverload<int>(&QComboBox::currentIndexChanged),&dialog,[choice,target]{
-                *target=choice->currentData().toString();
-            });
-        };
-        addAnchor(t("Closure / cl pose","促音 / 独立闭口姿态","促音 / 単独閉口の姿勢"),"mouthClosureAnchor",draft.appearance.closureAnchor);
-        addAnchor(t("Breath pose","呼吸姿态","ブレスの姿勢"),"mouthBreathAnchor",draft.appearance.breathAnchor);
-        addAnchor(t("Rest pose","休息姿态","休止の姿勢"),"mouthRestAnchor",draft.appearance.restAnchor);
-        auto accents=new QTableWidget(0,2);
-        accents->setObjectName("mouthAccentTemplates");
-        accents->setHorizontalHeaderLabels({
-            t("Meter","拍号","拍子"),t("Strong positions (blank = default)","强拍位置（空白用默认）","強拍位置（空欄は既定）")
-        });
-        accents->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-        analysisLayout->addRow(accents);
-        QSet<QString> signatures;
-        for(const auto &meter:project.score.time.meters)signatures.insert(QString("%1/%2").arg(meter.numerator).arg(meter.denominator));
-        for(const auto &key:draft.appearance.strongBeats.keys())signatures.insert(key);
-        auto sorted=signatures.values();
-        sorted.sort();
-        for(const auto &key:sorted){
-            const int row=accents->rowCount();
-            accents->insertRow(row);
-            auto item=new QTableWidgetItem(key);
-            item->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);
-            accents->setItem(row,0,item);
-            QStringList values;
-            for(int n:draft.appearance.strongBeats.value(key))values.append(QString::number(n));
-            accents->setItem(row,1,new QTableWidgetItem(values.join(',')));
+    refreshRuleTargets=[&]{for(int row=0;row<customRules->rowCount();++row){auto combo=qobject_cast<QComboBox *>(customRules->cellWidget(row,5));auto previous=combo->currentData().toString();while(removedTargets.contains(previous))previous=removedTargets.value(previous);QSignalBlocker block(combo);combo->clear();combo->addItem(t("Relaxed","收敛","抑制"),"relaxed");combo->addItem(t("Normal","常态","通常"),"normal");combo->addItem(t("Emphasis","强调","強調"),"emphasis");for(auto g:draft.performance.groups)combo->addItem(g.name,"group:"+g.id);int index=combo->findData(previous);combo->setCurrentIndex(index<0?combo->findData("group:base"):index);}};
+    auto readRules=[&]{QVector<PerformanceRule> list;for(int row=0;row<customRules->rowCount();++row){PerformanceRule r;r.enabled=customRules->item(row,0)->checkState()==Qt::Checked;bool ok=false;r.priority=customRules->item(row,1)->text().toInt(&ok);if(!ok)throw Failure("Invalid rule priority");double threshold=customRules->item(row,3)->text().toDouble(&ok);if(!ok)throw Failure("Invalid rule threshold");double minimum=customRules->item(row,4)->text().toDouble(&ok);if(!ok)throw Failure("Invalid rule duration");r.condition=qobject_cast<QComboBox *>(customRules->cellWidget(row,2))->currentData().toString();r.target=qobject_cast<QComboBox *>(customRules->cellWidget(row,5))->currentData().toString();r.track=qobject_cast<QComboBox *>(customRules->cellWidget(row,6))->currentData().toString();auto values=customRules->item(row,0)->data(Qt::UserRole).toList();r.threshold=values[0].toDouble();r.thresholdSeconds=values[1].toDouble();r.thresholdDegrees=values[2].toDouble();r.minBeats=values[3].toDouble();r.minSeconds=values[4].toDouble();bool seconds=ps.timeBasis==PerformanceTimeBasis::Seconds;bool degrees=draft.appearance.intervalUnit=="diatonic";
+        (seconds?r.minSeconds:r.minBeats)=minimum;
+        if(r.condition=="long"&&seconds)r.thresholdSeconds=threshold;else if(degrees&&QStringList{"leap","up","down"}.contains(r.condition))r.thresholdDegrees=threshold;else r.threshold=threshold;list.append(r);}return list;};
+    for(int direction:{-1,1}){auto b=new QPushButton(direction<0?t("Up","上移","上へ"):t("Down","下移","下へ"));rbl->addWidget(b);connect(b,&QPushButton::clicked,&dialog,[&,direction]{try{int row=customRules->currentRow(),other=row+direction;if(row<0||other<0||other>=customRules->rowCount())return;auto list=readRules();list.swapItemsAt(row,other);customRules->setRowCount(0);for(const auto &r:list)addRule(r);customRules->setCurrentCell(other,0);}catch(const std::exception &e){status->setText(QString::fromUtf8(e.what()));}});}
+    auto showTable=[&]{customRules->horizontalHeaderItem(3)->setText(t("Threshold (selected basis)","阈值（所选依据）","閾値（選択単位）"));customRules->horizontalHeaderItem(4)->setText(ps.timeBasis==PerformanceTimeBasis::Seconds?t("Min seconds","最少秒数","最短秒"):t("Min quarters","最少四分音符","最短四分音符"));};showTable();
+    auto switchBasis=[&]{try{auto rules=readRules();ps.timeBasis=timeUnit->currentIndex()==0?PerformanceTimeBasis::Music:PerformanceTimeBasis::Seconds;draft.appearance.intervalUnit=unit->currentData().toString();customRules->setRowCount(0);for(const auto &r:rules)addRule(r);for(auto &refresh:refreshParameters)refresh();showTable();}catch(const std::exception &e){QSignalBlocker tb(timeUnit),pb(unit);timeUnit->setCurrentIndex(ps.timeBasis==PerformanceTimeBasis::Music?0:1);unit->setCurrentIndex(unit->findData(draft.appearance.intervalUnit));status->setText(QString::fromUtf8(e.what()));}};
+    connect(timeUnit,&QComboBox::currentIndexChanged,&dialog,switchBasis);connect(unit,&QComboBox::currentIndexChanged,&dialog,switchBasis);
+    auto restore=makeButton(t("Restore recommended rules","恢复推荐规则","推奨規則に戻す"),"restorePerformanceRules");al->addRow(restore);connect(restore,&QPushButton::clicked,&dialog,[&]{customRules->setRowCount(0);ps=PerformanceSettings{};timeUnit->setCurrentIndex(0);unit->setCurrentIndex(0);for(auto &refresh:refreshParameters)refresh();for(const auto &name:{"performanceLeap","performanceProgression","performanceMotif","performanceSection","performanceRelease","performanceContinuity"})dialog.findChild<QCheckBox *>(name)->setChecked(true);});
+    auto importPage=new QWidget;auto il=new QVBoxLayout(importPage);pages->addTab(importPage,t("Batch import","批量导入","一括読込"));
+    auto importHint=new QLabel(t("Drop PNGs or a folder here. Filenames suggest slots; any valid PNG can be mapped manually. Choose each destination group and mouth, or select rows and assign a group together. Checked replacements overwrite the settings draft only.","可拖入 PNG 或文件夹。文件名只用于建议槽位，任意有效 PNG 都能指定差分组和口形。可逐行选择，或选中多行后统一指定组。勾选替换项表示确认替换；此处先改设置草稿，原图不变。","PNGまたはフォルダーをドロップできます。任意のPNGにグループと口形を指定でき、選択した複数行のグループを一括変更できます。チェックした置換は設定の下書きに適用されます。"));importHint->setWordWrap(true);il->addWidget(importHint);
+    auto folderRow=new QHBoxLayout;il->addLayout(folderRow);auto folder=new QLineEdit;folder->setObjectName("mouthImportFolder");folderRow->addWidget(folder);auto chooseFolder=makeButton(t("Choose folder","选择文件夹","フォルダー選択"),"mouthChooseFolder"),scan=makeButton(t("Scan folder","扫描文件夹","確認"),"mouthScanFolder"),chooseFiles=makeButton(t("Choose PNGs","选择多个 PNG","PNG を選択"),"mouthChooseFiles"),cancelScan=makeButton(trText("Cancel"),"mouthCancelScan");folderRow->addWidget(chooseFolder);folderRow->addWidget(scan);folderRow->addWidget(chooseFiles);folderRow->addWidget(cancelScan);cancelScan->setEnabled(false);
+    auto groupRow=new QHBoxLayout;il->addLayout(groupRow);auto batchGroup=new QComboBox;batchGroup->setObjectName("importTargetGroup");groupRow->addWidget(batchGroup);auto mapSelected=makeButton(t("Set group for selected rows","选中行指定此组","選択行のグループを変更"),"importMapSelected"),newImportGroup=makeButton(t("New group…","新建组…","新規グループ…"),"importNewGroup");groupRow->addWidget(mapSelected);groupRow->addWidget(newImportGroup);
+    auto importTable=new QTableWidget(0,5);importTable->setObjectName("mouthImportTable");importTable->setSelectionBehavior(QAbstractItemView::SelectRows);importTable->setHorizontalHeaderLabels({t("Import","导入","読込"),t("Destination group","目标差分组","対象グループ"),t("Mouth","口形","口形"),t("File","文件","ファイル"),t("Status","状态","状態")});importTable->horizontalHeader()->setSectionResizeMode(3,QHeaderView::Stretch);il->addWidget(importTable);
+    auto thumbnail=new QLabel;thumbnail->setObjectName("importPreview");thumbnail->setFixedHeight(96);thumbnail->setAlignment(Qt::AlignCenter);il->addWidget(thumbnail);
+    auto applyImport=makeButton(t("Import checked rows into settings draft","将勾选项导入设置草稿","選択項目を設定の下書きに読込"),"mouthApplyImport");il->addWidget(applyImport);auto importProgress=new QProgressBar;il->addWidget(importProgress);importProgress->hide();
+    QFutureWatcher<AssetImportPlan> watcher;auto scanCancel=std::make_shared<std::atomic_bool>(false);AssetImportPlan importPlan;
+    auto groupOptions=[&](QComboBox *box,const QString &current){QSignalBlocker b(box);box->clear();for(const auto &g:draft.performance.groups)box->addItem(g.name,g.id);for(const auto &g:importPlan.groups)if(box->findData(g.id)<0)box->addItem(g.name+t(" (new)","（新组）","（新規）"),g.id);box->setCurrentIndex(std::max(0,box->findData(current)));};
+    auto destination=[&](int row){auto g=qobject_cast<QComboBox *>(importTable->cellWidget(row,1)),mouth=qobject_cast<QComboBox *>(importTable->cellWidget(row,2));return mouth->currentData().toString().isEmpty()?QString{}:variantAssetId(g->currentData().toString(),mouth->currentData().toString());};
+    auto updateImportRow=[&](int row){const auto &e=importPlan.entries[row];auto id=destination(row);bool invalid=e.status=="invalid",replacement=draft.assets.contains(id),conflict=e.status=="conflict"&&id==e.id;auto cell=importTable->item(row,0);cell->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable|(!invalid&&!id.isEmpty()?Qt::ItemIsUserCheckable:Qt::NoItemFlags));cell->setCheckState(!invalid&&!id.isEmpty()&&!replacement&&!conflict?Qt::Checked:Qt::Unchecked);auto text=invalid?t("Invalid PNG","PNG 无效","無効な PNG"):id.isEmpty()?t("Choose mouth","请选择口形","口形を選択"):replacement?t("Replacement: check to confirm","替换：勾选确认","置換：チェックして確認"):conflict?t("Duplicate: remap or select one","重名：改映射或选一个","重複：変更または1つ選択"):t("New","新增","新規");importTable->item(row,4)->setText(text);importTable->item(row,4)->setToolTip(e.message);};
+    auto fillImport=[&]{groupOptions(batchGroup,groupId);importTable->setRowCount(0);for(int i=0;i<importPlan.entries.size();++i){const auto &e=importPlan.entries[i];importTable->insertRow(i);auto check=new QTableWidgetItem;importTable->setItem(i,0,check);auto g=new QComboBox;groupOptions(g,e.group.isEmpty()?groupId:e.group);importTable->setCellWidget(i,1,g);auto mouth=new QComboBox;mouth->addItem(t("Choose…","请选择…","選択…"),"");for(const auto &slot:QStringList{"A","I","U","E","O","closed","rest","breath"})mouth->addItem(mouthName(slot),slot);mouth->setCurrentIndex(std::max(0,mouth->findData(e.id.section('/',-1))));importTable->setCellWidget(i,2,mouth);for(int c:{3,4}){auto item=new QTableWidgetItem(c==3?QFileInfo(e.path).fileName():QString{});item->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);item->setToolTip(e.path);importTable->setItem(i,c,item);}updateImportRow(i);connect(g,&QComboBox::currentIndexChanged,&dialog,[&,i]{updateImportRow(i);});connect(mouth,&QComboBox::currentIndexChanged,&dialog,[&,i]{updateImportRow(i);});}};
+    connect(importTable,&QTableWidget::currentCellChanged,&dialog,[&](int row){thumbnail->clear();if(row<0||row>=importPlan.entries.size())return;QImageReader reader(importPlan.entries[row].path);auto size=reader.size();if(!size.isValid()||importPlan.entries[row].status=="invalid")return;size.scale(96,96,Qt::KeepAspectRatio);reader.setScaledSize(size);thumbnail->setPixmap(QPixmap::fromImage(reader.read()));});
+    connect(mapSelected,&QPushButton::clicked,&dialog,[&]{for(const auto &index:importTable->selectionModel()->selectedRows()){auto combo=qobject_cast<QComboBox *>(importTable->cellWidget(index.row(),1));combo->setCurrentIndex(combo->findData(batchGroup->currentData()));}});
+    connect(newImportGroup,&QPushButton::clicked,&dialog,[&]{newGroup(false);groupOptions(batchGroup,groupId);for(int row=0;row<importTable->rowCount();++row){auto box=qobject_cast<QComboBox *>(importTable->cellWidget(row,1));groupOptions(box,box->currentData().toString());}});
+    connect(chooseFolder,&QPushButton::clicked,&dialog,[&]{auto f=QFileDialog::getExistingDirectory(&dialog,chooseFolder->text(),folder->text());if(!f.isEmpty())folder->setText(f);});connect(cancelScan,&QPushButton::clicked,&dialog,[&]{scanCancel->store(true);});
+    auto scanPaths=[&](QStringList paths){
+        if(watcher.isRunning()||paths.isEmpty())return;
+        bool directory=paths.size()==1&&QFileInfo(paths.front()).isDir();
+        if(!directory){for(const auto &path:paths)if(QFileInfo(path).isDir()||QFileInfo(path).suffix().compare("png",Qt::CaseInsensitive)){status->setText(t("Drop one folder or PNG files together.","请一次拖入一个文件夹，或一批 PNG 文件。","フォルダー1つ、または複数のPNGをドロップしてください。"));return;}}
+        if(directory)folder->setText(paths.front());pages->setCurrentWidget(importPage);scanCancel->store(false);scan->setEnabled(false);chooseFiles->setEnabled(false);cancelScan->setEnabled(true);applyImport->setEnabled(false);buttons->button(QDialogButtonBox::Apply)->setEnabled(false);material->setEnabled(false);automatic->setEnabled(false);consonantPage->setEnabled(false);importTable->setEnabled(false);importProgress->setValue(0);importProgress->show();auto snapshot=draft;auto id=groupId;
+        watcher.setFuture(QtConcurrent::run([snapshot,paths,id,directory,token=scanCancel,&dialog,importProgress]{auto report=[&dialog,importProgress](int n){QMetaObject::invokeMethod(&dialog,[importProgress,n]{importProgress->setValue(n);},Qt::QueuedConnection);};if(directory)return scanVariantDirectory(paths.front(),snapshot,id,token.get(),report);auto plan=scanAssetFiles(paths,{},token.get(),report);for(auto &entry:plan.entries){entry.group=id;if(!entry.id.isEmpty())entry.id=variantAssetId(id,entry.id);}return plan;}));
+    };
+    connect(scan,&QPushButton::clicked,&dialog,[&]{scanPaths({folder->text()});});
+    connect(chooseFiles,&QPushButton::clicked,&dialog,[&]{scanPaths(QFileDialog::getOpenFileNames(&dialog,chooseFiles->text(),{},"PNG (*.png)"));});
+    connect(&watcher,&QFutureWatcher<AssetImportPlan>::finished,&dialog,[&]{importPlan=watcher.result();scan->setEnabled(true);chooseFiles->setEnabled(true);cancelScan->setEnabled(false);applyImport->setEnabled(true);buttons->button(QDialogButtonBox::Apply)->setEnabled(true);material->setEnabled(true);automatic->setEnabled(true);consonantPage->setEnabled(true);importTable->setEnabled(true);importProgress->hide();fillImport();status->setText(importPlan.cancelled?trText("Cancelled"):importPlan.error);});
+    connect(applyImport,&QPushButton::clicked,&dialog,[&]{QMap<QString,QString> additions;QSet<QString> added;for(int i=0;i<importPlan.entries.size();++i)if(importTable->item(i,0)->checkState()==Qt::Checked){const auto &e=importPlan.entries[i];auto id=destination(i);if(e.status=="invalid"||id.isEmpty())continue;if(additions.contains(id)){status->setText(t("Several checked files target the same slot. Remap or uncheck duplicates.","多个勾选文件指向同一组的同一口形，请改映射或取消重复项。","複数の画像が同じ枠に指定されています。割当てを変えるかチェックを外してください。"));return;}additions[id]=e.path;if(id.contains('/'))added.insert(id.section('/',0,0));}
+        for(auto it=additions.cbegin();it!=additions.cend();++it)draft.assets[it.key()]=it.value();for(const auto &g:importPlan.groups)if(added.contains(g.id)){bool found=false;for(const auto &v:draft.performance.groups)if(v.id==g.id)found=true;if(!found)draft.performance.groups.append(g);}refreshGroups();status->setText(t("Imported %1 slots into settings draft.","已向设置草稿导入 %1 个槽位。","設定の下書きに %1 枠を読込みました。").arg(additions.size()));for(int row=0;row<importTable->rowCount();++row)updateImportRow(row);});
+    new FileDropFilter(&dialog,scanPaths);new FileDropFilter(importTable->viewport(),scanPaths);new FileDropFilter(folder,scanPaths);
+    for(auto it=slotButtons.cbegin();it!=slotButtons.cend();++it)new FileDropFilter(it.value(),[&,slot=it.key()](QStringList paths){if(watcher.isRunning())return;if(paths.size()==1&&QFileInfo(paths.front()).suffix().compare("png",Qt::CaseInsensitive)==0){selected=slot;refreshSlots();path->setText(paths.front());assign->click();}else scanPaths(paths);});
+    if(!droppedPaths.isEmpty())QTimer::singleShot(0,&dialog,[&,droppedPaths]{scanPaths(droppedPaths);});
+    root->addWidget(status);root->addWidget(buttons);fillConsonants();
+    connect(buttons->button(QDialogButtonBox::Cancel),&QPushButton::clicked,&dialog,&QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::Apply),&QPushButton::clicked,&dialog,[&]{try{
+        key->apply(draft.appearance);
+        QVector<int> offsets;for(const auto &token:scale->text().split(QRegularExpression("[,，\\s]+"),Qt::SkipEmptyParts)){bool ok=false;int n=token.toInt(&ok);if(!ok)throw Failure("Invalid custom scale");offsets.append(n);}draft.appearance.customDegreeScale=offsets;
+        draft.performance.settings.rules=readRules();validateAppearance(draft.appearance);validatePerformance(draft);validateConsonants(draft.rules.consonants);dialog.accept();
+    }catch(const std::exception &e){status->setText(QString::fromUtf8(e.what()));}});
+    const int result=dialog.exec();scanCancel->store(true);if(watcher.isRunning())watcher.waitForFinished();mouthSettingsOpen=false;QTimer::singleShot(0,this,[this]{ensureWaveform();});if(result!=QDialog::Accepted)return;
+    if(defaults->isChecked()){try{preferences.performanceSettings=draft.performance.settings;auto &rules=preferences.performanceSettings.rules;rules.erase(std::remove_if(rules.begin(),rules.end(),[](const auto &r){return r.target.startsWith("group:")||!r.track.isEmpty();}),rules.end());savePreferences(preferences);}catch(const std::exception &e){error(QString::fromUtf8(e.what()));}}
+    const bool mouthChanged=draft.rules.consonants!=project.rules.consonants;
+    const bool performanceChanged=draft.appearance.enabled&&!performanceCurrent(draft);
+    if(!mouthChanged&&!performanceChanged){change(trText("Advanced variant settings"),[draft](Project &p){p.appearance=draft.appearance;p.assets=draft.assets;p.performance=draft.performance;});return;}
+    Project next=project;next.appearance=draft.appearance;next.assets=draft.assets;next.performance=draft.performance;next.rules.consonants=draft.rules.consonants;
+    loadIsRegenerate=true;cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;setBusy(true);
+    auto report=[this](int n){QMetaObject::invokeMethod(this,[this,n]{progress->setValue(n);},Qt::QueuedConnection);};
+    loadWatcher.setFuture(QtConcurrent::run([next,token,report,mouthChanged,performanceChanged]()mutable{LoadResult r;try{
+        if(mouthChanged)next.regenerate(token.get(),report);
+        if(performanceChanged&&!token->load()){
+            auto plan=generatePerformance(next,token.get(),report);
+            if(!plan.error.isEmpty())throw Failure(plan.error);
+            if(!plan.cancelled&&!token->load())applyPerformanceDraft(next,plan);
         }
-        auto analysisHint=new QLabel(t("Incoming changes compare the preceding singing note in the same instance. First notes use shared movement; repeated notes have their own class. Beats use original positions. Default strong beats: 4/4 = 1,3; compound = group starts; others = 1.",
-        "入向变化比较同实例前一发声音符，首音用通用幅度、同音反复独立分类；强弱拍按原谱起点。默认强拍：4/4 为 1、3，复合拍为分组首拍，其他拍号为 1。","同じ参照内の前の発声音符と比較します。最初は共通、同音反復は独立分類です。拍は元の位置を使います。既定の強拍：4/4 は 1,3、複合拍は各群の先頭、その他は 1。"));
-        analysisHint->setWordWrap(true);
-        analysisLayout->addRow(analysisHint);
-        auto importPage=new QWidget;
-        auto importLayout=new QVBoxLayout(importPage);
-        pages->addTab(importPage,t("Folder import","文件夹导入","フォルダー読込"));
-        auto importHint=new QLabel(t("Names: A_strong_up_step.png, closed_strong_up_step.png. any means shared. Simple names A.png, closed.png, etc. are accepted. Only the selected folder is scanned; existing mappings are unchecked by default.",
-        "命名：A_strong_up_step.png、closed_strong_up_step.png；any 表示通用。也接受 A.png、closed.png 等简单名称。只扫描所选文件夹一层，替换已有映射默认不勾选。","命名：A_strong_up_step.png、closed_strong_up_step.png。any は共通です。A.png、closed.png 等も使用できます。選択したフォルダーのみ確認し、既存の置換は既定では選択しません。"));
-        importHint->setWordWrap(true);
-        importLayout->addWidget(importHint);
-        auto folderRow=new QHBoxLayout;
-        importLayout->addLayout(folderRow);
-        auto folder=new QLineEdit;
-        folder->setObjectName("mouthImportDirectory");
-        folderRow->addWidget(folder);
-        auto chooseFolder=new QPushButton(t("Choose folder","选择文件夹","フォルダーを選択"));
-        folderRow->addWidget(chooseFolder);
-        auto scan=new QPushButton(t("Scan folder","扫描文件夹","フォルダーを確認"));
-        scan->setObjectName("mouthScanDirectory");
-        folderRow->addWidget(scan);
-        auto cancelScan=new QPushButton(trText("Cancel"));
-        cancelScan->setObjectName("mouthCancelScan");
-        cancelScan->setEnabled(false);
-        folderRow->addWidget(cancelScan);
-        auto importTable=new QTableWidget(0,4);
-        importTable->setObjectName("mouthImportTable");
-        importTable->setHorizontalHeaderLabels({
-            t("File / select","文件 / 选择","ファイル / 選択"),t("Slot","槽位","枠"),t("Status","状态","状態"),t("Details","说明","詳細")
-        });
-        importTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-        importTable->horizontalHeader()->setSectionResizeMode(3,QHeaderView::Stretch);
-        importTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        importLayout->addWidget(importTable);
-        auto importProgress=new QProgressBar;
-        importProgress->hide();
-        importLayout->addWidget(importProgress);
-        auto applyImport=new QPushButton(t("Import selected into draft","将勾选项导入设置草稿","選択項目を設定の下書きに読込"));
-        applyImport->setObjectName("mouthApplyDirectory");
-        applyImport->setEnabled(false);
-        importLayout->addWidget(applyImport);
-        auto importStatus=new QLabel;
-        importStatus->setObjectName("mouthImportStatus");
-        importStatus->setWordWrap(true);
-        importLayout->addWidget(importStatus);
-        QFutureWatcher<AssetImportPlan> watcher;
-        auto scanCancel=std::make_shared<std::atomic_bool>(false);
-        connect(chooseFolder,&QPushButton::clicked,&dialog,[&]{
-            const auto dir=QFileDialog::getExistingDirectory(&dialog,t("Choose folder","选择文件夹","フォルダーを選択"),folder->text());
-            if(!dir.isEmpty())folder->setText(dir);
-        });
-        connect(cancelScan,&QPushButton::clicked,&dialog,[&]{
-            scanCancel->store(true);
-        });
-        connect(scan,&QPushButton::clicked,&dialog,[&]{
-            scanCancel=std::make_shared<std::atomic_bool>(false);
-            auto token=scanCancel;
-            const auto directory=folder->text();
-            const auto existing=draft.assets;
-            scan->setEnabled(false);
-            applyImport->setEnabled(false);
-            cancelScan->setEnabled(true);
-            importProgress->setValue(0);
-            importProgress->show();
-            importTable->setRowCount(0);
-            importStatus->clear();
-            buttons->button(QDialogButtonBox::Apply)->setEnabled(false);
-            QPointer<QProgressBar> progressGuard=importProgress;
-            watcher.setFuture(QtConcurrent::run([directory,existing,token,progressGuard]{
-                return scanAssetDirectory(directory,existing,token.get(),[progressGuard](int n){
-                    if(progressGuard)QMetaObject::invokeMethod(progressGuard,[progressGuard,n]{
-                        if(progressGuard)progressGuard->setValue(n);
-                    },Qt::QueuedConnection);
-                });
-            }));
-        });
-        connect(&watcher,&QFutureWatcher<AssetImportPlan>::finished,&dialog,[&]{
-            const auto result=watcher.result();
-            scan->setEnabled(true);
-            cancelScan->setEnabled(false);
-            importProgress->hide();
-            buttons->button(QDialogButtonBox::Apply)->setEnabled(true);
-            if(result.cancelled){
-                importStatus->setText(trText("Cancelled"));
-                return;
-            }
-            if(!result.error.isEmpty()){
-                importStatus->setText(result.error);
-                return;
-            }
-            int eligible=0;
-            for(const auto &entry:result.entries){
-                const int row=importTable->rowCount();
-                importTable->insertRow(row);
-                auto item=new QTableWidgetItem(QFileInfo(entry.path).fileName());
-                item->setData(Qt::UserRole,entry.id);
-                item->setData(Qt::UserRole+1,entry.path);
-                item->setToolTip(entry.path);
-                item->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);
-                const bool valid=entry.status=="new"||entry.status=="replace";
-                if(valid){
-                    item->setFlags(item->flags()|Qt::ItemIsUserCheckable);
-                    item->setCheckState(entry.status=="new"?Qt::Checked:Qt::Unchecked);
-                    ++eligible;
-                }
-                importTable->setItem(row,0,item);
-                importTable->setItem(row,1,new QTableWidgetItem(entry.id));
-                const auto label=entry.status=="new"?t("New","新增","新規"):entry.status=="replace"?t("Replace","替换","置換"):entry.status=="conflict"?t("Conflict",
-                "重复冲突","重複競合"):entry.status=="invalid"?t("Invalid PNG","PNG 无效","無効な PNG"):t("Unknown filename","文件名未识别","未認識の名前");
-                importTable->setItem(row,2,new QTableWidgetItem(label));
-                auto detail=entry.message;
-                if(detail=="Duplicate normalized slot")detail=t("Duplicate normalized slot","多个文件对应同一槽位","複数のファイルが同じ枠に対応します");
-                else if(detail=="Unrecognized asset filename")detail=t("Unrecognized asset filename","文件名不符合规定","ファイル名が規定に一致しません");
-                else if(detail=="Invalid or oversized PNG")detail=t("Invalid or oversized PNG","PNG 无效或超过单图上限","PNG が無効か画像サイズが上限を超えています");
-                importTable->setItem(row,3,new QTableWidgetItem(detail));
-            }
-            applyImport->setEnabled(eligible>0);
-            importStatus->setText(t("%1 files checked; %2 eligible.","核查 %1 个 PNG，%2 个可选择。","%1 個の PNG を確認、%2 個が選択可能です。").arg(result.entries.size()).arg(eligible));
-        });
-        connect(applyImport,&QPushButton::clicked,&dialog,[&]{
-            int count=0;
-            for(int row=0;row<importTable->rowCount();++row){
-                auto item=importTable->item(row,0);
-                if(item->flags().testFlag(Qt::ItemIsUserCheckable)&&item->checkState()==Qt::Checked){
-                    draft.assets[item->data(Qt::UserRole).toString()]=item->data(Qt::UserRole+1).toString();
-                    ++count;
-                }
-            }
-            refreshSlots();
-            importStatus->setText(t("%1 mappings queued. Apply the settings window to save; Cancel discards them.","%1 个映射已进入草稿；应用设置窗口才保存，取消丢弃。","%1 件の対応を下書きに追加しました。設定画面の適用で保存、キャンセルで破棄します。").arg(count));
-        });
-        root->addWidget(status);
-        root->addWidget(buttons);
-        connect(buttons->button(QDialogButtonBox::Cancel),&QPushButton::clicked,&dialog,&QDialog::reject);
-        connect(buttons->button(QDialogButtonBox::Apply),&QPushButton::clicked,&dialog,[&]{
-            try{
-                auto options=draft.appearance;
-                if(options.degreeMode=="custom")options.customDegreeScale=readCustomScale();
-                for(const auto &track:project.score.tracks)for(const auto &note:track.notes)if(options.noteSpellings.contains(note.id)&&!writtenPitch(options,note))throw Failure(t("Written name must match the note pitch","指定音名必须与当前音高一致","指定音名は現在の音高と一致する必要があります"));
-                options.strongBeats.clear();
-                for(int row=0;row<accents->rowCount();++row){
-                    const auto value=accents->item(row,1)->text().trimmed();
-                    if(value.isEmpty())continue;
-                    QVector<int> positions;
-                    for(const auto &field:value.split(QRegularExpression("[,，\\s]+"),Qt::SkipEmptyParts)){
-                        bool ok=false;
-                        const int n=field.toInt(&ok);
-                        if(!ok)throw Failure(t("Invalid strong-beat positions","强拍位置无效","強拍位置が無効です"));
-                        positions.append(n);
-                    }
-                    options.strongBeats[accents->item(row,0)->text()]=positions;
-                }
-                validateAppearance(options);
-                validateConsonants(draft.rules.consonants);
-                draft.appearance=options;
-                dialog.accept();
-            }
-            catch(const std::exception &e){
-                status->setText(QString::fromUtf8(e.what()));
-            }
-        });
-        refreshSlots();
-        fillConsonants();
-        const int result=dialog.exec();
-        scanCancel->store(true);
-        if(watcher.isRunning())watcher.waitForFinished();
-        mouthSettingsOpen=false;
-        QTimer::singleShot(0,this,[this]{
-            ensureWaveform();
-        });
-        if(result!=QDialog::Accepted)return;
-        if(draft.rules.consonants==project.rules.consonants){
-            change(trText("Advanced variant settings"),[draft](Project &p){
-                p.appearance=draft.appearance;
-                p.assets=draft.assets;
-            });
-            return;
-        }
-        Project next=project;
-        next.appearance=draft.appearance;
-        next.assets=draft.assets;
-        next.rules.consonants=draft.rules.consonants;
-        loadIsRegenerate=true;
-        cancel=std::make_shared<std::atomic_bool>(false);
-        auto token=cancel;
-        setBusy(true);
-        auto report=[this](int n){
-            QMetaObject::invokeMethod(this,[this,n]{
-                progress->setValue(n);
-            },Qt::QueuedConnection);
-        };
-        loadWatcher.setFuture(QtConcurrent::run([next,token,report]()mutable{
-            LoadResult r;
-            try{
-                next.regenerate(token.get(),report);
-                r.project=next;
-                r.cancelled=token->load();
-            }
-            catch(const std::exception &e){
-                r.cancelled=token->load();
-                r.error=QString::fromUtf8(e.what());
-            }
-            return r;
-        }));
-    }
+        r.project=std::move(next);r.cancelled=token->load();
+    }catch(const std::exception &e){r.cancelled=token->load();r.error=QString::fromUtf8(e.what());}return r;}));
+}
 }

@@ -75,3 +75,7 @@ Chosuta 代码、配方、桌面项和原创 SVG 图标继续 GPL-3.0-or-later�
 本机 Arch 包可以验证构建、内容和解包运行；未安装到系统不等于已验证系统安装/卸载。DEB/RPM、AUR 公开提交、Windows 原生编译均不能因本机 Arch 测试而记为完成。公开整理和分发方式见 [源码发布说明](publication.zh-CN.md)。
 
 参考：[CPack DEB](https://cmake.org/cmake/help/latest/cpack_gen/deb.html)、[CPack RPM](https://cmake.org/cmake/help/latest/cpack_gen/rpm.html)、[PKGBUILD 手册](https://man.archlinux.org/man/PKGBUILD.5.en)、[makepkg 手册](https://man.archlinux.org/man/makepkg.8.en)。
+
+## Windows 附带工具与 no-ffmpeg
+
+0.8.2 的 `scripts/build-windows.ps1 -FfmpegDir <已有工具bin> -BothVariants -CreateZip` 支持编译一次、分别部署并压缩两种目录（其他 Qt／ICU 参数见 [Windows 说明](windows.zh-CN.md)）。外部 ffmpeg／ffprobe 及其共享 DLL 独立位于 `bin/tools/ffmpeg/`；无工具版仍保留 Qt 媒体后端。脚本记录各自大小／哈希／检测结果，不覆盖现有产物。当前环境未执行 Windows 部署，没有新的 Release；指定工具的许可和对应源码义务按实际构建核对。

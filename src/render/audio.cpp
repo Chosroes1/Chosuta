@@ -10,16 +10,7 @@ namespace chosuta {
             r.error="Missing audio: "+path;
             return r;
         }
-        QString probe;
-        auto executable=resolveExecutable(ffmpeg);
-        if(QFileInfo(executable).isAbsolute()) {
-            auto sibling=QFileInfo(executable).absoluteDir().filePath("ffprobe"+QString(QFileInfo(executable).suffix().toLower()=="exe"?".exe":""));
-            if(QFileInfo::exists(sibling))probe=sibling;
-        }
-        if(probe.isEmpty()){
-            const auto candidate=resolveExecutable("ffprobe");
-            probe=QFileInfo(candidate).isAbsolute()?candidate:QStandardPaths::findExecutable(candidate);
-        }
+        const auto probe=resolveFfprobe(ffmpeg);
         if(probe.isEmpty()) {
             r.warning="ffprobe unavailable; set animation duration manually";
             return r;
@@ -73,4 +64,45 @@ namespace chosuta {
         if(r.duration<=0)r.warning="Audio duration unknown; set animation duration manually";
         return r;
     }
+    MediaToolsInfo inspectMediaTools(const QString &ffmpeg,const std::atomic_bool &cancel) {
+        MediaToolsInfo info;info.ffmpeg=resolveExecutable(ffmpeg);info.ffprobe=resolveFfprobe(info.ffmpeg);
+        auto query=[&](const QString &program,const QStringList &args)->QString {
+            if(cancel.load()){info.cancelled=true;return {};}
+            if(program.isEmpty()){info.errors<<"ffprobe: unavailable";return {};}
+            QProcess process;process.setProcessChannelMode(QProcess::MergedChannels);process.start(program,args);
+            if(!process.waitForStarted(3000)){info.errors<<program+": "+process.errorString();return {};}
+            QElapsedTimer timer;timer.start();QByteArray output;
+            while(true){
+                process.waitForFinished(50);output+=process.readAll();
+                if(cancel.load()||timer.elapsed()>10000||output.size()>2*1024*1024){
+                    process.kill();process.waitForFinished(1000);info.cancelled=cancel.load();
+                    if(!info.cancelled)info.errors<<program+": query timeout/output limit";
+                    return {};
+                }
+                if(process.state()==QProcess::NotRunning)break;
+            }
+            if(process.exitStatus()!=QProcess::NormalExit||process.exitCode()!=0){
+                info.errors<<program+": "+QString::fromUtf8(output).left(1024);return {};
+            }
+            return QString::fromUtf8(output);
+        };
+        info.ffmpegVersion=query(info.ffmpeg,{"-hide_banner","-version"}).section('\n',0,0);
+        info.ffprobeVersion=query(info.ffprobe,{"-hide_banner","-version"}).section('\n',0,0);
+        if(!info.cancelled&&info.ffmpegVersion.isEmpty())info.errors<<"FFmpeg: no version information";
+        if(!info.cancelled&&info.ffprobeVersion.isEmpty())info.errors<<"ffprobe: no version information";
+        if(!info.ffmpegVersion.isEmpty()){
+            auto encoders=query(info.ffmpeg,{"-hide_banner","-encoders"});
+            auto filters=query(info.ffmpeg,{"-hide_banner","-filters"});
+            auto contains=[](const QString &listing,const QString &name){
+                for(const auto &line:listing.split('\n'))if(line.simplified().section(' ',1,1)==name)return true;
+                return false;
+            };
+            for(const auto &name:QStringList{"libx264","aac","libvpx-vp9","libopus","qtrle","pcm_f32le"})
+                if(!contains(encoders,name))info.missingEncoders<<name;
+            for(const auto &name:QStringList{"asetpts","adelay","apad","scale","format","aresample","aformat"})
+                if(!contains(filters,name))info.missingFilters<<name;
+        }
+        return info;
+    }
+
 }

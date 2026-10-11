@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "preferences.h"
+#include "core/performance.h"
 #include <algorithm>
 #include "core/model.h"
 namespace chosuta {
@@ -22,7 +23,12 @@ namespace chosuta {
         if(!QStringList {
             "auto","zh","en","ja"
         }.contains(p.language))p.language="auto";
-        p.returnOnPause=s.value("playback/returnOnPause",false).toBool();
+        p.performanceLaneHeight=std::clamp(s.value("timeline/performanceHeight",56).toInt(),40,120);
+        p.performanceLaneVisible=s.value("timeline/performanceVisible",true).toBool();
+        auto performance=s.value("performance/v2-defaults").toByteArray();if(!performance.isEmpty())p.performanceSettings=readPerformanceSettings(checkedJson(performance).object());
+        p.cursorSnap=s.value("timeline/cursorSnap","off").toString();
+        if(!QStringList{"off","beat","syllable"}.contains(p.cursorSnap))p.cursorSnap="off";
+        p.returnOnStop=s.value("playback/returnOnStop",false).toBool();
         p.mouthLaneHeight=std::clamp(s.value("timeline/mouthHeight",p.mouthLaneHeight).toInt(),96,360);
         p.subtitleLaneHeight=std::clamp(s.value("timeline/subtitleHeight",60).toInt(),48,240);
         p.timelineHeight=std::clamp(s.value("timeline/viewportHeight",250).toInt(),180,900);
@@ -38,7 +44,11 @@ namespace chosuta {
         validatePronunciationOptions(p.pronunciation);
         QSettings s(QSettings::IniFormat,QSettings::UserScope,"Chosuta","Chosuta");
         s.setValue("ui/language",p.language);
-        s.setValue("playback/returnOnPause",p.returnOnPause);
+        s.setValue("playback/returnOnStop",p.returnOnStop);
+        s.setValue("timeline/cursorSnap",p.cursorSnap);
+        s.setValue("performance/v2-defaults",QJsonDocument(performanceSettingsJson(p.performanceSettings)).toJson(QJsonDocument::Compact));
+        s.setValue("timeline/performanceHeight",p.performanceLaneHeight);
+        s.setValue("timeline/performanceVisible",p.performanceLaneVisible);
         s.setValue("pronunciation/settings",QJsonDocument(pronunciationOptionsJson(p.pronunciation)).toJson(QJsonDocument::Compact));
         s.setValue("timeline/mouthHeight",p.mouthLaneHeight);
         s.setValue("timeline/subtitleHeight",p.subtitleLaneHeight);

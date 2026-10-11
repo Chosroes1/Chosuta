@@ -5,8 +5,12 @@
 namespace chosuta {
 struct Preferences {
     QString language="auto";
-    bool returnOnPause=false;
+    bool returnOnStop=false;
+    QString cursorSnap="off";
     PronunciationOptions pronunciation;
+    PerformanceSettings performanceSettings;
+    int performanceLaneHeight=56;
+    bool performanceLaneVisible=true;
     int mouthLaneHeight=96,subtitleLaneHeight=60,timelineHeight=250,waveformLaneHeight=80;
 };
 QString resolveUiLanguage(const QString &choice,const QStringList &systemLanguages);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
 #include "core/appearance.h"
+#include "core/performance.h"
 #include <cmath>
 #include <initializer_list>
 namespace chosuta {
@@ -73,7 +74,7 @@ namespace chosuta {
             {
                 "format","Chosuta"
             }, {
-                "schema",9
+                "schema",11
             }, {
                 "sourceBase64",QString::fromLatin1(p.score.raw.toBase64())
             }, {
@@ -113,6 +114,7 @@ namespace chosuta {
         };
         rules["consonants"]=consonantsJson(p.rules.consonants);
         root["appearance"]=appearanceJson(p.appearance);
+        root["performance"]=performanceJson(p);
         rules["pronunciation"]=pronunciationOptionsJson(p.rules.pronunciation);
         rules["special"]=special;
         QJsonObject readings;
@@ -171,8 +173,8 @@ namespace chosuta {
         QFile file(path);
         if(!file.open(QIODevice::ReadOnly)||file.size()>64*1024*1024)throw Failure("Cannot read project (limit 64 MiB): "+file.errorString());
         auto root=checkedJson(file.readAll()).object();
-        if(root["format"]!="Chosuta"||root["schema"]!=9)throw Failure("Unsupported project format/schema");
-        requireFields(root,{"sourceBase64","sourcePath","sourceHash","selected","priorities","rules","appearance","generated","overrides","assets","fallback","audioPath","canvas","audioDuration","playbackReturnPosition","output","subtitles","timingCorrection"});
+        if(root["format"]!="Chosuta"||root["schema"]!=11)throw Failure("Unsupported project format/schema");
+        requireFields(root,{"sourceBase64","sourcePath","sourceHash","selected","priorities","rules","appearance","generated","overrides","assets","fallback","audioPath","canvas","audioDuration","playbackReturnPosition","output","subtitles","timingCorrection","performance"});
         auto decoded=QByteArray::fromBase64Encoding(root["sourceBase64"].toString().toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
         if(!decoded)throw Failure("Invalid embedded source");
         Project p;
@@ -282,6 +284,7 @@ namespace chosuta {
         if(!std::isfinite(p.audioDuration)||p.audioDuration<0||p.audioDuration>864000||!std::isfinite(p.playbackReturnPosition)||p.playbackReturnPosition<0||p.playbackReturnPosition>21600)throw Failure("Invalid audio duration/return position");
         readSubtitles(p,root.value("subtitles"));
         readTimingCorrection(p,root.value("timingCorrection"));
+        readPerformance(p,root.value("performance"));
         return p;
     }
 }

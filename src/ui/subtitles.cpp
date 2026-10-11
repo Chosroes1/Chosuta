@@ -118,6 +118,7 @@ void Window::updateLayoutTarget() {
     preview->setTarget(id,own&&id==subtitleTrackId?subtitleCueId:QString{});
 }
 void Window::selectSubtitle(const QString &id,const QString &cue,bool editText) {
+    performanceId.clear();
     if(busy)return;
     timeline->finishSubtitleEditing(false);subtitleTrackId=id;subtitleCueId=cue;
     bool old=refreshing;refreshing=true;refreshSubtitles();refreshing=old;timeline->selectSubtitle(id,cue);refreshSelection();
@@ -132,6 +133,7 @@ void Window::deleteSubtitleCue() {
 }
 void Window::deleteSelection() {
     if(busy||playing)return;
+    if(!performanceId.isEmpty()){deletePerformance();return;}
     if(!subtitleCueId.isEmpty()){deleteSubtitleCue();return;}
     auto ids=timeline->selectedIds();if(ids.isEmpty())return;
     change(trText("Delete selection"),[ids](Project&p){for(const auto&e:p.effective())if(ids.contains(e.id))p.erase(e);});
