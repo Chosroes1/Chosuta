@@ -29,7 +29,7 @@ namespace chosuta {
     }
     QString consonantMode(const QString &key) {
         const auto fields=key.split(':');
-        if(fields.size()!=3||!consonantKeys(fields[0]).contains(key))throw Failure("Unknown consonant key: "+key);
+        if(fields.size()!=3||!consonantKeys(fields[0]).contains(key))throw Failure(Message::format("Unknown consonant key: %1",{key}));
         const auto phone=fields[2].toLower();
         return QStringList{
             "b","p","m","by","py","my"

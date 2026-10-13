@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "model.h"
+#include "source_time.h"
 namespace chosuta {
     QString variantAssetId(const QString &group,const QString &shape);
     QString variantGroupName(const Project &,const QString &id);
@@ -15,13 +16,14 @@ namespace chosuta {
     struct PerformanceDraft {
         QVector<PerformanceSegment> segments;
         QVector<PerformanceBoundary> suggestions;
-        QString basisHash,error;
+        QString basisHash;Message error;
         bool cancelled=false;
     };
     PerformanceDraft generatePerformance(const Project &,const std::atomic_bool *cancel=nullptr,Progress progress={});
     struct PerformanceSlice {
         double start=0,end=0;
-        QString group,id,reason;
+        QString group,id;
+        QVector<Message> reasons;
         bool manual=false,protect=false,orphan=false;
     };
     class PerformanceResolver {
@@ -32,14 +34,14 @@ namespace chosuta {
         const PerformanceSlice *at(double videoTime)const;
         SubtitleInterval interval(const PerformanceSegment &)const;
         double mappedBlick(qint64 blick,const QString &track={},bool end=false)const;
-        QStringList diagnostics;
+        QVector<Message> diagnostics;
         private:
         Project project;
         QVector<PerformanceSlice> plan;
-        QHash<QString,QPair<double,double>> effectiveTimes;
+        SourceTimeMap sourceTimes;
         QHash<QString,const Note *> notes;
         QHash<QString,QString> sourceTracks;
-        QMap<QString,QVector<const Note *>> tracks;
+        QMap<QString,QVector<SourceSlice>> routes;
     };
     void setPerformanceTime(const Project &,PerformanceSegment &,double start,double end,bool beats);
     void putPerformanceSegment(Project &,PerformanceSegment); // Replace only the overlapping portion.

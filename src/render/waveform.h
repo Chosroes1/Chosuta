@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "core/model.h"
+#include "core/executable.h"
 #include <memory>
 namespace chosuta {
 struct WavePeak {float low=0,high=0;};
@@ -16,11 +17,11 @@ struct Waveform {
     qint64 storageBytes()const;
     void buildLevels();
 };
-struct WaveformResult {std::shared_ptr<const Waveform> wave;QString error;bool cancelled=false;};
-WaveformResult readWaveform(const QString &path,const QString &ffmpeg,const std::atomic_bool &cancel,Progress progress={},double expectedDuration=0);
+struct WaveformResult {std::shared_ptr<const Waveform> wave;Message error;bool cancelled=false;};
+WaveformResult readWaveform(const QString &path,const MediaTools &tools,const std::atomic_bool &cancel,Progress progress={},double expectedDuration=0);
 struct WaveCorrectionResult {
     TimingCorrection timing;
-    QString error;
+    Message error;
     bool cancelled=false;
     int considered=0,accepted=0,protectedSources=0,unclear=0,conflicts=0;
 };

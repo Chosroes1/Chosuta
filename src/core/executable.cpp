@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "executable.h"
+#include "message.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <stdexcept>
 namespace chosuta {
     QString defaultFfmpegExecutable() {
@@ -14,7 +17,8 @@ namespace chosuta {
     void setDefaultFfmpegExecutable(const QString &program) {
         QSettings settings(QSettings::IniFormat,QSettings::UserScope,"Chosuta","Chosuta");
         settings.setValue("tools/ffmpeg",program.trimmed());settings.sync();
-        if(settings.status()!=QSettings::NoError)throw std::runtime_error("Cannot save FFmpeg preferences");
+        if(!program.trimmed().isEmpty()&&program!="ffmpeg"&&program!="ffmpeg.exe")adoptMediaTool(program.trimmed());
+        if(settings.status()!=QSettings::NoError)throw Failure("Cannot save FFmpeg preferences");
     }
     static QString findExecutable(const QString &selected,const QString &applicationDirectory) {
         if(selected.isEmpty())return selected;
@@ -61,5 +65,33 @@ namespace chosuta {
         }
         const auto candidate=resolveExecutable("ffprobe");
         return QFileInfo(candidate).isAbsolute()?candidate:QStandardPaths::findExecutable(candidate);
+    }
+    static bool automatic(const QString &program){return program=="ffmpeg"||program=="ffmpeg.exe";}
+    static QString identity(const QString &path){
+        QFileInfo file(path);
+        return (file.canonicalFilePath().isEmpty()?file.absoluteFilePath():file.canonicalFilePath())+"\n"+
+            QString::number(file.size())+"\n"+QString::number(file.lastModified().toMSecsSinceEpoch());
+    }
+    static QString adoptionKey(const QString &program){
+        return "tools/adopted/"+QString::fromLatin1(QCryptographicHash::hash(resolveExecutable(program).toUtf8(),QCryptographicHash::Sha256).toHex());
+    }
+    static QString toolIdentity(const QString &program){return identity(resolveExecutable(program))+"\n"+identity(resolveFfprobe(program));}
+    bool mediaToolAdopted(const QString &program){
+        if(automatic(program)){const auto local=defaultFfmpegExecutable();return local.isEmpty()||automatic(local)||mediaToolAdopted(local); }
+        QSettings settings(QSettings::IniFormat,QSettings::UserScope,"Chosuta","Chosuta");
+        return settings.value(adoptionKey(program)).toString()==toolIdentity(program);
+    }
+    void adoptMediaTool(const QString &program){
+        QSettings settings(QSettings::IniFormat,QSettings::UserScope,"Chosuta","Chosuta");
+        settings.setValue(adoptionKey(program),toolIdentity(program));settings.sync();
+        if(settings.status()!=QSettings::NoError)throw Failure("Cannot save media tool selection");
+    }
+    MediaTools selectMediaTools(const QString &program,ToolSelection origin){
+        if(program.trimmed().isEmpty())throw Failure("Media tool path is empty");
+        if(origin==ToolSelection::Project&&!mediaToolAdopted(program))
+            throw Failure("Project media tool has not been adopted on this computer; select it in Media Tools or use --ffmpeg explicitly");
+        auto encoder=resolveExecutable(program);
+        if(!QFileInfo(encoder).isAbsolute())encoder=QDir(QCoreApplication::applicationDirPath()).filePath("tools/ffmpeg/"+encoder);
+        return MediaTools(encoder,resolveFfprobe(encoder));
     }
 }

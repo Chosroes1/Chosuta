@@ -5,6 +5,9 @@
 namespace chosuta {
 struct Preferences {
     QString language="auto";
+    QSet<QString> invalidFields;
+    struct Issue{QString setting;Message message;};
+    QVector<Issue> diagnostics;
     bool returnOnStop=false;
     QString cursorSnap="off";
     PronunciationOptions pronunciation;

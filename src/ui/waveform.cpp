@@ -12,7 +12,7 @@ void Window::updateTimelineMinimum(){
     const int fixedHeight=qRound(timeline->rulerRect().height()+timeline->mouthLaneRect().height()+timeline->waveformLaneRect().height()+timeline->performanceLaneRect().height());
     const int subtitleHeight=project.subtitlesEnabled&&!project.subtitles.isEmpty()?qRound(timeline->subtitleLaneRect(0).height())+4:16;
     // Reserve the viewport as well as its frame and horizontal scrollbar.
-    timelineScroll->setMinimumHeight(fixedHeight+subtitleHeight+2*timelineScroll->frameWidth()+timelineScroll->horizontalScrollBar()->sizeHint().height());
+    timelineScroll->setMinimumHeight(std::min(std::max(180,height()/2),fixedHeight+subtitleHeight+2*timelineScroll->frameWidth()+timelineScroll->horizontalScrollBar()->sizeHint().height()));
     // Commit the new constraint before the next handle press; deferred layout can
     // otherwise move the handle between mouse press and drag.
     timelineScroll->parentWidget()->layout()->activate();
@@ -38,17 +38,20 @@ void Window::ensureWaveform(){
     QString key=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+resolveExecutable(project.output.ffmpeg);
     if(waveformKey==key)return;
     waveformKey=key;waveform.reset();waveformMessage=trText("Preparing waveform…");timeline->setWaveform({},waveformMessage);
-    cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;auto path=project.audioPath;auto executable=project.output.ffmpeg;double duration=project.audioDuration;
+    std::optional<MediaTools> executable;
+    try{executable.emplace(selectMediaTools(project.output.ffmpeg));}
+    catch(const std::exception &e){waveformMessage=messageText(uiLanguage,exceptionMessage(e));timeline->setWaveform({},waveformMessage);return;}
+    cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;auto path=project.audioPath;double duration=project.audioDuration;
     setBusy(true);
-    auto report=[this](int n){QMetaObject::invokeMethod(this,[this,n]{progress->setValue(n);},Qt::QueuedConnection);};
-    waveformWatcher.setFuture(QtConcurrent::run([path,executable,token,report,duration]{return readWaveform(path,executable,*token,report,duration);}));
+    auto report=taskProgress();
+    waveformWatcher.setFuture(QtConcurrent::run([path,executable,token,report,duration]{return readWaveform(path,*executable,*token,report,duration);}));
 }
 void Window::correctTiming(){
     if(busy||playing||!waveform||project.generated.isEmpty())return;
     auto snapshot=project;snapshot.timing.maxShift=timingMaxShift->value()/1000;snapshot.timing.maxDurationChange=timingMaxDuration->value()/100;
     cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;auto wave=waveform;
     setBusy(true);
-    auto report=[this](int n){QMetaObject::invokeMethod(this,[this,n]{progress->setValue(n);},Qt::QueuedConnection);};
+    auto report=taskProgress();
     correctionWatcher.setFuture(QtConcurrent::run([snapshot,wave,token,report]{
         // Limits apply to this new score-based pass, never to accumulated results.
         auto base=snapshot;base.timing.sources.clear();base.timing.enabled=false;
@@ -57,7 +60,7 @@ void Window::correctTiming(){
 }
 void Window::revertTiming(){
     if(busy||playing||project.timing.sources.isEmpty())return;
-    change(trText("Revert waveform correction"),[](Project &p){p.timing.sources.clear();p.timing.enabled=false;},true);
+    change(actionText("Revert waveform correction"),[](Project &p){p.timing.sources.clear();p.timing.enabled=false;},true);
     statusBar()->showMessage(trText("Waveform correction reverted."));
 }
 }

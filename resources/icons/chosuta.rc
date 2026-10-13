@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Use the resource include path, keeping filesystem paths out of RC strings.
+1 ICON "chosuta.ico"

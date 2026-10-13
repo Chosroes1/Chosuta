@@ -22,7 +22,9 @@ namespace chosuta {
         if(event->type()==QEvent::LocaleChange&&preferences.language=="auto") {
             const auto resolved=resolveUiLanguage("auto",QLocale::system().uiLanguages());
             if(resolved!=uiLanguage)QTimer::singleShot(0,this,[this,resolved] {
-                stopPlayback();uiLanguage=resolved;buildUi();refresh();
+                stopPlayback();uiLanguage=resolved;
+            setWidgetLanguage(uiLanguage);
+            for(int i=0;i<history.count();++i)if(auto command=dynamic_cast<const TranslatedCommand *>(history.command(i)))const_cast<TranslatedCommand *>(command)->retranslate(uiLanguage);buildUi();refresh();
             });
         }
         auto widget=qobject_cast<QWidget*>(object);
@@ -79,7 +81,7 @@ namespace chosuta {
         try {
             savePreferences(next);
         }catch(const Failure&e) {
-            error(QString::fromUtf8(e.what()));
+            error(exceptionMessage(e));
             return;
         }
         preferences=next;
@@ -88,6 +90,8 @@ namespace chosuta {
             const int tab=tabs->currentIndex();
             const auto selected=timeline->selectedIds();
             uiLanguage=resolved;
+            setWidgetLanguage(uiLanguage);
+            for(int i=0;i<history.count();++i)if(auto command=dynamic_cast<const TranslatedCommand *>(history.command(i)))const_cast<TranslatedCommand *>(command)->retranslate(uiLanguage);
             buildUi();
             refresh();
             tabs->setCurrentIndex(tab);
@@ -141,7 +145,7 @@ namespace chosuta {
         kanji->setChecked(project.rules.pronunciation.japaneseKanji);japaneseLayout->addWidget(kanji);
         auto kanjiHint=new QLabel(trText("Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off."));
         kanjiHint->setWordWrap(true);japaneseLayout->addWidget(kanjiHint);japaneseLayout->addStretch();pages->addTab(japanesePage,trText("Japanese"));
-        auto defaults=new QCheckBox(trText("Also save as defaults for new SVP imports"));defaults->setObjectName("dictionaryDefaults");defaults->setChecked(true);layout->addWidget(defaults);
+        auto defaults=new QCheckBox(trText("Also save as defaults for new SVP imports"));defaults->setObjectName("dictionaryDefaults");defaults->setChecked(false);layout->addWidget(defaults);
         auto status=new QLabel;status->setObjectName("dictionaryStatus");status->setWordWrap(true);layout->addWidget(status);
         auto rawOptions=[&] {
             QJsonArray entries;
@@ -171,20 +175,20 @@ namespace chosuta {
         connect(import,&QPushButton::clicked,&dialog,[&] {
             const auto path=QFileDialog::getOpenFileName(&dialog,trText("Import dictionary"),{},"JSON (*.json)");if(path.isEmpty())return;
             try {
-                QFile file(path);if(!file.open(QIODevice::ReadOnly))throw Failure(file.errorString());
+                QFile file(path);if(!file.open(QIODevice::ReadOnly))throw Failure(Message("File operation failed").withDetail(file.errorString()));
                 if(file.size()>DictionaryByteLimit)throw Failure("Dictionary exceeds 3 MB");
                 const auto options=pronunciationOptionsRead(checkedJson(file.readAll()).object());
                 QSignalBlocker block(table);fill(options);kanji->setChecked(options.japaneseKanji);updateSize();
-            }catch(const Failure&e){status->setText(QString::fromUtf8(e.what()));}
+            }catch(const Failure&e){status->setText(messageText(uiLanguage,exceptionMessage(e)));}
         });
         connect(exportButton,&QPushButton::clicked,&dialog,[&] {
             try {
                 const auto options=pronunciationOptionsRead(rawOptions());
                 const auto path=QFileDialog::getSaveFileName(&dialog,trText("Export dictionary"),{},"JSON (*.json)");if(path.isEmpty())return;
-                QSaveFile file(path);if(!file.open(QIODevice::WriteOnly))throw Failure(file.errorString());
+                QSaveFile file(path);if(!file.open(QIODevice::WriteOnly))throw Failure(Message("File operation failed").withDetail(file.errorString()));
                 const auto bytes=QJsonDocument(pronunciationOptionsJson(options)).toJson(QJsonDocument::Compact);
-                if(file.write(bytes)!=bytes.size()||!file.commit())throw Failure(file.errorString());
-            }catch(const Failure&e){status->setText(QString::fromUtf8(e.what()));}
+                if(file.write(bytes)!=bytes.size()||!file.commit())throw Failure(Message("File operation failed").withDetail(file.errorString()));
+            }catch(const Failure&e){status->setText(messageText(uiLanguage,exceptionMessage(e)));}
         });
         auto buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel);buttons->setObjectName("advancedSettingsButtons");layout->addWidget(buttons);
         buttons->button(QDialogButtonBox::Save)->setText(trText("Save"));
@@ -195,10 +199,10 @@ namespace chosuta {
                 const auto options=pronunciationOptionsRead(rawOptions());
                 if(!project.rules.englishDictionary.isEmpty()&&QFileInfo(project.rules.englishDictionary).size()+pronunciationDictionaryBytes(options)>DictionaryByteLimit)
                     throw Failure("Pronunciation dictionaries exceed 3 MB");
-                if(defaults->isChecked()) {auto next=preferences;next.pronunciation=options;savePreferences(next);preferences=next;}
-                if(project.rules.pronunciation!=options)change(trText("Advanced settings"),[options](Project&p){p.rules.pronunciation=options;});
+                if(defaults->isChecked()) {auto next=preferences;next.pronunciation=options;next.invalidFields.remove("pronunciation/settings");savePreferences(next);preferences=next;}
+                if(project.rules.pronunciation!=options)change(actionText("Advanced settings"),[options](Project&p){p.rules.pronunciation=options;});
                 dialog.accept();
-            }catch(const Failure&e){status->setText(QString::fromUtf8(e.what()));}
+            }catch(const Failure&e){status->setText(messageText(uiLanguage,exceptionMessage(e)));}
         });
         updateSize();dialog.exec();
     }
@@ -225,14 +229,14 @@ namespace chosuta {
         form->addRow(trText("Width"),canvasWidth);
         form->addRow(trText("Height"),canvasHeight);
         connect(canvasAspect,&QComboBox::currentIndexChanged,this,[this] {
-            if(refreshing||busy)return;auto size=canvasAspect->currentData().toSize();if(!size.isEmpty())change(trText("Canvas"),[size](Project&p) {
+            if(refreshing||busy)return;auto size=canvasAspect->currentData().toSize();if(!size.isEmpty())change(actionText("Canvas"),[size](Project&p) {
                 p.canvas.width=size.width();p.canvas.height=size.height();
             });
         });
         for(auto spin: {
             canvasWidth,canvasHeight
         })connect(spin,&QSpinBox::editingFinished,this,[this] {
-            if(!refreshing&&!busy&&(project.canvas.width!=canvasWidth->value()||project.canvas.height!=canvasHeight->value()))change(trText("Canvas"),[this](Project&p) {
+            if(!refreshing&&!busy&&(project.canvas.width!=canvasWidth->value()||project.canvas.height!=canvasHeight->value()))change(actionText("Canvas"),[this](Project&p) {
                 p.canvas.width=canvasWidth->value();p.canvas.height=canvasHeight->value();validateCanvas(p.canvas);
             });
         });
@@ -244,7 +248,7 @@ namespace chosuta {
         canvasDuration->setSpecialValueText(trText("Auto (score)"));
         form->addRow(trText("Animation duration"),canvasDuration);
         connect(canvasDuration,&QDoubleSpinBox::editingFinished,this,[this] {
-            if(!refreshing&&!busy&&project.output.duration!=canvasDuration->value())change(trText("Animation duration"),[this](Project&p) {
+            if(!refreshing&&!busy&&project.output.duration!=canvasDuration->value())change(actionText("Animation duration"),[this](Project&p) {
                 p.output.duration=canvasDuration->value();
             });
         });
@@ -252,21 +256,21 @@ namespace chosuta {
         useAudio->setObjectName("useAudioDuration");
         form->addRow(useAudio);
         connect(useAudio,&QPushButton::clicked,this,[this] {
-            if(!busy&&project.audioDuration>0&&project.audioDuration+project.output.audioOffset>0&&project.audioDuration+project.output.audioOffset<=21600)change(trText("Animation duration"),[](Project&p) {
+            if(!busy&&project.audioDuration>0&&project.audioDuration+project.output.audioOffset>0&&project.audioDuration+project.output.audioOffset<=21600)change(actionText("Animation duration"),[](Project&p) {
                 p.output.duration=p.audioDuration+p.output.audioOffset;
             });
         });
         backgroundColor=new QPushButton;
         form->addRow(trText("Background"),backgroundColor);
         connect(backgroundColor,&QPushButton::clicked,this,[this] {
-            if(busy)return;auto color=QColorDialog::getColor(project.canvas.background,this,trText("Background"));if(color.isValid())change(trText("Background"),[color](Project&p) {
+            if(busy)return;auto color=QColorDialog::getColor(project.canvas.background,this,trText("Background"));if(color.isValid())change(actionText("Background"),[color](Project&p) {
                 p.canvas.background=color;
             });
         });
         canvasTransparent=new QCheckBox(trText("Transparent canvas"));
         form->addRow(canvasTransparent);
         connect(canvasTransparent,&QCheckBox::toggled,this,[this](bool checked) {
-            if(!refreshing&&!busy)change(trText("Canvas"),[checked](Project&p) {
+            if(!refreshing&&!busy)change(actionText("Canvas"),[checked](Project&p) {
                 p.canvas.transparent=checked;
             });
         });
@@ -278,14 +282,14 @@ namespace chosuta {
         form->addRow(choose);
         connect(choose,&QPushButton::clicked,this,[this] {
             if(busy)return;auto path=QFileDialog::getOpenFileName(this,trText("Background image"), {
-            },"Images (*.png *.jpg *.jpeg *.webp *.bmp)");if(!path.isEmpty())change(trText("Background image"),[path](Project&p) {
+            },"Images (*.png *.jpg *.jpeg *.webp *.bmp)");if(!path.isEmpty())change(actionText("Background image"),[path](Project&p) {
                 p.canvas.backgroundImage=path;
             });
         });
         auto remove=new QPushButton(trText("Remove image"));
         form->addRow(remove);
         connect(remove,&QPushButton::clicked,this,[this] {
-            if(!busy)change(trText("Background image"),[](Project&p) {
+            if(!busy)change(actionText("Background image"),[](Project&p) {
                 p.canvas.backgroundImage.clear();
             });
         });
@@ -296,7 +300,7 @@ namespace chosuta {
         backgroundFit->addItem(trText("Stretch"),"stretch");
         form->addRow(trText("Background fit"),backgroundFit);
         connect(backgroundFit,&QComboBox::currentIndexChanged,this,[this] {
-            if(!refreshing&&!busy)change(trText("Background fit"),[this](Project&p) {
+            if(!refreshing&&!busy)change(actionText("Background fit"),[this](Project&p) {
                 p.canvas.backgroundFit=backgroundFit->currentData().toString();
             });
         });
@@ -321,14 +325,14 @@ namespace chosuta {
         for(auto spin: {
             characterScale,characterX,characterY
         })connect(spin,&QDoubleSpinBox::valueChanged,this,[this] {
-            if(!refreshing&&!busy)change(trText("Canvas"),[this](Project&p) {
+            if(!refreshing&&!busy)change(actionText("Canvas"),[this](Project&p) {
                 p.canvas.characterScale=characterScale->value()/100.;p.canvas.characterX=characterX->value()/100.;p.canvas.characterY=characterY->value()/100.;
             });
         });
         auto reset=new QPushButton(trText("Reset layout"));
         form->addRow(reset);
         connect(reset,&QPushButton::clicked,this,[this] {
-            if(!busy)change(trText("Canvas"),[](Project&p) {
+            if(!busy)change(actionText("Canvas"),[](Project&p) {
                 p.canvas.characterScale=1;p.canvas.characterX=p.canvas.characterY=.5;
             });
         });

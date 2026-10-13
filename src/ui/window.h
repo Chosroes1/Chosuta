@@ -8,12 +8,13 @@
 #include "render/render.h"
 #include "timeline.h"
 #include "preferences.h"
+#include "text.h"
 #include "render/audio.h"
 #include "preview.h"
 namespace chosuta {
     struct LoadResult {
         Project project;
-        QString error;
+        Message error;
         bool cancelled=false;
     };
     class Window:public QMainWindow {
@@ -26,6 +27,7 @@ namespace chosuta {
         const Project &currentProject() const {
             return project;
         }
+        quint64 evaluationBuildCount()const{return evaluationBuilds;}
         bool runSmokeWorkflow(const QString &directory);
         protected:
         bool eventFilter(QObject *,QEvent *)override;
@@ -35,11 +37,19 @@ namespace chosuta {
         void dropEvent(QDropEvent *)override;
         private:
         Project project;
-        QString projectPath,uiLanguage;
+        std::shared_ptr<const Evaluation> evaluation;
+        quint64 revision=0,job=0,jobRevision=0,evaluationBuilds=0;
+        enum class TaskState {Idle,Running,Cancelling,Review,Closing};
+        TaskState taskState=TaskState::Idle;
+        bool closePending=false;
+        bool finishTask();
+        Progress taskProgress();
+        void rebuildEvaluation();
+        QString projectPath,uiLanguage,verifiedAudioPath,verifiedAudioHash;
         Preferences preferences;
         QScrollArea *timelineScroll=nullptr;
         QSplitter *timelineSplitter=nullptr,*workspaceSplitter=nullptr;
-        QWidget *canvasPage=nullptr;
+        QWidget *canvasPage=nullptr,*mouthPage=nullptr,*mouthProperties=nullptr;
         QLabel *canvasLabel=nullptr;
         QSpinBox *canvasWidth=nullptr,*canvasHeight=nullptr;
         QDoubleSpinBox *canvasDuration=nullptr,*characterScale=nullptr,*characterX=nullptr,*characterY=nullptr;
@@ -98,16 +108,16 @@ namespace chosuta {
         void updateTimelineMinimum();
         QString activePath;
         bool audioStarted=false;
-        QString trText(const char *key)const;
+        QString trText(const char *key,const char *zh=nullptr,const char *ja=nullptr)const;
         void buildUi();
         void refresh(bool timingOnly=false);
         void refreshPreview();
         void refreshSelection();
         void collectRules(Project &p)const;
-        void change(const QString &label,const std::function<void(Project &)> &fn,bool timingOnly=false);
+        void change(ActionText label,const std::function<void(Project &)> &fn,bool timingOnly=false);
         void assignProject(Project p,bool timingOnly=false);
         void setBusy(bool value);
-        void error(const QString &message);
+        void error(const Message &message);
         bool confirmDiscard();
         bool save(bool choosePath=false);
         void openDialog();
@@ -142,7 +152,6 @@ namespace chosuta {
         void generatePerformanceDraft(bool selection=false,bool restore=false);
         void reviewPerformance(bool draft);
         void finishPerformanceDraft(bool apply);
-        QString pt(const char *en,const char *zh,const char *ja)const;
         QWidget *performancePage=nullptr,*performanceDraftBar=nullptr;
         QLabel *performanceHint=nullptr;
         QPlainTextEdit *performanceReasons=nullptr;
@@ -168,7 +177,7 @@ namespace chosuta {
         void applySubtitleProperties();
         void writeSubtitleText(const QString &track,const QString &cue,const QString &text);
         void alignSubtitleRange();
-        void changeSubtitles(const QString &,const std::function<void(Project &)> &);
+        void changeSubtitles(ActionText,const std::function<void(Project &)> &);
         void updateLayoutTarget();
         void followCursor(bool force=false);
         void startExport();

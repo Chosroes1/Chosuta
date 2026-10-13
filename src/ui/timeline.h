@@ -2,7 +2,7 @@
 #pragma once
 #include <QWidget>
 #include "core/model.h"
-#include "core/appearance.h"
+#include "core/evaluation.h"
 #include "core/performance.h"
 #include <memory>
 #include "render/waveform.h"
@@ -12,7 +12,7 @@ namespace chosuta {
         Q_OBJECT
         public:
         explicit Timeline(QWidget *parent=nullptr);
-        void setProject(const Project &p);
+        void setProject(const Project &p,std::shared_ptr<const Evaluation> view={});
         void setBeats(bool beats);
         void setZoom(double zoom);
         void setCursor(double time);
@@ -56,7 +56,7 @@ namespace chosuta {
         void subtitleSelected(QString track,QString cue,bool editText);
         void subtitleCreated(int track,double time);
         void subtitleEdited(QString track,chosuta::SubtitleCue cue);
-        void editRejected(QString message);
+        void editRejected(Message message);
         void deleteRequested();
         void blankClicked();
         void textEditingFinished();
@@ -75,7 +75,8 @@ namespace chosuta {
         private:
         Project project;
         std::unique_ptr<AppearanceResolver> appearance;
-        std::unique_ptr<PerformanceResolver> performance;
+        std::shared_ptr<const PerformanceResolver> performance;
+        std::shared_ptr<const Evaluation> evaluation;
         QString performanceId,cursorSnap="off";
         QVector<double> syllableEdges;
         QVector<double> performanceMarks;

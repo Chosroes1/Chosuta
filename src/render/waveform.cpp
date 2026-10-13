@@ -25,18 +25,18 @@ WavePeak Waveform::peaks(double begin,double end)const {
     }
     return result;
 }
-WaveformResult readWaveform(const QString &path,const QString &ffmpeg,const std::atomic_bool &cancel,Progress progress,double expectedDuration){
+WaveformResult readWaveform(const QString &path,const MediaTools &tools,const std::atomic_bool &cancel,Progress progress,double expectedDuration){
     WaveformResult result;
     try {
-        QFileInfo before(path);if(!before.isFile())throw Failure("Missing audio: "+path);
+        QFileInfo before(path);if(!before.isFile())throw Failure(Message::format("Missing audio: %1",{path}));
         auto wave=std::make_shared<Waveform>();wave->path=path;wave->fileBytes=before.size();wave->fileModified=before.lastModified().toMSecsSinceEpoch();
-        QFile input(path);if(!input.open(QIODevice::ReadOnly))throw Failure(input.errorString());QCryptographicHash hash(QCryptographicHash::Sha256);
-        while(!input.atEnd()){if(cancel.load()){result.cancelled=true;return result;}auto bytes=input.read(65536);if(bytes.isEmpty()&&input.error()!=QFileDevice::NoError)throw Failure(input.errorString());hash.addData(bytes);}
+        QFile input(path);if(!input.open(QIODevice::ReadOnly))throw Failure(Message("File operation failed").withDetail(input.errorString()));QCryptographicHash hash(QCryptographicHash::Sha256);
+        while(!input.atEnd()){if(cancel.load()){result.cancelled=true;return result;}auto bytes=input.read(65536);if(bytes.isEmpty()&&input.error()!=QFileDevice::NoError)throw Failure(Message("File operation failed").withDetail(input.errorString()));hash.addData(bytes);}
         wave->hash=QString::fromLatin1(hash.result().toHex());input.close();
         if(progress)progress(5);
         QProcess process;process.setProcessChannelMode(QProcess::SeparateChannels);
-        process.start(resolveExecutable(ffmpeg),{"-v","error","-nostdin","-i",path,"-map","0:a:0","-vn","-ac","1","-ar","16000","-f","f32le","pipe:1"});
-        if(!process.waitForStarted(3000))throw Failure(process.errorString());
+        process.start(tools.ffmpeg,{"-v","error","-nostdin","-i",path,"-map","0:a:0","-vn","-ac","1","-ar","16000","-f","f32le","pipe:1"});
+        if(!process.waitForStarted(3000))throw Failure(Message("Cannot start FFmpeg").withDetail(process.errorString()));
         QByteArray pending,errors;int count=0;float low=1,high=-1;double squares=0;QElapsedTimer idle;idle.start();
         auto stop=[&]{process.kill();process.waitForFinished(1000);};
         auto bin=[&]{wave->bins.append({low,high,float(std::sqrt(squares/count))});count=0;low=1;high=-1;squares=0;};
@@ -60,12 +60,12 @@ WaveformResult readWaveform(const QString &path,const QString &ffmpeg,const std:
             if(idle.elapsed()>60000){stop();throw Failure("Audio decoding stopped responding");}
             if(bytes.isEmpty())process.waitForReadyRead(20);
         }
-        if(process.exitStatus()!=QProcess::NormalExit||process.exitCode()!=0)throw Failure(errors.isEmpty()?QString("Audio decoding failed"):QString::fromUtf8(errors));
+        if(process.exitStatus()!=QProcess::NormalExit||process.exitCode()!=0)throw Failure(Message("Audio decoding failed").withDetail(QString::fromUtf8(errors)));
         if(!pending.isEmpty()||wave->samples==0)throw Failure("Empty or incomplete decoded audio");
         if(count)bin();
         QFileInfo after(path);if(after.size()!=wave->fileBytes||after.lastModified().toMSecsSinceEpoch()!=wave->fileModified)throw Failure("Audio changed while reading waveform");
         wave->buildLevels();if(cancel.load()){result.cancelled=true;return result;}if(progress)progress(100);result.wave=std::move(wave);
-    }catch(const std::exception &e){result.error=QString::fromUtf8(e.what());}
+    }catch(const std::exception &e){result.error=exceptionMessage(e);}
     return result;
 }
 WaveCorrectionResult correctWaveform(const Project &p,const Waveform &wave,const std::atomic_bool &cancel,Progress progress,const QStringList &selectedEvents){
@@ -80,7 +80,7 @@ WaveCorrectionResult correctWaveform(const Project &p,const Waveform &wave,const
         for(const auto &e:p.generated){if(cancel.load())throw Failure("Cancelled");eventSources[e.id]=e.source;if(selectedEvents.contains(e.id))chosen.insert(e.source);
             if(!groups.contains(e.source))groups[e.source]={e.source,e.start,e.end,false,false};
             auto &g=groups[e.source];g.a=std::min(g.a,e.start);g.b=std::max(g.b,e.end);
-            if(e.unknown||e.provenance.startsWith("special/")||e.shape=="breath")g.skip=true;
+            if(e.unknown||e.provenance.startsWith("special/")||e.articulation=="br")g.skip=true;
         }
         for(const auto &track:p.score.tracks)for(const auto &note:track.notes){if(cancel.load())throw Failure("Cancelled");
             QString control=p.rules.readings.value(note.id).trimmed();if(control.isEmpty())control=note.phonemes.trimmed();
@@ -144,7 +144,7 @@ WaveCorrectionResult correctWaveform(const Project &p,const Waveform &wave,const
         if(cancel.load()){result.cancelled=true;layer.sources.clear();return result;}
         result.accepted=layer.sources.size();layer.enabled=result.accepted>0;
         Project check=p;check.timing=layer;validateTimingCorrection(check);if(progress)progress(100);
-    }catch(const std::exception &e){if(cancel.load())result.cancelled=true;else result.error=QString::fromUtf8(e.what());layer.sources.clear();layer.enabled=false;}
+    }catch(const std::exception &e){if(cancel.load())result.cancelled=true;else result.error=exceptionMessage(e);layer.sources.clear();layer.enabled=false;}
     return result;
 }
 }

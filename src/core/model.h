@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <QtCore>
+#include "message.h"
 #include <QColor>
 #include <functional>
 #include <atomic>
@@ -8,9 +9,6 @@
 namespace chosuta {
     constexpr qint64 Blick = 705600000;
     constexpr qint64 MusicLimit = 9000000000000000LL;
-    struct Failure : std::runtime_error {
-        explicit Failure(const QString &s):std::runtime_error(s.toStdString()){}
-    };
     struct Tempo {
         qint64 position=0;
         double bpm=120;
@@ -36,7 +34,7 @@ namespace chosuta {
         QString beatLabel(qint64 blick) const;
     };
     struct Diagnostic {
-        QString path, code, message;
+        QString path, code;Message message;
     };
     struct Note {
         QString id, lyrics, phonemes, language="ja", phoneset, groupInstance;
@@ -135,12 +133,20 @@ namespace chosuta {
         QString phone,articulation;
         bool appearanceFixed=false;
     };
+    // Normalized intervals in the generated parent and in the edited event.
+    // Kept independently so moving/resizing a child never rewrites its origin.
+    struct SourceFragment {
+        QString parentId;
+        double sourceStart=0,sourceEnd=1,start=0,end=1;
+        bool operator==(const SourceFragment &)const=default;
+    };
     struct Override {
         Event event;
         QString anchor="seconds";
         qint64 startBlick=0,endBlick=0;
         bool locked=true, deleted=false, standalone=false;
         QStringList parentIds;
+        QVector<SourceFragment> sourceFragments;
     };
     struct CanvasSettings {
         int width=1280,height=720;
@@ -207,7 +213,7 @@ namespace chosuta {
         QVector<double> cuts;
         double phaseStart=0,phaseEnd=1; // Preserve template phase when splitting/cropping.
         bool protect=true;
-        QString reason;
+        QVector<Message> reasons;
         bool operator==(const PerformanceSegment &)const=default;
     };
     struct PerformanceBoundary {
@@ -244,7 +250,17 @@ namespace chosuta {
         const PerformanceTiming &timing()const{return timeBasis==PerformanceTimeBasis::Music?music:seconds;}
         bool operator==(const PerformanceSettings &)const=default;
     };
+    struct AnalysisSettings {
+            bool tonalityEnabled=false;
+            QString intervalUnit="semitones";
+            QString degreeTonic="C",degreeMode="major";
+            QVector<int> customDegreeScale={0,2,4,5,7,9,11};
+            QMap<QString,QString> noteSpellings; // Expanded Note identity -> written pitch, e.g. C#4 / Db4.
+            QMap<QString,QVector<int>> strongBeats; // signature -> 1-based denominator beats
+            bool operator==(const AnalysisSettings &)const=default;
+    };
     struct Performance {
+        AnalysisSettings analysis;
         QVector<VariantGroup> groups={{"base","Base"}};
         QMap<QString,QString> roles={{"relaxed","base"},{"normal","base"},{"emphasis","base"}};
         PerformanceSettings settings;
@@ -254,15 +270,7 @@ namespace chosuta {
         QString basisHash; // Accepted automatic plan basis; never regenerated during rendering.
     };
     struct Project {
-        struct Appearance {
-            bool enabled=false,tonalityEnabled=false;
-            QString intervalUnit="semitones";
-            QString degreeTonic="C",degreeMode="major";
-            QVector<int> customDegreeScale={0,2,4,5,7,9,11};
-            QMap<QString,QString> noteSpellings; // Expanded Note identity -> written pitch, e.g. C#4 / Db4.
-            QMap<QString,QVector<int>> strongBeats; // signature -> 1-based denominator beats
-            bool operator==(const Appearance &)const=default;
-        } appearance;
+        struct Appearance { bool enabled=false; bool operator==(const Appearance &)const=default; } appearance;
         Performance performance;
         Score score;
         QStringList selected;
@@ -278,7 +286,7 @@ namespace chosuta {
         ExportSettings output;
         bool subtitlesEnabled=false;
         QVector<SubtitleTrack> subtitles;
-        double audioDuration=0,playbackReturnPosition=0;
+        double audioDuration=0;
         double duration() const;
         QVector<Event> effective() const;
         QStringList orphanOverrides() const;
@@ -288,6 +296,9 @@ namespace chosuta {
         void split(const Event &event,double position);
         void merge(const QVector<Event> &events);
     };
+    void validateOutputSettings(const ExportSettings &);
+    void validateSavedEvent(const Event &);
+    void validateProject(const Project &);
     QSet<QString> subtitleSources(const Project &);
     SubtitleInterval subtitleInterval(const Project &,const SubtitleCue &,const QSet<QString> *sources=nullptr);
     QVector<LyricSpan> lyricSpans(const Project &,const QString &track);
@@ -300,7 +311,6 @@ namespace chosuta {
     QVector<Event> generate(const Project &project,const std::atomic_bool *cancel=nullptr,Progress progress={});
     QVector<Event> resolveEvents(const QVector<Event> &events);
     const Event *eventAt(const QVector<Event> &events,double time,bool disjoint=false);
-    QString shapeAt(const Project &project,const QVector<Event> &events,double time,bool disjoint=false);
     enum class SegmentRole {Consonant,Vowel,Special};
     struct Pronunciation {
         QVector<QStringList> syllables;

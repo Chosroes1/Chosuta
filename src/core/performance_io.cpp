@@ -1,20 +1,41 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "performance.h"
+#include "intervals.h"
+#include "json.h"
 #include <cmath>
 namespace chosuta {
+namespace {
+void validateReasons(const QVector<Message> &reasons){
+    if(reasons.size()>96)throw Failure("Too many performance reasons");
+    for(const auto &r:reasons){
+        if(r.key.isEmpty()||r.key.size()>256||!r.detail.isEmpty()||r.arguments.size()>4)throw Failure("Invalid performance reason");
+        for(const auto &a:r.arguments)if(a.size()>256)throw Failure("Invalid performance reason argument");
+    }
+}
+QJsonArray reasonJson(const QVector<Message> &reasons){validateReasons(reasons);QJsonArray rows;for(const auto &r:reasons)rows.append(QJsonObject{{"key",r.key},{"arguments",QJsonArray::fromStringList(r.arguments)}});return rows;}
+QVector<Message> readReasons(const QJsonValue &value){
+    if(!value.isArray())throw Failure("Invalid performance reasons");
+    QVector<Message> result;
+    for(const auto &v:value.toArray()){
+        auto o=jsonFields(v,"performance.reasons",{"key"},{},{},{},{"arguments"});Message r;r.key=o["key"].toString();
+        for(const auto &a:o["arguments"].toArray()){jsonString(a,"performance.reasons.arguments");r.arguments.append(a.toString());}result.append(r);
+    }validateReasons(result);return result;
+}
+}
+
 namespace {
 QMap<QString,double *> timingNumbers(PerformanceTiming &t){return {{"window",&t.window},{"background",&t.background},{"lookahead",&t.lookahead},{"support",&t.support},{"confirm",&t.confirm},{"minimum",&t.minimum},{"emphasis",&t.emphasis},{"exit",&t.exit},{"breath",&t.breath},{"phrase",&t.phrase},{"reset",&t.reset},{"release",&t.release}};}
 QMap<QString,double *> numbers(PerformanceSettings &s){return {{"efficiency",&s.efficiency},{"highShare",&s.highShare},{"motifShare",&s.motifShare},{"activityRatio",&s.activityRatio},{"wideningRatio",&s.wideningRatio},{"motifTolerance",&s.motifTolerance}};}
 QMap<QString,int *> integers(PerformanceSettings &s){return {{"leapSemitones",&s.leapSemitones},{"leapDegrees",&s.leapDegrees},{"progressionSemitones",&s.progressionSemitones},{"progressionDegrees",&s.progressionDegrees},{"nearSemitones",&s.nearSemitones},{"nearDegrees",&s.nearDegrees},{"contrastSemitones",&s.contrastSemitones},{"contrastDegrees",&s.contrastDegrees}};}
 QMap<QString,bool *> flags(PerformanceSettings &s){return {{"leap",&s.leap},{"progression",&s.progression},{"motif",&s.motif},{"section",&s.section},{"release",&s.release},{"continuity",&s.continuity}};}
-QString str(const QJsonObject &o,const QString &k){if(!o[k].isString())throw Failure("Invalid performance text: "+k);return o[k].toString();}
-double num(const QJsonObject &o,const QString &k){if(!o[k].isDouble()||!std::isfinite(o[k].toDouble()))throw Failure("Invalid performance number: "+k);return o[k].toDouble();}
-bool flag(const QJsonObject &o,const QString &k){if(!o[k].isBool())throw Failure("Invalid performance flag: "+k);return o[k].toBool();}
+QString str(const QJsonObject &o,const QString &k){if(!o[k].isString())throw Failure(Message::format("Invalid performance text: %1",{k}));return o[k].toString();}
+double num(const QJsonObject &o,const QString &k){if(!o[k].isDouble()||!std::isfinite(o[k].toDouble()))throw Failure(Message::format("Invalid performance number: %1",{k}));return o[k].toDouble();}
+bool flag(const QJsonObject &o,const QString &k){if(!o[k].isBool())throw Failure(Message::format("Invalid performance flag: %1",{k}));return o[k].toBool();}
 qint64 tick(const QJsonObject &o,const QString &k){bool ok=false;auto v=str(o,k).toLongLong(&ok);if(!ok||v < -MusicLimit||v>MusicLimit)throw Failure("Invalid performance music position");return v;}
-QJsonArray array(const QJsonObject &o,const QString &k){if(!o[k].isArray())throw Failure("Invalid performance list: "+k);return o[k].toArray();}
+QJsonArray array(const QJsonObject &o,const QString &k){if(!o[k].isArray())throw Failure(Message::format("Invalid performance list: %1",{k}));return o[k].toArray();}
 QJsonObject object(const QJsonValue &v){if(!v.isObject())throw Failure("Invalid performance object");return v.toObject();}
 void validateSettings(PerformanceSettings s){
-    const auto ns=numbers(s);for(auto it=ns.cbegin();it!=ns.cend();++it)if(!std::isfinite(*it.value())||*it.value()<0||*it.value()>64)throw Failure("Invalid performance setting: "+it.key());
+    const auto ns=numbers(s);for(auto it=ns.cbegin();it!=ns.cend();++it)if(!std::isfinite(*it.value())||*it.value()<0||*it.value()>64)throw Failure(Message::format("Invalid performance setting: %1",{it.key()}));
     if(s.timeBasis!=PerformanceTimeBasis::Music&&s.timeBasis!=PerformanceTimeBasis::Seconds)throw Failure("Invalid performance time basis");
     for(auto t:{s.music,s.seconds}){for(auto v:timingNumbers(t))if(!std::isfinite(*v)||*v<=0||*v>128)throw Failure("Invalid performance duration");
         if(t.background<t.window||t.lookahead<t.support||t.reset<t.phrase||t.emphasis<t.minimum)throw Failure("Inconsistent performance timing ranges");}
@@ -55,7 +76,7 @@ void validatePerformance(const Project &p){
     auto target=[&](const QString &s){return v.roles.contains(s)||(s.startsWith("group:")&&groups.contains(s.mid(6)));};
     for(const auto &r:v.settings.rules)if(!target(r.target))throw Failure("Unknown rule target");
     QSet<QString> ids;
-    for(const auto *list:{&v.generated,&v.manual})for(const auto &s:*list){
+    for(const auto *list:{&v.generated,&v.manual})for(const auto &s:*list){validateReasons(s.reasons);
         if(s.id.isEmpty()||s.id.size()>1024||ids.contains(s.id))throw Failure("Duplicate or invalid performance segment ID");
         ids.insert(s.id);
         if(!QStringList{"beats","seconds"}.contains(s.anchor)||!QStringList{"hold","expand","contract","arch","custom"}.contains(s.mode))throw Failure("Invalid performance anchor/template");
@@ -69,17 +90,17 @@ void validatePerformance(const Project &p){
 }
 QJsonObject performanceJson(const Project &p){
     validatePerformance(p);const auto &v=p.performance;QJsonObject o{{"settings",performanceSettingsJson(v.settings)},{"basisHash",v.basisHash}};
-    QJsonArray groups;for(const auto &g:v.groups)groups.append(QJsonObject{{"id",g.id},{"name",g.name}});o["groups"]=groups;
+    QJsonArray groups;for(const auto &g:v.groups)groups.append(QJsonObject{{"id",g.id},{"name",g.name}});o["groups"]=groups;o["analysis"]=analysisSettingsJson(p.performance.analysis);
     QJsonObject roles;for(auto it=v.roles.cbegin();it!=v.roles.cend();++it)roles[it.key()]=it.value();o["roles"]=roles;
     QJsonArray boundaries;for(const auto &b:v.boundaries)boundaries.append(QJsonObject{{"source",b.source},{"mode",b.mode}});o["boundaries"]=boundaries;
     QJsonArray suggestions;for(const auto &b:v.suggestions)suggestions.append(QJsonObject{{"source",b.source},{"mode",b.mode}});o["suggestions"]=suggestions;
     QJsonArray tonalities;for(const auto &k:v.tonalities)tonalities.append(QJsonObject{{"start",QString::number(k.start)},{"end",QString::number(k.end)},{"key",k.key}});o["tonalities"]=tonalities;
     auto segments=[](const QVector<PerformanceSegment> &list){QJsonArray a;for(const auto &s:list){QJsonArray cuts;for(auto c:s.cuts)cuts.append(c);
-        a.append(QJsonObject{{"id",s.id},{"anchor",s.anchor},{"track",s.track},{"firstSource",s.firstSource},{"lastSource",s.lastSource},{"startBlick",QString::number(s.startBlick)},{"endBlick",QString::number(s.endBlick)},{"start",s.start},{"end",s.end},{"mode",s.mode},{"targets",QJsonArray::fromStringList(s.targets)},{"cuts",cuts},{"phaseStart",s.phaseStart},{"phaseEnd",s.phaseEnd},{"protect",s.protect},{"reason",s.reason}});}return a;};
+        a.append(QJsonObject{{"id",s.id},{"anchor",s.anchor},{"track",s.track},{"firstSource",s.firstSource},{"lastSource",s.lastSource},{"startBlick",QString::number(s.startBlick)},{"endBlick",QString::number(s.endBlick)},{"start",s.start},{"end",s.end},{"mode",s.mode},{"targets",QJsonArray::fromStringList(s.targets)},{"cuts",cuts},{"phaseStart",s.phaseStart},{"phaseEnd",s.phaseEnd},{"protect",s.protect},{"reasons",reasonJson(s.reasons)}});}return a;};
     o["generated"]=segments(v.generated);o["manual"]=segments(v.manual);return o;
 }
 void readPerformance(Project &p,const QJsonValue &value){
-    auto o=object(value);Performance v;v.settings=readPerformanceSettings(o["settings"]);v.basisHash=str(o,"basisHash");v.groups.clear();
+    auto o=object(value);Performance v;v.analysis=readAnalysisSettings(o["analysis"]);v.settings=readPerformanceSettings(o["settings"]);v.basisHash=str(o,"basisHash");v.groups.clear();
     for(auto item:array(o,"groups")){auto g=object(item);v.groups.append({str(g,"id"),str(g,"name")});}
     auto roles=object(o["roles"]);v.roles.clear();for(auto it=roles.cbegin();it!=roles.cend();++it)v.roles[it.key()]=str(roles,it.key());
     for(auto item:array(o,"boundaries")){auto b=object(item);v.boundaries.append({str(b,"source"),str(b,"mode")});}
@@ -90,7 +111,7 @@ void readPerformance(Project &p,const QJsonValue &value){
         s.startBlick=tick(a,"startBlick");s.endBlick=tick(a,"endBlick");s.start=num(a,"start");s.end=num(a,"end");s.mode=str(a,"mode");s.targets.clear();
         for(auto t:array(a,"targets")){if(!t.isString())throw Failure("Invalid target");s.targets.append(t.toString());}
         for(auto c:array(a,"cuts")){if(!c.isDouble())throw Failure("Invalid cut");s.cuts.append(c.toDouble());}
-        s.phaseStart=num(a,"phaseStart");s.phaseEnd=num(a,"phaseEnd");s.protect=flag(a,"protect");s.reason=str(a,"reason");result.append(s);
+        s.phaseStart=num(a,"phaseStart");s.phaseEnd=num(a,"phaseEnd");s.protect=flag(a,"protect");s.reasons=readReasons(a["reasons"]);result.append(s);
     }return result;};
     v.generated=segments("generated");v.manual=segments("manual");p.performance=std::move(v);validatePerformance(p);
 }

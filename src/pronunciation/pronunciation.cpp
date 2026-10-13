@@ -45,7 +45,7 @@ namespace chosuta {
         QFileInfo info(path);
         if(last==path&&modified==info.lastModified().toMSecsSinceEpoch())return cache;
         QFile f(path);
-        if(!f.open(QIODevice::ReadOnly)||f.size()>DictionaryByteLimit-builtinDictionaryBytes())throw Failure("Cannot read English dictionary (limit 3 MB including built-in tables): "+path);
+        if(!f.open(QIODevice::ReadOnly)||f.size()>DictionaryByteLimit-builtinDictionaryBytes())throw Failure(Message::format("Cannot read English dictionary (limit 3 MB including built-in tables): %1",{path}));
         cache=builtin;
         while(!f.atEnd()) {
             QString l=QString::fromUtf8(f.readLine()).section('#',0,0).trimmed();

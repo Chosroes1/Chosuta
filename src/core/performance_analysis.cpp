@@ -1,31 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "performance_analysis.h"
 #include "intervals.h"
+#include "source_time.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
 namespace chosuta {
 namespace {
-Project::Appearance tonalAt(const Project &p,qint64 tick){auto a=p.appearance;
+AnalysisSettings tonalAt(const Project &p,qint64 tick){auto a=p.performance.analysis;
     auto it=std::upper_bound(p.performance.tonalities.cbegin(),p.performance.tonalities.cend(),tick,[](qint64 t,const TonalityRegion &k){return t<k.start;});
     if(it!=p.performance.tonalities.cbegin()){--it;if(tick<it->end){a.tonalityEnabled=!it->key.isEmpty();if(auto key=parseTonality(it->key)){a.degreeTonic=key->first;a.degreeMode=key->second;}}}return a;
 }
 }
 PerformanceAnalysis analyzePerformance(const Project &p,const std::atomic_bool *cancel,Progress report){
     auto check=[&]{if(cancel&&cancel->load())throw Failure("Cancelled");};
-    PerformanceAnalysis out;const auto &s=p.performance.settings;const auto &t=s.timing();bool music=s.timeBasis==PerformanceTimeBasis::Music,diatonic=p.appearance.intervalUnit=="diatonic";
-    struct Source{const Note *n;QString track;int priority,order;};QVector<Source> sources;
-    struct Edge{qint64 at;int source;bool start;};QVector<Edge> edges;
-    for(int ti=0;ti<p.score.tracks.size();++ti){const auto &track=p.score.tracks[ti];if(track.muted||!p.selected.contains(track.id))continue;
-        for(const auto &n:track.notes)if(!n.muted&&n.duration>0){check();int index=sources.size();sources.append({&n,track.id,p.priorities.value(track.id,ti),ti});edges.append({n.onset,index,true});edges.append({n.onset+n.duration,index,false});}}
-    std::sort(edges.begin(),edges.end(),[](auto a,auto b){return a.at==b.at?a.start<b.start:a.at<b.at;});
-    auto less=[&](int a,int b){const auto &x=sources[a],&y=sources[b];if(x.priority!=y.priority)return x.priority<y.priority;if(x.order!=y.order)return x.order<y.order;if(x.n->onset!=y.n->onset)return x.n->onset>y.n->onset;return x.n->id==y.n->id?a<b:x.n->id<y.n->id;};
-    int primary=-1;for(int ti=0;ti<p.score.tracks.size();++ti){auto &track=p.score.tracks[ti];if(track.muted||!p.selected.contains(track.id))continue;if(primary<0||p.priorities.value(track.id,ti)<p.priorities.value(p.score.tracks[primary].id,primary))primary=ti;}
-    std::set<int,decltype(less)> active(less);bool breath=false;
-    for(int i=0;i<edges.size();){check();qint64 at=edges[i].at;while(i<edges.size()&&edges[i].at==at){auto e=edges[i++];if(e.start)active.insert(e.source);else active.erase(e.source);}if(i==edges.size()||active.empty())continue;
-        const auto &source=sources[*active.begin()];if(!p.rules.harmonyTakeover&&source.order!=primary)continue;const auto &n=*source.n;auto word=n.phonemes.trimmed().isEmpty()?n.lyrics.trimmed():n.phonemes.trimmed();
+    PerformanceAnalysis out;const auto &s=p.performance.settings;const auto &t=s.timing();bool music=s.timeBasis==PerformanceTimeBasis::Music,diatonic=p.performance.analysis.intervalUnit=="diatonic";
+    QHash<QString,const Note *> notes;for(const auto &track:p.score.tracks)for(const auto &n:track.notes)notes[n.id]=&n;
+    bool breath=false;
+    for(const auto &source:routeSources(p,cancel)){check();const auto &n=*notes[source.source];const qint64 at=source.start;
+        auto word=n.phonemes.trimmed().isEmpty()?n.lyrics.trimmed():n.phonemes.trimmed();
         if(word=="br"){breath=true;continue;}if(word=="cl"||word=="っ"||word=="ッ"||word.isEmpty())continue;
-        qint64 end=edges[i].at;
+        qint64 end=source.end;
         if(!out.notes.isEmpty()&&out.notes.last().note==&n&&out.notes.last().b==at){auto &last=out.notes.last();last.b=end;last.end=p.score.time.seconds(end);last.y=music?double(end)/Blick:last.end;continue;}
         PerformanceInput v;v.note=&n;v.track=source.track;v.a=at;v.b=end;v.start=p.score.time.seconds(at);v.end=p.score.time.seconds(end);v.x=music?double(at)/Blick:v.start;v.y=music?double(end)/Blick:v.end;v.breath=breath;breath=false;
         const auto tone=tonalAt(p,at);v.tone=tone.tonalityEnabled?tone.degreeTonic+" "+tone.degreeMode:QString{};
@@ -73,7 +68,7 @@ PerformanceAnalysis analyzePerformance(const Project &p,const std::atomic_bool *
 QJsonObject performanceAnalysisJson(const Project &p,const std::atomic_bool *cancel){
     validatePerformance(p);auto a=analyzePerformance(p,cancel,{});QJsonArray notes;
     for(int i=0;i<a.notes.size();++i){const auto &n=a.notes[i];notes.append(QJsonObject{{"source",n.note->id},{"track",n.track},{"startBlick",QString::number(n.a)},{"endBlick",QString::number(n.b)},{"position",p.score.time.beatLabel(n.a)},{"midi",n.note->pitch},{"coordinate",n.named?QJsonValue(n.pitch):QJsonValue()},{"tonality",n.tone},{"degree",n.degree},{"phrase",n.phrase},{"section",n.hard},{"ending",n.ending},{"motifEndIndex",a.motifEnd[i]}});}
-    return {{"algorithm","performance-v2.0"},{"basisHash",performanceBasisHash(p,cancel)},{"timeBasis",p.performance.settings.timeBasis==PerformanceTimeBasis::Music?"music":"seconds"},{"distanceBasis",p.appearance.intervalUnit},{"boundedMotifSearch",a.degraded},{"pitchCoverageSufficient",a.pitched},{"q10",a.q10},{"q50",a.q50},{"q75",a.q75},{"q90",a.q90},{"notes",notes}};
+    return {{"algorithm","performance-v2.0"},{"basisHash",performanceBasisHash(p,cancel)},{"timeBasis",p.performance.settings.timeBasis==PerformanceTimeBasis::Music?"music":"seconds"},{"distanceBasis",p.performance.analysis.intervalUnit},{"boundedMotifSearch",a.degraded},{"pitchCoverageSufficient",a.pitched},{"q10",a.q10},{"q50",a.q50},{"q75",a.q75},{"q90",a.q90},{"notes",notes}};
 }
 
 }

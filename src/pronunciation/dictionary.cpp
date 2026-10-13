@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
+#include "core/json.h"
 static void initDictionaryResources() {Q_INIT_RESOURCE(data);}
 namespace chosuta {
     QString dictionaryKey(const QString&word,const QString&language) {
@@ -20,7 +21,7 @@ namespace chosuta {
             initDictionaryResources();qint64 total=0;
             for(const auto &name:QStringList{"english.tsv","japanese.tsv","chinese.tsv"}) {
                 QFile file(":/chosuta/"+name);
-                if(!file.open(QIODevice::ReadOnly))throw Failure("Missing pronunciation resource: "+name);
+                if(!file.open(QIODevice::ReadOnly))throw Failure(Message::format("Missing pronunciation resource: %1",{name}));
                 total+=file.size();
             }
             return total;
@@ -34,22 +35,22 @@ namespace chosuta {
         if(pronunciationDictionaryBytes(o)>DictionaryByteLimit)throw Failure("Pronunciation dictionaries exceed 3 MB");
         int count=0;
         for(auto language=o.words.cbegin();language!=o.words.cend();++language) {
-            if(!QStringList{"en","zh","ja"}.contains(language.key()))throw Failure("Invalid dictionary language: "+language.key());
+            if(!QStringList{"en","zh","ja"}.contains(language.key()))throw Failure(Message::format("Invalid dictionary language: %1",{language.key()}));
             for(auto word=language->cbegin();word!=language->cend();++word) {
                 if(++count>20000)throw Failure("Dictionary exceeds 20000 entries");
                 if(word.key().isEmpty()||word.key().size()>128||word.key()!=dictionaryKey(word.key(),language.key())||
                     QStringList{"+","-","ー","br","cl"}.contains(word.key())||word.key().contains(QRegularExpression("[\\p{Cc}]")))
-                    throw Failure("Invalid dictionary word: "+word.key());
-                if(word->text.trimmed().isEmpty()||word->text.size()>4096)throw Failure("Invalid dictionary reading: "+word.key());
+                    throw Failure(Message::format("Invalid dictionary word: %1",{word.key()}));
+                if(word->text.trimmed().isEmpty()||word->text.size()>4096)throw Failure(Message::format("Invalid dictionary reading: %1",{word.key()}));
                 const auto parsed=pronounce(word->text,language.key(),word->phonemes);
-                if(parsed.unknown)throw Failure("Unrecognized dictionary reading: "+language.key()+" / "+word.key());
+                if(parsed.unknown)throw Failure(Message::format("Unrecognized dictionary reading: %1",{language.key()+" / "+word.key()}));
             }
         }
     }
     PronunciationOptions pronunciationOptionsRead(const QJsonValue&value) {
         PronunciationOptions options;
         if(!value.isObject())throw Failure("Invalid pronunciation settings");
-        const auto object=value.toObject();
+        const auto object=jsonFields(value,"pronunciation",{},{},{"japaneseKanji"},{},{"entries"},{"version"});
         if(object["version"].toInt()!=1||!object["entries"].isArray()||!object["japaneseKanji"].isBool())
             throw Failure("Invalid pronunciation settings version/fields");
         const auto entries=object["entries"].toArray();
@@ -57,12 +58,12 @@ namespace chosuta {
         options.japaneseKanji=object["japaneseKanji"].toBool();
         for(const auto &value:entries) {
             if(!value.isObject())throw Failure("Invalid dictionary entry");
-            const auto entry=value.toObject();
+            const auto entry=jsonFields(value,"pronunciation.entries[]",{"language","word","reading","notation"});
             const auto language=entry["language"].toString();
             const auto word=dictionaryKey(entry["word"].toString(),language);
             const auto notation=entry["notation"].toString();
             if(notation!="reading"&&notation!="phonemes")throw Failure("Invalid dictionary notation");
-            if(options.words[language].contains(word))throw Failure("Duplicate dictionary word: "+language+" / "+word);
+            if(options.words[language].contains(word))throw Failure(Message::format("Duplicate dictionary word: %1",{language+" / "+word}));
             options.words[language][word]={entry["reading"].toString().trimmed(),notation=="phonemes"};
         }
         validatePronunciationOptions(options);

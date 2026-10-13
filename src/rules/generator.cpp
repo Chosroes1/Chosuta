@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
+#include "core/source_time.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -10,11 +11,7 @@ namespace chosuta {
         if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8||!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant timing settings");
         if(!p.rules.englishDictionary.isEmpty()&&QFileInfo(p.rules.englishDictionary).size()+pronunciationDictionaryBytes(p.rules.pronunciation)>DictionaryByteLimit)
             throw Failure("Pronunciation dictionaries exceed 3 MB");
-        struct Candidate {
-            Event event;
-            int priority=0,order=0;
-        };
-        QVector<Candidate>candidates;
+        QVector<Event> candidates;
         for(int ti=0;ti<p.score.tracks.size();++ti) {
             const auto&t=p.score.tracks[ti];
             if(!p.selected.contains(t.id)||t.muted)continue;
@@ -59,9 +56,7 @@ namespace chosuta {
                     e.text=n.lyrics;
                     e.unknown=unknown||shape=="unknown";
                     e.phone=emittedPhone;e.articulation=emittedArticulation;
-                    candidates.append( {
-                        e,p.priorities.value(t.id,ti),ti
-                    });
+                    candidates.append(e);
                     previous=shape;
                     if(QStringList{"A","I","U","E","O"}.contains(shape))context.vowel=shape;
                 };
@@ -136,11 +131,11 @@ namespace chosuta {
                     int leading=0,trailing=0;
                     double onset=0,coda=0;
                     const auto roles=result.roles.value(si);
-                    const bool bounded=p.rules.consonantMaxSeconds>0&&roles.contains(SegmentRole::Vowel)&&!(roles.front()==SegmentRole::Special&&shapes.front()=="closed");
+                    const bool bounded=roles.contains(SegmentRole::Vowel)&&!(roles.front()==SegmentRole::Special&&shapes.front()=="closed");
                     if(bounded) {
                         while(leading<roles.size()&&roles[leading]==SegmentRole::Consonant)++leading;
                         while(trailing<roles.size()-leading&&roles[roles.size()-1-trailing]==SegmentRole::Consonant)++trailing;
-                        const double budget=std::min((b-a)*p.rules.consonantRatio,p.rules.consonantMaxSeconds);
+                        const double budget=p.rules.consonantMaxSeconds>0?std::min((b-a)*p.rules.consonantRatio,p.rules.consonantMaxSeconds):(b-a)*p.rules.consonantRatio;
                         onset=leading?budget:0;coda=trailing?budget:0;
                         // Both groups together must leave at least 20% for the vowel/special body.
                         if(onset+coda>(b-a)*.8){double factor=(b-a)*.8/(onset+coda);onset*=factor;coda*=factor;}
@@ -189,64 +184,20 @@ namespace chosuta {
                 }
             }
         }
-        // Sweep only active singing intervals: rest holding is evaluated after source routing.
-        struct Boundary {
-            double time;
-            int index;
-            bool start;
-        };
-        QVector<Boundary>boundaries;
-        for(int i=0;i<candidates.size();++i) {
-            boundaries.append( {
-                candidates[i].event.start,i,true
-            });
-            boundaries.append( {
-                candidates[i].event.end,i,false
-            });
-        }
-        std::sort(boundaries.begin(),boundaries.end(),[](auto a,auto b) {
-            return a.time==b.time?a.start<b.start:a.time<b.time;
-        });
-        auto less=[&](int a,int b) {
-            const auto&x=candidates[a];
-            const auto&y=candidates[b];
-            if(x.priority!=y.priority)return x.priority<y.priority;
-            if(x.order!=y.order)return x.order<y.order;
-            if(x.event.start!=y.event.start)return x.event.start>y.event.start;
-            return x.event.id<y.event.id;
-        };
-        std::set<int,decltype(less)>active(less);
-        QVector<Event>result;
-        double previousEnd=-std::numeric_limits<double>::infinity();
-        int primary=-1;
-        for(int ti=0;ti<p.score.tracks.size();++ti)if(p.selected.contains(p.score.tracks[ti].id)&&!p.score.tracks[ti].muted)
-        if(primary<0||p.priorities.value(p.score.tracks[ti].id,ti)<p.priorities.value(p.score.tracks[primary].id,primary))primary=ti;
-        for(int i=0;i<boundaries.size();) {
+        QHash<QString,QVector<SourceSlice>> routes;
+        for(const auto &slice:routeSources(p,cancel))routes[slice.source].append(slice);
+        QVector<Event> result;
+        for(const auto &e:candidates){
             if(cancel&&cancel->load())throw Failure("Cancelled");
-            if(progress&&i%1024==0)progress(80+i*20/std::max(1,int(boundaries.size())));
-            double time=boundaries[i].time;
-            while(i<boundaries.size()&&boundaries[i].time==time) {
-                auto b=boundaries[i++];
-                if(b.start)active.insert(b.index);
-                else active.erase(b.index);
+            for(const auto &slice:routes.value(e.source)){
+                const double a=std::max(e.start,p.score.time.seconds(slice.start)),b=std::min(e.end,p.score.time.seconds(slice.end));
+                if(b<=a)continue;
+                auto v=e;v.start=a;v.end=b;
+                if(a!=e.start||b!=e.end)v.id+=QString("/route:%1").arg(p.score.time.blicks(a));
+                result.append(v);
             }
-            if(i==boundaries.size()||active.empty())continue;
-            const auto&c=candidates[*active.begin()];
-            if(!p.rules.harmonyTakeover&&primary!=c.order)continue;
-            double next=boundaries[i].time;
-            if(next<=time)continue;
-            if(!result.isEmpty()&&result.last().id.section("/route:",0,0)==c.event.id&&previousEnd==time) {
-                result.last().end=next;
-                previousEnd=next;
-                continue;
-            }
-            auto e=c.event;
-            if(time!=e.start||next!=e.end)e.id+=QString("/route:%1").arg(p.score.time.blicks(time));
-            e.start=time;
-            e.end=next;
-            result.append(e);
-            previousEnd=next;
         }
+        std::sort(result.begin(),result.end(),[](const auto &a,const auto &b){return a.start==b.start?a.id<b.id:a.start<b.start;});
         if(progress)progress(100);
         return result;
     }

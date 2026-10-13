@@ -80,10 +80,10 @@ namespace chosuta {
         if(!std::isfinite(c.characterScale)||c.characterScale<.01||c.characterScale>10||!std::isfinite(c.characterX)||!std::isfinite(c.characterY)||c.characterX < -2||c.characterX>3||c.characterY < -2||c.characterY>3)throw Failure("Invalid character layout");
     }
     double Project::duration()const {
+        if(output.duration>0)return output.duration;
         double d=0;
         for(const auto&t:score.tracks)for(const auto&n:t.notes)d=std::max(d,score.time.seconds(n.onset+n.duration));
         for(const auto&e:effective())d=std::max(d,e.end);
-        if(output.duration>0)return output.duration;
         d=std::max(.1,d+std::max(0.,output.syncOffset));
         if(subtitlesEnabled){const auto sources=subtitleSources(*this);for(const auto&t:subtitles)if(t.enabled)for(const auto&c:t.cues)d=std::max(d,subtitleInterval(*this,c,&sources).end);}
         if(appearance.enabled&&!performance.manual.isEmpty()){PerformanceResolver resolver(*this,false);for(const auto &segment:performance.manual)d=std::max(d,resolver.interval(segment).end);}
@@ -159,6 +159,7 @@ namespace chosuta {
         o.event=e;
         if(!QStringList{"A","I","U","E","O","closed","rest","breath","unknown"}.contains(e.shape))o.event.appearanceFixed=true;
         
+        o.sourceFragments=eventSourceFragments(*this,e);
         if(overrides.contains(e.id))o.parentIds=overrides[e.id].parentIds;
         o.standalone=overrides.contains(e.id)?overrides[e.id].standalone:(e.provenance=="manual/split"||e.provenance=="manual/merge");
         if(!o.event.provenance.startsWith("manual"))o.event.provenance="manual/edit";
@@ -174,43 +175,67 @@ namespace chosuta {
         edit(e);
         overrides[e.id].deleted=true;
     }
+    static QVector<SourceFragment> cropFragments(const QVector<SourceFragment> &fragments,double start,double end) {
+        QVector<SourceFragment> result;
+        for(const auto &f:fragments){
+            const double a=std::max(start,f.start),b=std::min(end,f.end);
+            if(b<=a)continue;
+            const double scale=(f.sourceEnd-f.sourceStart)/(f.end-f.start);
+            result.append({f.parentId,f.sourceStart+(a-f.start)*scale,f.sourceStart+(b-f.start)*scale,
+                (a-start)/(end-start),(b-start)/(end-start)});
+        }
+        return result;
+    }
     void Project::split(const Event&e,double p) {
-        if(p<=e.start||p>=e.end)throw Failure("Split must be inside event");
+        if(!std::isfinite(p)||p<=e.start||p>=e.end)throw Failure("Split must be inside event");
+        const auto fragments=eventSourceFragments(*this,e);
+        const double cut=(p-e.start)/(e.end-e.start);
         erase(e);
         Event a=e,b=e;
         a.id=QUuid::createUuid().toString(QUuid::WithoutBraces);
         b.id=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        a.end=p;
-        b.start=p;
+        a.end=p;b.start=p;
         a.provenance=b.provenance="manual/split";
-        edit(a);
-        edit(b);
-        auto parents=overrides[e.id].standalone?overrides[e.id].parentIds:QStringList {
-            e.id
-        };
-        overrides[a.id].parentIds=parents;
-        overrides[b.id].parentIds=parents;
+        edit(a);edit(b);
+        const auto parents=overrides[e.id].standalone?overrides[e.id].parentIds:QStringList{e.id};
+        overrides[a.id].parentIds=parents;overrides[b.id].parentIds=parents;
+        overrides[a.id].sourceFragments=cropFragments(fragments,0,cut);
+        overrides[b.id].sourceFragments=cropFragments(fragments,cut,1);
     }
     void Project::merge(const QVector<Event>&events) {
         if(events.size()<2)throw Failure("Select two or more events");
         Event e=events.front();
-        
         QStringList parents;
-        for(const auto&v:events) {
-            e.start=std::min(e.start,v.start);
-            e.end=std::max(e.end,v.end);
-            auto origin=overrides.contains(v.id)&&overrides[v.id].standalone?overrides[v.id].parentIds:QStringList {
-                v.id
-            };
-            parents.append(origin);
-            erase(v);
-            e.source+=QString(";%1").arg(v.source);
+        QHash<QString,Event> selected,originals;
+        QHash<QString,QVector<SourceFragment>> fragments;
+        for(const auto &v:generated)originals[v.id]=v;
+        for(const auto &v:events){
+            e.start=std::min(e.start,v.start);e.end=std::max(e.end,v.end);
+            selected[v.id]=v;fragments[v.id]=eventSourceFragments(*this,v);
+            parents.append(overrides.contains(v.id)&&overrides[v.id].standalone?overrides[v.id].parentIds:QStringList{v.id});
         }
-        e.id=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        e.provenance="manual/merge";
-        edit(e);
-        parents.removeDuplicates();
-        overrides[e.id].parentIds=parents;
+        QVector<SourceFragment> merged;
+        QSet<QString> sources;bool known=true;
+        for(const auto &visible:resolveEvents(events)){
+            const auto v=selected.value(visible.id);
+            auto pieces=cropFragments(fragments.value(v.id),(visible.start-v.start)/(v.end-v.start),(visible.end-v.start)/(v.end-v.start));
+            if(pieces.isEmpty())known=false;
+            for(auto f:pieces){
+                if(!originals.contains(f.parentId))known=false;
+                else sources.insert(originals.value(f.parentId).source);
+                f.start=(visible.start+(visible.end-visible.start)*f.start-e.start)/(e.end-e.start);
+                f.end=(visible.start+(visible.end-visible.start)*f.end-e.start)/(e.end-e.start);
+                merged.append(f);
+            }
+        }
+        // Preserve an exact, potentially piecewise single-source mapping. Genuine
+        // multi-source merges remain explicitly ambiguous; never encode IDs in text.
+        e.source=known&&sources.size()==1?*sources.cbegin():QString{};
+        if(e.source.isEmpty())merged.clear();
+        for(const auto &v:events)erase(v);
+        e.id=QUuid::createUuid().toString(QUuid::WithoutBraces);e.provenance="manual/merge";
+        edit(e);parents.removeDuplicates();
+        overrides[e.id].parentIds=parents;overrides[e.id].sourceFragments=merged;
     }
     QVector<Event> resolveEvents(const QVector<Event>&events) {
         struct Boundary {
@@ -276,25 +301,6 @@ namespace chosuta {
             if(!found||!found->provenance.startsWith("manual")||it->provenance.startsWith("manual"))found=&*it;
         }
         return found;
-    }
-    QString shapeAt(const Project&p,const QVector<Event>&events,double time,bool disjoint) {
-        time-=p.output.syncOffset;
-        if(const auto*e=eventAt(events,time,disjoint))return e->shape;
-        auto policy=p.rules.special.value("rest");
-        if(policy.mode=="shape")return policy.shape;
-        const Event*previous=nullptr;
-        if(disjoint) {
-            auto it=std::upper_bound(events.begin(),events.end(),time,[](double t,const Event&e) {
-                return t<e.start;
-            });
-            if(it!=events.begin()) {
-                --it;
-                if(it->end<=time)previous=&*it;
-            }
-        }
-        else for(const auto&e:events)if(e.end<=time&&(!previous||e.end>previous->end||(e.end==previous->end&&e.provenance.startsWith("manual"))))previous=&e;
-        if(previous&&(policy.mode=="hold"||time-previous->end<policy.holdSeconds))return previous->shape;
-        return policy.shape;
     }
     QVector<Event> applyTimingProposals(const Project&p,const QVector<TimingProposal>&proposals,const QString&hash) {
         auto result=p.effective();

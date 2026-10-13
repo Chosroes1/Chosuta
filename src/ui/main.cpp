@@ -7,6 +7,8 @@ int main(int argc,char**argv) {
     QCoreApplication::setOrganizationName("Chosuta");
     QCoreApplication::setApplicationName("Chosuta");
     QCoreApplication::setApplicationVersion(CHOSUTA_VERSION);
+    QGuiApplication::setDesktopFileName("chosuta");
+    QApplication::setWindowIcon(QIcon(":/chosuta/icons/chosuta.png"));
     QTemporaryDir settings;
     if(app.arguments().contains("--smoke-test"))QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
     chosuta::Window window;
@@ -15,7 +17,7 @@ int main(int argc,char**argv) {
     if(args.contains("--smoke-test")) {
         QTimer::singleShot(100,&app,[&] {
             QTemporaryDir temp;
-            bool success=window.runSmokeWorkflow(temp.path());
+            bool success=!window.windowIcon().pixmap(32,32).isNull()&&window.runSmokeWorkflow(temp.path());
             int index=args.indexOf("--screenshot");
             QTimer::singleShot(100,&app,[&,success,index] {
                 if(index>=0&&index+1<args.size())window.grab().save(args[index+1]);

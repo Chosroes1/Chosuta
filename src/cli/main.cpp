@@ -80,10 +80,10 @@ int main(int argc,char**argv) {
     std::signal(SIGTERM,cancelSignal);
     try {
         if(parser.isSet("check-media-tools")){
-            const auto info=inspectMediaTools(parser.isSet("ffmpeg")?parser.value("ffmpeg"):QString("ffmpeg"),cancelled);
+            const auto info=inspectMediaTools(selectMediaTools(parser.isSet("ffmpeg")?parser.value("ffmpeg"):QString("ffmpeg"),ToolSelection::Explicit),cancelled);
             QJsonObject result{{"ready",info.ready()},{"ffmpeg",info.ffmpeg},{"ffprobe",info.ffprobe},
                 {"ffmpegVersion",info.ffmpegVersion},{"ffprobeVersion",info.ffprobeVersion},
-                {"errors",QJsonArray::fromStringList(info.errors)},{"missingEncoders",QJsonArray::fromStringList(info.missingEncoders)},
+                {"errors",QJsonArray::fromStringList(messageStrings(info.errors))},{"missingEncoders",QJsonArray::fromStringList(info.missingEncoders)},
                 {"missingFilters",QJsonArray::fromStringList(info.missingFilters)},{"cancelled",info.cancelled}};
             std::cout<<QJsonDocument(result).toJson().toStdString();return info.cancelled?130:info.ready()?0:1;
         }
@@ -194,7 +194,7 @@ int main(int argc,char**argv) {
         if(parser.isSet("advanced-mouth")&&parser.isSet("simple-mouth"))throw Failure("Conflicting mouth modes");
         if(parser.isSet("advanced-mouth"))p.appearance.enabled=true;
         if(parser.isSet("simple-mouth"))p.appearance.enabled=false;
-        if(parser.isSet("key")){auto key=parseTonality(parser.value("key"));if(!key)throw Failure("Invalid key");p.appearance.tonalityEnabled=true;p.appearance.degreeTonic=key->first;p.appearance.degreeMode=key->second;}
+        if(parser.isSet("key")){auto key=parseTonality(parser.value("key"));if(!key)throw Failure("Invalid key");p.performance.analysis.tonalityEnabled=true;p.performance.analysis.degreeTonic=key->first;p.performance.analysis.degreeMode=key->second;}
         if(parser.isSet("performance-json")){QFile f(parser.value("performance-json"));if(!f.open(QIODevice::ReadOnly)||f.size()>64*1024*1024)throw Failure("Cannot read performance JSON");readPerformance(p,checkedJson(f.readAll()).object());}
         if(parser.isSet("consonant-settings")){QFile file(parser.value("consonant-settings"));if(!file.open(QIODevice::ReadOnly)||file.size()>65536)throw Failure("Cannot read consonant settings (limit 64 KiB)");p.rules.consonants=readConsonants(checkedJson(file.readAll()).object());}
         if(parser.isSet("dictionary"))p.rules.englishDictionary=QFileInfo(parser.value("dictionary")).absoluteFilePath();
@@ -251,14 +251,14 @@ int main(int argc,char**argv) {
                 }, {
                     "code",d.code
                 }, {
-                    "message",d.message
+                    "message",d.message.text()
                 }
             });
             summary["tracks"]=tracks;
             summary["tempo"]=tempos;
             summary["meter"]=meters;
             summary["diagnostics"]=diagnostics;
-            summary["appearance"]=appearanceJson(p.appearance);summary["consonants"]=consonantsJson(p.rules.consonants);
+            summary["appearance"]=QJsonObject{{"enabled",p.appearance.enabled}};summary["analysis"]=analysisSettingsJson(p.performance.analysis);summary["consonants"]=consonantsJson(p.rules.consonants);
             summary["timingCorrection"]=QJsonObject{{"enabled",p.timing.enabled},{"current",timingCorrectionCurrent(p)},{"sources",p.timing.sources.size()},{"maxShift",p.timing.maxShift},{"maxDurationChange",p.timing.maxDurationChange}};
             std::cout<<QJsonDocument(summary).toJson().constData();
             return 0;
@@ -266,19 +266,22 @@ int main(int argc,char**argv) {
         if(command!="generate"&&command!="export"&&command!="correct"&&command!="revert")throw Failure("Unknown command");
         if(args.size()!=3)throw Failure("Output path is required");
         if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary")||parser.isSet("custom-dictionary")||parser.isSet("japanese-kanji")||parser.isSet("no-japanese-kanji")||parser.isSet("consonant-settings"))p.regenerate();
-        if(parser.isSet("assets")) {
-            const auto plan=scanAssetDirectory(parser.value("assets"),p.assets,&cancelled);
-            if(plan.cancelled)return 130;
+        auto importPlan=[&](const AssetImportPlan &plan){
             if(!plan.error.isEmpty())throw Failure(plan.error);
+            QVector<AssetImportEntry> entries;QSet<QString> replace;
             for(const auto &entry:plan.entries){
-                if(entry.status=="conflict"||entry.status=="invalid")throw Failure(entry.status+": "+entry.path+": "+entry.message);
-                if(entry.status=="new"||(entry.status=="replace"&&parser.isSet("force")))p.assets[entry.id]=entry.path;
+                if(entry.status=="conflict"||entry.status=="invalid")throw Failure(entry.status+": "+entry.path+": "+entry.message.text());
+                if(entry.status=="new"||(entry.status=="replace"&&parser.isSet("force"))){entries.append(entry);if(parser.isSet("force"))replace.insert(entry.id);}
                 else std::cerr<<(entry.status+": skipped "+entry.path).toStdString()<<"\n";
             }
-        }
-        if(parser.isSet("variant-assets")){auto plan=scanVariantDirectory(parser.value("variant-assets"),p,"base",&cancelled);if(plan.cancelled)return 130;if(!plan.error.isEmpty())throw Failure(plan.error);for(auto e:plan.entries){if(e.status=="invalid"||e.status=="conflict")throw Failure(e.status+": "+e.path);if(e.status=="new"||(e.status=="replace"&&parser.isSet("force")))p.assets[e.id]=e.path;else std::cerr<<(e.status+": skipped "+e.path).toStdString()<<"\n";}for(auto g:plan.groups)p.performance.groups.append(g);validatePerformance(p);}
-        auto integer=[&](QString name,int &value){if(parser.isSet(name)){bool ok=false;const int n=parser.value(name).toInt(&ok);if(!ok)throw Failure("Invalid "+name);value=n;}};
-        auto real=[&](QString name,double &value){if(parser.isSet(name)){bool ok=false;const double n=parser.value(name).toDouble(&ok);if(!ok||!std::isfinite(n))throw Failure("Invalid "+name);value=n;}};
+            applyAssetImport(p,entries,replace);
+            for(const auto &group:plan.groups)p.performance.groups.append(group);
+            validatePerformance(p);
+        };
+        if(parser.isSet("assets")){const auto plan=scanAssetDirectory(parser.value("assets"),p.assets,&cancelled);if(plan.cancelled)return 130;importPlan(plan);}
+        if(parser.isSet("variant-assets")){const auto plan=scanVariantDirectory(parser.value("variant-assets"),p,"base",&cancelled);if(plan.cancelled)return 130;importPlan(plan);}
+        auto integer=[&](QString name,int &value){if(parser.isSet(name)){bool ok=false;const int n=parser.value(name).toInt(&ok);if(!ok)throw Failure(Message::format("Invalid %1",{name}));value=n;}};
+        auto real=[&](QString name,double &value){if(parser.isSet(name)){bool ok=false;const double n=parser.value(name).toDouble(&ok);if(!ok||!std::isfinite(n))throw Failure(Message::format("Invalid %1",{name}));value=n;}};
         if(parser.isSet("size")) {
             auto size=parser.value("size").split('x');
             if(size.size()!=2)throw Failure("Invalid size");
@@ -314,7 +317,7 @@ int main(int argc,char**argv) {
             p.timing.sources.clear();p.timing.enabled=false;
             double shift=p.timing.maxShift*1000,stretch=p.timing.maxDurationChange*100;real("max-shift",shift);real("max-duration-change",stretch);
             p.timing.maxShift=shift/1000;p.timing.maxDurationChange=stretch/100;validateTimingCorrection(p);
-            auto decoded=readWaveform(p.audioPath,p.output.ffmpeg,cancelled,{},p.audioDuration);
+            auto decoded=readWaveform(p.audioPath,selectMediaTools(p.output.ffmpeg,parser.isSet("ffmpeg")?ToolSelection::Explicit:ToolSelection::Project),cancelled,{},p.audioDuration);
             if(decoded.cancelled)return 130;if(!decoded.error.isEmpty())throw Failure(decoded.error);
             std::cout<<"Waveform: "<<decoded.wave->bins.size()<<" bins, "<<decoded.wave->storageBytes()<<" summary bytes, "<<decoded.wave->duration()<<" seconds\n";
             auto result=correctWaveform(p,*decoded.wave,cancelled);
@@ -332,13 +335,11 @@ int main(int argc,char**argv) {
             std::cout<<p.generated.size()<<" estimated events\n";
             return 0;
         }
-        if(!verifyTimingAudio(p,cancelled))return 130;
-        if(p.timing.enabled&&!p.timing.sources.isEmpty()&&!timingCorrectionCurrent(p))std::cerr<<"Chosuta: waveform correction is stale; using score timing and manual edits.\n";
-        auto result=exportVideo(p,args[2],cancelled,[](int n) {
+        auto result=exportVideo(p,selectMediaTools(p.output.ffmpeg,parser.isSet("ffmpeg")?ToolSelection::Explicit:ToolSelection::Project),args[2],cancelled,[](int n) {
             std::cerr<<"\r"<<n<<"%   "<<std::flush;
         },parser.isSet("force"));
         std::cerr<<'\n';
-        for(const auto&message:result.diagnostics)std::cerr<<"Chosuta: "<<message.toStdString()<<'\n';
+        for(const auto&message:result.diagnostics)std::cerr<<"Chosuta: "<<message.text().toStdString()<<'\n';
         if(result.cancelled)return 130;
         if(!result.success)throw Failure(result.error);
         std::cout<<result.frames<<" frames: "<<args[2].toStdString()<<'\n';

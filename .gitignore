@@ -1,6 +1,7 @@
 /build*/
 /out/
 /svproject/
+/icon/
 /maca_tachie/
 *.user
 __pycache__/

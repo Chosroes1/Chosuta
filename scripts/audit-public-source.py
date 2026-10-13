@@ -14,6 +14,14 @@ from pathlib import Path
 import re
 
 
+# Exact reviewed application assets, not a general binary-file exemption.
+# Updating the artwork requires reviewing the pixels/metadata and these hashes.
+APP_ICON_SHA256 = {
+    "resources/icons/chosuta.png": "4ad76a744b6ecfa91bec73655783973d9174d1d18355a4e1f0d513230710e8f9",
+    "resources/icons/chosuta.ico": "cf3a62fcbf86c52e1d9a79ffdb1857150c92b8941dfc1e91bfe558496f0904c5",
+}
+
+
 def audit(root: Path) -> dict:
     findings = []
     records = []
@@ -43,6 +51,10 @@ def audit(root: Path) -> dict:
             continue
         data = path.read_bytes()
         records.append({"file": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+        if name in APP_ICON_SHA256:
+            if hashlib.sha256(data).hexdigest() != APP_ICON_SHA256[name]:
+                findings.append({"file": name, "rule": "unreviewed-application-icon"})
+            continue
         try:
             content = data.decode("utf-8")
         except UnicodeDecodeError:
@@ -62,7 +74,7 @@ def audit(root: Path) -> dict:
             if entropy >= 4.4:
                 findings.append({"file": name, "line": content.count("\n", 0, match.start()) + 1, "rule": "high-entropy-literal"})
     return {"filesChecked": len(records), "findings": findings, "files": records,
-            "checks": list(patterns) + ["excluded-paths", "text-only", "high-entropy-literals"],
+            "checks": list(patterns) + ["excluded-paths", "text-or-reviewed-icon", "high-entropy-literals"],
             "uploaded": False, "scope": "Current directory snapshot; future edits require a new check."}
 
 

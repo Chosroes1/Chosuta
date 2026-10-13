@@ -1,31 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "core/model.h"
-#include "core/appearance.h"
+#include "core/executable.h"
+#include "core/evaluation.h"
 #include <QImage>
 #include <QTextLayout>
 #include <memory>
 namespace chosuta {
     class Scene {
         public:
-        explicit Scene(const Project &project);
+        explicit Scene(const Project &project,std::shared_ptr<const Evaluation> view={});
         QImage frame(double seconds,QSize size={})const;
         QRectF characterRect(double seconds)const;
         QRectF subtitleRect(const SubtitleStyle &,const QString &text)const;
         std::optional<SubtitleInterval> cueInterval(const QString &id)const;
         void setLayout(const CanvasSettings &,const QVector<SubtitleTrack> &,bool enabled);
         void setSubtitleText(const QString &id,const QString &text);
-        void setTiming(const Project &project); // Same assets/layout; no image decoding.
-        mutable QStringList diagnostics;
+        void setTiming(const Project &project,std::shared_ptr<const Evaluation> view={}); // Same assets/layout; no image decoding.
+        mutable QVector<Message> diagnostics;
         AssetSelection selectionAt(double seconds)const;
         QStringList missingAppearanceAssets()const;
         qint64 imageCacheBytes()const{return images.totalCost();}
         int imageDecodeCount()const{return decodeCount;}
-        bool hasFallback()const {
-            return available.contains(project.fallback);
-        }
         bool hasBackground()const{return project.canvas.backgroundImage.isEmpty()||!background.isNull();}
         private:
+        std::shared_ptr<const Evaluation> evaluation;
         Project project;
         QVector<Event>events;
         AppearanceResolver appearance;
@@ -47,13 +46,12 @@ namespace chosuta {
     };
     struct ExportResult {
         bool success=false,cancelled=false;
-        QString error;
-        QStringList diagnostics;
+        Message error;QString audioContentHash;
+        QVector<Message> diagnostics;
         int frames=0;
     };
-    ExportResult exportVideo(const Project &,const QString &path,const std::atomic_bool &cancel,Progress progress={},bool overwrite=false);
+    ExportResult exportVideo(const Project &,const MediaTools &,const QString &path,const std::atomic_bool &cancel,Progress progress={},bool overwrite=false);
     QStringList encoderArguments(const Project &,const QString &temporaryPath);
     void validateExport(const Project &);
-    QStringList availableEncoders(const QString &ffmpeg);
     void createDemoAssets(const QString &directory);
 }

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "window.h"
+#include "text.h"
 #include <QInputMethod>
 #include "core/executable.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <cmath>
 namespace chosuta {
-    class ProjectCommand:public QUndoCommand {
+    class ProjectCommand:public TranslatedCommand {
         Window *window;
         Project before,after;
         bool timingOnly=false;
         public:
-        ProjectCommand(Window*w,Project a,Project b,QString label,bool onlyTiming=false):QUndoCommand(label),window(w),before(std::move(a)),after(std::move(b)),timingOnly(onlyTiming){}
+        ProjectCommand(Window*w,Project a,Project b,ActionText label,bool onlyTiming=false):TranslatedCommand(label,w->uiLanguage),window(w),before(std::move(a)),after(std::move(b)),timingOnly(onlyTiming){before.audioContentHash.clear();after.audioContentHash.clear();}
         void undo()override {
             window->assignProject(before,timingOnly);
         }
@@ -18,359 +19,13 @@ namespace chosuta {
             window->assignProject(after,timingOnly);
         }
     };
-    QString Window::trText(const char*key)const {
-        struct Entry {
-            const char*en;
-            const char*zh;
-            const char*ja;
-        };
-        static const Entry entries[]= {
-            {"Default FFmpeg (this computer)","默认 FFmpeg（本机）","既定の FFmpeg（このPC）"},
-            {"Override for this project","为本工程单独指定","このプロジェクトで個別指定"},
-            {"Browse…","浏览…","参照…"},
-            {"Check media tools","检测媒体工具","メディアツールを確認"},
-            {"Checking…","正在检测…","確認中…"},
-            {"Automatic: bundled tools, then PATH","自动：内置工具，然后系统 PATH","自動：同梱ツール、次に PATH"},
-            {"Choose ffmpeg; ffprobe and shared DLLs should stay beside it. The default is saved only on this computer when you press OK.","选择 ffmpeg；ffprobe 和共享 DLL 请保留在其旁边。点击确定后，本机默认路径才会保存。","ffmpeg を選択し、ffprobe と共有 DLL は同じ場所に置いてください。既定のパスは OK でこの PC に保存されます。"},
-            {"Tool startup and listed capabilities passed. Export/playback still require a real media test.","工具启动及所列能力检查通过；实际导出和播放仍需媒体测试。","ツールの起動と一覧の機能を確認しました。書き出し・再生は実際のメディアで確認してください。"},
-            {"Missing encoders","缺少编码器","不足するエンコーダー"},
-            {"Missing filters","缺少滤镜","不足するフィルター"},
-            {"Advanced variant settings","高级差分设置","高度な差分設定"},
-            {"Missing compatible pose","缺少对应姿态图片","対応する姿勢画像がありません"},
-            {"Enable advanced variants","启用高级差分","高度な差分を有効化"},
-            {"These rules also apply to advanced variants: they determine mouth states and timing; advanced settings select images that preserve pose and expression.","这些规则同样适用于高级差分：决定口形状态与时序，高级设置据此选择包含动作和神态的图片。","これらの規則は高度な差分にも適用されます。口形とタイミングを決め、高度な設定で動作や表情を保つ画像を選択します。"},
-            {"Waveform timing","波形时间校正","波形によるタイミング調整"},
-            {"Correct timing from waveform","按波形校正时间","波形でタイミングを補正"},
-            {"Revert waveform correction","回退波形校正","波形補正を元に戻す"},
-            {"Waveform correction reverted.","已回退波形校正。","波形補正を元に戻しました。"},
-            {"Reload waveform","重读波形","波形を再読込"},
-            {"Max shift (ms)","最大偏移（毫秒）","最大ずれ（ms）"},
-            {"Max duration change (%)","最大时长变化（%）","最大時間変化（%）"},
-            {"Preparing waveform…","正在准备波形…","波形を準備中…"},
-            {"Waveform unavailable: %1","波形不可用：%1","波形を利用できません：%1"},
-            {"Waveform preparation cancelled. Reload to retry.","波形准备已取消，可点击重读重试。","波形の準備を中止しました。再読込で再試行できます。"},
-            {"Correction is optional and starts only when clicked. Clear onset/end estimates stay near score timing; unclear or mixed audio may keep the original timing. Limits apply when correcting.","点击后才校正，可回退；只在工程附近估计明确起止。连唱或混音中不明确的位置保留工程时间。上限在点击校正时应用。","クリックした時だけ補正し、元に戻せます。譜面付近の明確な開始・終了のみ推定します。連続歌唱やミックスで不明確な箇所は元の時間を保ちます。上限は補正時に適用されます。"},
-            {"Waveform correction: %1 changed, %2 protected, %3 unclear, %4 conflicting.","波形校正：%1 个来源已调整，%2 个受人工修改保护，%3 个不明确，%4 个冲突。","波形補正：%1 件を調整、%2 件は手動編集を保護、%3 件は不明確、%4 件は競合。"},
-            {"Saved waveform correction is stale; score timing is used. Correct again if needed.","已保存的波形校正已失效，使用工程时间；需要时可重新校正。","保存された波形補正は無効です。譜面時間を使用します。必要なら再補正してください。"},
-            {"Edit subtitle text","编辑字幕文字","字幕の文字を編集"},
-            {"Subtitle text limit is 4096 characters.","单条字幕文字上限为 4096 字符，已拒绝本次超限输入。","字幕の文字数は最大 4096 です。上限を超える入力は適用されません。"},
-            {"Subtitle ends after the animation. Extend the duration to include it.","字幕超过动画末尾，可延长动画时长以完整显示。","字幕がアニメーションの終わりを超えています。全体を表示するには時間を延長してください。"},
-            {"Some subtitles exceed the fixed duration. Extend before exporting? No exports only the chosen duration.","部分字幕超过固定动画时长。导出前是否延长？选择“否”只导出当前指定时长。","一部の字幕が指定時間を超えています。書き出す前に延長しますか？「いいえ」では指定した時間だけを書き出します。"},
-            {"Scene diagnostics","画布与字幕诊断","画面と字幕の診断"},
-            {"Subtitles","字幕","字幕"},
-            {"Add subtitles","添加字幕","字幕を追加"},
-            {"Subtitle track","字幕轴","字幕トラック"},
-            {"New subtitle track","新增字幕轴","字幕トラックを追加"},
-            {"Delete subtitle track","删除字幕轴","字幕トラックを削除"},
-            {"Enable this track","启用此轴","このトラックを有効化"},
-            {"Align to lyrics","对齐歌词","歌詞に合わせる"},
-            {"Lyric source track","歌词来源轨道","歌詞の参照トラック"},
-            {"Choose a lyric source","选择歌词来源","歌詞の参照先を選択"},
-            {"Double-click an empty subtitle lane to enter text. Apply confirms style and timing. Lyric alignment uses score timing.","双击字幕轴空白处输入文字；样式和时间修改后点击应用。歌词对齐依据谱面时间。","字幕トラックの空白をダブルクリックして文字を入力します。スタイルと時間は適用ボタンで確定します。歌詞との同期は譜面時間に基づきます。"},
-            {"Enter subtitle text","输入字幕文字","字幕の文字を入力"},
-            {"Text","文字","文字"},
-            {"Name","名称","名前"},
-            {"First lyric","起始歌词","開始歌詞"},
-            {"Last lyric","结束歌词","終了歌詞"},
-            {"Use lyric range","使用歌词范围","歌詞の範囲を使用"},
-            {"Override style for this subtitle","仅此字幕覆盖样式","この字幕のスタイルを上書き"},
-            {"Delete subtitle","删除字幕","字幕を削除"},
-            {"Font","字体","フォント"},
-            {"Edit text in subtitle block","在字幕块中编辑文字","字幕ブロック内で文字を編集"},
-            {"Restore timeline heights","恢复轴高度","トラックの高さをリセット"},
-            {"Consonant limit (ms; 0 = no cap)","辅音组时长上限（毫秒；0 为不限）","子音群の時間上限（ms、0 は上限なし）"},
-            {"Font height (% of canvas)","字号（画布高度 %）","文字サイズ（画面高さ %）"},
-            {"Center X (%)","中心 X（%）","中心 X（%）"},
-            {"Center Y (%)","中心 Y（%）","中心 Y（%）"},
-            {"Text width (%)","文字框宽度（%）","テキスト幅（%）"},
-            {"Text color","文字颜色","文字色"},
-            {"Bold","粗体","太字"},
-            {"Italic","斜体","斜体"},
-            {"Outline","描边","縁取り"},
-            {"Left","左对齐","左揃え"},
-            {"Center","居中","中央"},
-            {"Right","右对齐","右揃え"},
-            {"Text alignment","文字对齐","文字揃え"},
-            {"Apply subtitles","应用字幕与样式","字幕とスタイルを適用"},
-            {"Extend to subtitle end","延长至字幕末尾","字幕の終わりまで延長"},
-            {"Move character","拖动立绘布局","立ち絵の配置をドラッグ"},
-            {"Move subtitles","拖动字幕布局","字幕の配置をドラッグ"},
-            {"Lyric source missing; subtitle text and timing were retained.","歌词来源缺失；已保留字幕文字及时间。","参照歌詞がありません。字幕の文字と時間は保持されています。"},
-            {"No nearby lyric; kept the manual interval.","附近无可对齐歌词；保留手动区间。","近くに対応する歌詞がありません。手動の区間を保持します。"},
-            {"Advanced settings","高级设置","詳細設定"},
-            {"Language","语言","言語"},
-            {"Word / phrase","词 / 词组","単語 / 語句"},
-            {"Notation","读音格式","読みの形式"},
-            {"Reading / phonemes","读音 / 音素","読み / 音素"},
-            {"Kana / pinyin / word","假名 / 拼音 / 单词","仮名 / ピンイン / 単語"},
-            {"Phonemes","音素","音素"},
-            {"Add word","添加词条","語句を追加"},
-            {"Remove selected","删除所选词条","選択した語句を削除"},
-            {"Import dictionary","导入词典","辞書を読み込む"},
-            {"Export dictionary","导出词典","辞書を書き出す"},
-            {"Pronunciation dictionary","读音词典","発音辞書"},
-            {"Japanese","日文","日本語"},
-            {"Estimate Japanese kanji readings (optional)","估计日文汉字读音（可选）","日本語の漢字の読みを推定（任意）"},
-            {"Also save as defaults for new SVP imports","同时保存为新导入 SVP 的默认设置","新しい SVP の既定設定としても保存"},
-            {"Dictionary data: %1 / 3,000,000 bytes","词典数据：%1 / 3,000,000 字节","辞書データ：%1 / 3,000,000 バイト"},
-            {"Dictionary exceeds 20000 entries","词典超过 20,000 个词条","辞書が 20,000 語を超えています"},
-            {"Custom readings override built-in readings. Note corrections and explicit SVP phonemes keep priority. Regenerate to apply.","自定义读音优先于内置读音。逐音符人工修正和 SVP 显式音素保持优先。保存后重新生成口形即可应用。","独自の読みは内蔵の読みより優先されます。ノートの修正と SVP の明示音素は最優先です。保存後に再生成してください。"},
-            {"Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off.","日文默认以假名为准。小型词表不能保证汉字读音准确；未知词仍需修正。关闭此选项也可以使用您明确添加的自定义读音。","日本語は仮名を基本とします。小さな語彙表では漢字の読みの正確さを保証できません。未知の語は修正が必要です。無効でも登録した独自の読みを使えます。"},
-            {"Settings","设置","設定"},
-            {"Preferences","偏好设置","環境設定"},
-            {"System language","跟随系统","システム言語"},
-            {"Interface language","界面语言","表示言語"},
-            {"Canvas","画布 / 背景","キャンバス / 背景"},
-            {"Aspect ratio","画面比例","縦横比"},
-            {"Custom","自定义","カスタム"},
-            {"Animation duration","动画时长（秒）","アニメーションの長さ（秒）"},
-            {"Auto (score)","自动（随乐谱）","自動（楽譜）"},
-            {"Background image","背景图片","背景画像"},
-            {"Choose image","选择图片","画像を選択"},
-            {"Remove image","移除背景图","背景画像を削除"},
-            {"Background fit","背景铺放","背景の配置"},
-            {"Cover","填满（等比裁切）","全体を覆う（切り抜き）"},
-            {"Contain","完整显示（等比）","全体を表示（余白）"},
-            {"Stretch","拉伸至画布","キャンバスに伸縮"},
-            {"Character scale (%)","立绘大小（%）","キャラクターの大きさ（%）"},
-            {"Character center X (%)","立绘中心 X（%）","キャラクター中心 X（%）"},
-            {"Character center Y (%)","立绘中心 Y（%）","キャラクター中心 Y（%）"},
-            {"Reset layout","重置立绘布局","配置をリセット"},
-            {"Transparent canvas","透明画布","透明キャンバス"},
-            {"Use audio duration","使用音频时长","音声の長さを使用"},
-            {"Extend animation","延长动画","アニメーションを延長"},
-            {"Audio is longer than animation. Extend to %1 seconds?","音频比当前动画长。是否将动画延长到 %1 秒？","音声がアニメーションより長くなっています。%1 秒に延長しますか？"},
-
-            {
-                "File","文件","ファイル"
-            }, {
-                "Edit","编辑","編集"
-            }, {
-                "View","视图","表示"
-            }, {
-                "Help","帮助","ヘルプ"
-            },
-            {
-                "Open SVP / Project","打开 SVP / 工程","SVP / プロジェクトを開く"
-            }, {
-                "Save","保存","保存"
-            }, {
-                "Save As","另存为","名前を付けて保存"
-            }, {
-                "Export Video","导出视频","動画を書き出す"
-            }, {
-                "Export Settings","导出设置","書き出し設定"
-            }, {
-                "Quit","退出","終了"
-            },
-            {
-                "Undo","撤销","元に戻す"
-            }, {
-                "Redo","重做","やり直す"
-            }, {
-                "Generate","生成口形","口形を生成"
-            }, {
-                "Tracks","轨道","トラック"
-            }, {
-                "Track","轨道","トラック"
-            }, {
-                "Priority (lower first)","优先级（小值优先）","優先度（小さい値を優先）"
-            }, {
-                "Notes","音符","ノート"
-            },
-            {
-                "Assets","PNG 差分","PNG 差分"
-            }, {
-                "Import PNGs","导入 PNG","PNG を読み込む"
-            }, {
-                "Demo Assets","创建测试素材","テスト素材を作成"
-            }, {
-                "Relocate Assets","重定位素材","素材を再指定"
-            }, {
-                "Custom Shape","自定义差分","口形を追加"
-            }, {
-                "Shape","口形 ID","口形 ID"
-            }, {
-                "Path","路径","パス"
-            }, {
-                "Fallback","缺图回退","画像未設定時の口形"
-            },
-            {
-                "Rules","规则","ルール"
-            }, {
-                "Lyrics Language","歌词语言","歌詞の言語"
-            }, {
-                "Auto","跟随工程 / 自动","プロジェクト / 自動"
-            }, {
-                "Harmony takeover","主轨休止时和声接管","主トラックの休止中はハーモニーを使用"
-            }, {
-                "Consonant fraction","辅音占音节比例","子音の時間比率"
-            },
-            {
-                "Special","特殊项","特殊項目"
-            }, {
-                "Mode","行为","動作"
-            }, {
-                "Hold (seconds)","保持秒数","保持秒数"
-            }, {
-                "Shape immediately","立即指定口形","口形を即時指定"
-            }, {
-                "Keep previous","保持前一口形","直前の口形を保持"
-            }, {
-                "Hold then shape","保持后指定口形","保持後に口形を指定"
-            },
-            {
-                "Rest","休止","休止"
-            }, {
-                "Empty lyric","空歌词","空の歌詞"
-            }, {
-                "Closure cl","促音 cl","閉鎖 cl"
-            }, {
-                "Breath br","呼吸 br","ブレス br"
-            }, {
-                "Nasal","鼻音","鼻音"
-            }, {
-                "Extension - / ー","延音 - / ー","長音 - / ー"
-            },
-            {
-                "English Dictionary","加载英文词典","英語辞書を読み込む"
-            }, {
-                "Diagnostics","诊断 / 待处理","診断 / 要確認"
-            }, {
-                "Preview","预览","プレビュー"
-            }, {
-                "Play / Stop","播放 / 停止","再生 / 停止"
-            }, {
-                "Audio","音频","音声"
-            }, {
-                "Attach Audio","附加音频","音声を追加"
-            }, {
-                "Remove Audio","移除音频","音声を削除"
-            },
-            {
-                "Seconds","秒 / 毫秒","秒 / ミリ秒"
-            }, {
-                "Bars / Beats","小节 / 拍","小節 / 拍"
-            }, {
-                "Zoom","缩放","ズーム"
-            }, {
-                "Position (seconds)","播放位置（秒）","再生位置（秒）"
-            }, {
-                "Selection","选择事件","イベントを選択"
-            }, {
-                "Start (seconds)","起点（秒）","開始（秒）"
-            }, {
-                "End (seconds)","终点（秒）","終了（秒）"
-            }, {
-                "Anchor","时间锚定","時間の基準"
-            }, {
-                "Fixed seconds","固定秒数","秒に固定"
-            }, {
-                "Follow beats","跟随节拍","拍に追従"
-            }, {
-                "Locked","锁定人工修改","手動変更をロック"
-            },
-            {
-                "Apply to selection","应用到所选事件","選択イベントに適用"
-            }, {
-                "Split at cursor","在播放位置拆分","カーソルで分割"
-            }, {
-                "Merge selection","合并所选事件","選択イベントを結合"
-            }, {
-                "Batch offset","批量偏移","一括オフセット"
-            }, {
-                "Correct pronunciation","修正读音","読みを修正"
-            }, {
-                "Delete selection","删除所选事件","選択イベントを削除"
-            }, {
-                "Reset manual edits","重置全部人工修改","手動変更をすべてリセット"
-            },
-            {
-                "Cancel","取消","キャンセル"
-            }, {
-                "Ready","就绪","準備完了"
-            }, {
-                "Error","错误","エラー"
-            }, {
-                "Cancelled","已取消","キャンセルしました"
-            }, {
-                "Export complete","导出完成","書き出し完了"
-            }, {
-                "Working…","处理中…","処理中…"
-            },
-            {
-                "Unsaved changes","尚有未保存修改","未保存の変更"
-            }, {
-                "Save before closing?","是否保存当前工程？","プロジェクトを保存しますか？"
-            }, {
-                "Overwrite","覆盖输出","出力を上書き"
-            }, {
-                "Replace existing file?","是否替换已有文件？","既存のファイルを置き換えますか？"
-            },
-            {
-                "Width","宽度","幅"
-            }, {
-                "Height","高度","高さ"
-            }, {
-                "Frame rate NUM/DEN","帧率 NUM/DEN","フレームレート NUM/DEN"
-            }, {
-                "Format","视频格式","動画形式"
-            }, {
-                "Background","背景颜色","背景色"
-            }, {
-                "Transparent (MOV)","透明背景（MOV）","透明背景（MOV）"
-            }, {
-                "Quality CRF","质量 CRF","品質 CRF"
-            }, {
-                "Video kbps (0 = CRF)","视频 kbps（0 使用 CRF）","動画 kbps（0 = CRF）"
-            }, {
-                "Duration (0 = score)","时长（0 随乐谱）","長さ（0 = 楽譜）"
-            }, {
-                "Animation offset (seconds)","动画同步偏移（秒）","アニメーションのオフセット（秒）"
-            }, {
-                "Audio offset (seconds)","音频偏移（秒）","音声のオフセット（秒）"
-            }, {
-                "FFmpeg executable","FFmpeg 程序路径","FFmpeg 実行ファイル"
-            },
-            {
-                "Estimated size","估计体积","推定サイズ"
-            }, {
-                "Quality mode: size varies","质量模式：体积不确定","品質モード：サイズは変動"
-            }, {
-                "Size estimate excludes audio/container","体积估计不含音频及封装开销","推定サイズは音声とコンテナを含まない"
-            },
-            {
-                "Enter shape ID","输入差分 ID","口形 ID を入力"
-            }, {
-                "Offset in seconds","偏移秒数","オフセット秒数"
-            }, {
-                "Explicit pronunciation for source note","输入源音符的明确读音 / 音素","元のノートの読み / 音素を入力"
-            }, {
-                "No event selected","尚未选择事件","イベントが選択されていません"
-            }, {
-                "Select one event","请选择一个事件","イベントを一つ選択してください"
-            }, {
-                "Missing assets","素材缺失","素材が見つかりません"
-            }, {
-                "Orphan manual edits","孤立人工修改","元のイベントがない手動変更"
-            }, {
-                "Unknown pronunciations","待修正读音","未解決の読み"
-            }, {
-                "Estimated timing","规则估计时序","ルールによる推定タイミング"
-            },
-            {
-                "Guide","操作说明","使い方"
-            }, {
-                "Open an SVP, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings.","打开 SVP → 勾选轨道 → 生成口形 → 导入 PNG → 编辑时间轴 → 保存 → 导出。拖动边缘调整边界，拖动中部移动，Ctrl 点击多选，Ctrl 滚轮缩放。优先级数值较小者优先。自动结果均为时序估计，未知读音保持待处理标记。测试素材为原创几何图形。","SVP を開く → トラック選択 → 生成 → PNG 読み込み → タイムライン編集 → 保存 → 書き出し。端をドラッグして長さを変更、中央をドラッグして移動。Ctrl クリックで複数選択、Ctrl ホイールでズーム。小さい優先度の値を優先。自動結果は推定で、未知の読みは要確認として表示されます。テスト素材はオリジナルの図形です。"
-            }
-        };
-        for(const auto&e:entries)if(qstrcmp(e.en,key)==0)return QString::fromUtf8(uiLanguage=="zh"?e.zh:uiLanguage=="ja"?e.ja:e.en);
-        return QString::fromUtf8(key);
-    }
+    QString Window::trText(const char *key,const char *zh,const char *ja)const{return uiText(uiLanguage,key,zh,ja);}
     Window::Window() {
         preferences=loadPreferences();
+        if(!preferences.diagnostics.isEmpty())QTimer::singleShot(0,this,[this]{QStringList messages;for(const auto &issue:preferences.diagnostics)messages<<messageText(uiLanguage,Message::format("Saved setting %1 was ignored. Reset this setting to replace its original value.",{issue.setting}))+"\n"+messageText(uiLanguage,issue.message);statusBar()->showMessage(messages.join("; "));});
         project.rules.pronunciation=preferences.pronunciation;project.performance.settings=preferences.performanceSettings;
         uiLanguage=resolveUiLanguage(preferences.language,QLocale::system().uiLanguages());
+        setWidgetLanguage(uiLanguage);
         qApp->installEventFilter(this);
         setAcceptDrops(true);
         setWindowTitle("Chosuta");
@@ -384,14 +39,14 @@ namespace chosuta {
         statusBar()->addPermanentWidget(progress);
         statusBar()->addPermanentWidget(cancelButton);
         connect(cancelButton,&QPushButton::clicked,this,[this] {
-            if(cancel)cancel->store(true);
+            if(cancel)cancel->store(true);taskState=TaskState::Cancelling;
         });
         connect(&history,&QUndoStack::cleanChanged,this,[this](bool clean) {
             setWindowModified(!clean);
         });
         connect(&loadWatcher,&QFutureWatcher<LoadResult>::finished,this,[this] {
             auto result=loadWatcher.result();
-            setBusy(false);
+            if(!finishTask())return;
             if(result.cancelled||(cancel&&cancel->load())) {
                 statusBar()->showMessage(trText("Cancelled"));
                 return;
@@ -400,7 +55,7 @@ namespace chosuta {
                 error(result.error);
                 return;
             }
-            if(loadIsRegenerate)history.push(new ProjectCommand(this,project,result.project,trText("Generate")));
+            if(loadIsRegenerate)history.push(new ProjectCommand(this,project,result.project,actionText("Generate")));
             else {
                 projectPath=activePath.endsWith(".chosuta",Qt::CaseInsensitive)?activePath:QString{};
                 history.clear();
@@ -411,33 +66,35 @@ namespace chosuta {
         });
         connect(&exportWatcher,&QFutureWatcher<ExportResult>::finished,this,[this] {
             auto result=exportWatcher.result();
-            setBusy(false);
+            if(!finishTask())return;
+            if(!result.audioContentHash.isEmpty()){verifiedAudioPath=project.audioPath;verifiedAudioHash=result.audioContentHash;project.audioContentHash=verifiedAudioHash;rebuildEvaluation();scene->setTiming(project,evaluation);timeline->setProject(project,evaluation);refreshPreview();}
             if(result.cancelled)statusBar()->showMessage(trText("Cancelled"));
             else if(!result.success)error(result.error);
-            else statusBar()->showMessage(trText("Export complete")+": "+activePath+(result.diagnostics.isEmpty()?QString{}:" — "+result.diagnostics.join("; ")));
+            else statusBar()->showMessage(trText("Export complete")+": "+activePath+(result.diagnostics.isEmpty()?QString{}:" — "+messagesText(uiLanguage,result.diagnostics)));
         });
         connect(&audioWatcher,&QFutureWatcher<AudioInfo>::finished,this,[this]{
-            auto r=audioWatcher.result();setBusy(false);
+            auto r=audioWatcher.result();if(!finishTask())return;
             if(r.cancelled){statusBar()->showMessage(trText("Cancelled"));return;}
             if(!r.error.isEmpty()){error(r.error);return;}
             double audioEnd=std::max(0.,r.duration+project.output.audioOffset);bool extend=false;
-            if(r.duration>0&&audioEnd>project.duration()+.001&&audioEnd<=21600){
+            if(r.duration>0&&audioEnd>(evaluation?evaluation->duration:project.duration())+.001&&audioEnd<=21600){
                 extend=QMessageBox::question(this,trText("Extend animation"),trText("Audio is longer than animation. Extend to %1 seconds?").arg(audioEnd,0,'f',3),QMessageBox::Yes|QMessageBox::No)==QMessageBox::Yes;
             }
-            change(trText("Audio"),[r,audioEnd,extend](Project&p){p.audioPath=r.path;p.audioDuration=r.duration;if(extend)p.output.duration=audioEnd;});
-            if(!r.warning.isEmpty())statusBar()->showMessage(r.warning);
+            change(actionText("Audio"),[r,audioEnd,extend](Project&p){p.audioPath=r.path;p.audioDuration=r.duration;if(extend)p.output.duration=audioEnd;});
+            if(!r.warning.isEmpty())statusBar()->showMessage(messageText(uiLanguage,r.warning));
         });
         connect(&waveformWatcher,&QFutureWatcher<WaveformResult>::finished,this,[this]{
-            auto r=waveformWatcher.result();setBusy(false);waveform=r.wave;
-            if(waveform)project.audioContentHash=waveform->hash;
+            auto r=waveformWatcher.result();const bool valid=finishTask();if(!valid&&!r.cancelled)return;waveform=r.wave;
+            if(waveform){verifiedAudioPath=project.audioPath;verifiedAudioHash=waveform->hash;project.audioContentHash=verifiedAudioHash;}
             else {
                 QFileInfo info(project.audioPath);
                 waveformKey=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+resolveExecutable(project.output.ffmpeg);
             }
-            waveformMessage=r.cancelled?trText("Waveform preparation cancelled. Reload to retry."):r.error.isEmpty()?QString{}:trText("Waveform unavailable: %1").arg(r.error);
+            waveformMessage=r.cancelled?trText("Waveform preparation cancelled. Reload to retry."):r.error.isEmpty()?QString{}:trText("Waveform unavailable: %1").arg(messageText(uiLanguage,r.error));
+            rebuildEvaluation();
             // Recheck saved timing against the decoded content, without reloading PNGs.
-            if(scene)scene->setTiming(project);
-            timeline->setProject(project);refreshWaveform();refreshSelection();refreshPreview();
+            if(scene)scene->setTiming(project,evaluation);
+            timeline->setProject(project,evaluation);refreshWaveform();refreshSelection();refreshPreview();
             auto stale=trText("Saved waveform correction is stale; score timing is used. Correct again if needed.");
             auto text=diagnostics->toPlainText();text.remove(stale);
             if(!project.timing.sources.isEmpty()&&!timingCorrectionCurrent(project))text+="\n\n"+stale;
@@ -445,18 +102,18 @@ namespace chosuta {
             if(!waveformMessage.isEmpty())statusBar()->showMessage(waveformMessage);
         });
         connect(&correctionWatcher,&QFutureWatcher<WaveCorrectionResult>::finished,this,[this]{
-            auto r=correctionWatcher.result();setBusy(false);
+            auto r=correctionWatcher.result();if(!finishTask())return;
             if(r.cancelled){statusBar()->showMessage(trText("Cancelled"));return;}
             if(!r.error.isEmpty()){error(r.error);return;}
-            change(trText("Correct timing from waveform"),[r](Project &p){p.timing=r.timing;},true);
+            change(actionText("Correct timing from waveform"),[r](Project &p){p.timing=r.timing;},true);
             statusBar()->showMessage(trText("Waveform correction: %1 changed, %2 protected, %3 unclear, %4 conflicting.").arg(r.accepted).arg(r.protectedSources).arg(r.unclear).arg(r.conflicts));
         });
         playbackTimer.setInterval(16);
         connect(&playbackTimer,&QTimer::timeout,this,[this] {
             playTime=playOrigin+playbackClock.elapsed()/1000.;
-            if(playTime>=project.duration()) {
+            if(playTime>=(evaluation?evaluation->duration:project.duration())) {
                 stopPlayback();
-                playTime=project.duration();
+                playTime=(evaluation?evaluation->duration:project.duration());
             }
             syncAudio();
             refreshPreview();
@@ -476,7 +133,7 @@ namespace chosuta {
         auto edit=menuBar()->addMenu(trText("Edit"));
         auto settings=menuBar()->addMenu(trText("Settings"));
         settings->setObjectName("settingsMenu");
-        auto transport=menuBar()->addMenu(pt("Transport","运行控制","トランスポート"));transport->setObjectName("transportMenu");
+        auto transport=menuBar()->addMenu(trText("Transport","运行控制","トランスポート"));transport->setObjectName("transportMenu");
         auto help=menuBar()->addMenu(trText("Help"));
         auto action=[&](QMenu*menu,const char*name,const std::function<void()>&fn,QKeySequence shortcut={}) {
             auto a=menu->addAction(trText(name));
@@ -517,8 +174,8 @@ namespace chosuta {
         action(settings,"Advanced variant settings",[this]{showMouthSettings();})->setObjectName("advancedMouthAction");
         action(settings,"Advanced settings",[this]{showAdvancedSettings();})->setObjectName("advancedSettingsAction");
         action(settings,"Canvas",[this]{tabs->setCurrentWidget(canvasPage);});
-        auto playAction=transport->addAction(pt("Play / Stop","播放／停止","再生／停止"));playAction->setObjectName("transportToggleAction");connect(playAction,&QAction::triggered,this,&Window::togglePlayback);
-        auto returnAction=transport->addAction(pt("Return to playback start on Stop","停止时回到本次播放起点","停止時に再生開始位置へ戻る"));returnAction->setObjectName("returnOnStopAction");returnAction->setCheckable(true);returnAction->setChecked(preferences.returnOnStop);connect(returnAction,&QAction::toggled,this,[this](bool v){preferences.returnOnStop=v;saveViewPreferences();});
+        auto playAction=transport->addAction(trText("Play / Stop","播放／停止","再生／停止"));playAction->setObjectName("transportToggleAction");connect(playAction,&QAction::triggered,this,&Window::togglePlayback);
+        auto returnAction=transport->addAction(trText("Return to playback start on Stop","停止时回到本次播放起点","停止時に再生開始位置へ戻る"));returnAction->setObjectName("returnOnStopAction");returnAction->setCheckable(true);returnAction->setChecked(preferences.returnOnStop);connect(returnAction,&QAction::toggled,this,[this](bool v){preferences.returnOnStop=v;saveViewPreferences();});
         action(help,"Guide",[this] {
             QMessageBox::information(this,trText("Guide"),trText("Open an SVP, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings."));
         });
@@ -526,17 +183,20 @@ namespace chosuta {
         auto root=new QVBoxLayout(central);
         setCentralWidget(central);
         performanceDraftBar=new QWidget;performanceDraftBar->setObjectName("performanceDraftBar");auto draftRow=new QHBoxLayout(performanceDraftBar);draftRow->setContentsMargins(0,0,0,0);performanceDraftBar->hide();
-        draftRow->addWidget(new QLabel(pt("Compare draft (not applied)","比较草稿（尚未应用）","案を比較（未適用）")));
-        for(int i=0;i<4;++i){QStringList labels={pt("Current","当前","現在"),pt("Draft","草稿","案"),pt("Apply","应用","適用"),pt("Cancel","取消","キャンセル")};auto b=new QPushButton(labels[i]);b->setObjectName("performanceReview"+QString::number(i));draftRow->addWidget(b);connect(b,&QPushButton::clicked,this,[this,i]{if(i<2)reviewPerformance(i==1);else finishPerformanceDraft(i==2);});}
+        draftRow->addWidget(new QLabel(trText("Compare draft (not applied)","比较草稿（尚未应用）","案を比較（未適用）")));
+        for(int i=0;i<4;++i){QStringList labels={trText("Current","当前","現在"),trText("Draft","草稿","案"),trText("Apply","应用","適用"),trText("Cancel","取消","キャンセル")};auto b=new QPushButton(labels[i]);b->setObjectName("performanceReview"+QString::number(i));draftRow->addWidget(b);connect(b,&QPushButton::clicked,this,[this,i]{if(i<2)reviewPerformance(i==1);else finishPerformanceDraft(i==2);});}
         auto canvasBanner=new QHBoxLayout;root->addLayout(canvasBanner);canvasBanner->addWidget(performanceDraftBar);
         auto canvasButton=new QPushButton(trText("Canvas"));canvasButton->setObjectName("canvasButton");canvasBanner->addWidget(canvasButton);
-        canvasLabel=new QLabel;canvasBanner->addWidget(canvasLabel);canvasBanner->addStretch();performanceGenerateTop=new QPushButton(pt("Generate performance","生成演出","演出を生成"));canvasBanner->addWidget(performanceGenerateTop);connect(performanceGenerateTop,&QPushButton::clicked,this,[this]{generatePerformanceDraft();});
+        canvasLabel=new QLabel;canvasBanner->addWidget(canvasLabel);canvasBanner->addStretch();performanceGenerateTop=new QPushButton(trText("Generate performance","生成演出","演出を生成"));canvasBanner->addWidget(performanceGenerateTop);connect(performanceGenerateTop,&QPushButton::clicked,this,[this]{generatePerformanceDraft();});
         connect(canvasButton,&QPushButton::clicked,this,[this]{tabs->setCurrentWidget(canvasPage);});
         timelineSplitter=new QSplitter(Qt::Vertical);timelineSplitter->setObjectName("timelineSplitter");root->addWidget(timelineSplitter,1);
         auto horizontal=new QSplitter;workspaceSplitter=horizontal;horizontal->setObjectName("workspaceSplitter");horizontal->setChildrenCollapsible(false);timelineSplitter->setChildrenCollapsible(false);timelineSplitter->addWidget(horizontal);
         tabs=new QTabWidget;
         tabs->setMinimumWidth(300);tabs->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);
-        horizontal->addWidget(tabs);
+        auto sidebar=new QWidget;auto sidebarLayout=new QVBoxLayout(sidebar);sidebarLayout->setContentsMargins(0,0,0,0);
+        auto pages=new QComboBox;pages->setObjectName("workspacePageChoice");sidebarLayout->addWidget(pages);sidebarLayout->addWidget(tabs);tabs->tabBar()->hide();horizontal->addWidget(sidebar);
+        connect(pages,&QComboBox::currentIndexChanged,this,[this,pages]{if(pages->currentIndex()>=0)tabs->setCurrentIndex(pages->currentData().toInt());});
+        connect(tabs,&QTabWidget::currentChanged,this,[this,pages](int current){QSignalBlocker block(pages);pages->clear();for(int i=0;i<tabs->count();++i)if(tabs->isTabVisible(i))pages->addItem(tabs->tabText(i),i);pages->setCurrentIndex(pages->findData(current));});
         auto button=[&](QLayout*layout,const char*key,const std::function<void()>&fn,QString name={}) {
             auto b=new QPushButton(trText(key));
             if(!name.isEmpty())b->setObjectName(name);
@@ -574,13 +234,13 @@ namespace chosuta {
                 next.priorities[id]=priority;
                 if(tracks->item(row,0)->checkState()==Qt::Checked)next.selected<<id;
             }
-            history.push(new ProjectCommand(this,project,next,trText("Tracks")));
+            history.push(new ProjectCommand(this,project,next,actionText("Tracks")));
             Q_UNUSED(item);
         });
         auto assetPage=new QWidget;
         auto assetLayout=new QVBoxLayout(assetPage);
         advancedMouth=new QCheckBox(trText("Enable advanced variants"));advancedMouth->setObjectName("advancedMouthEnabled");assetLayout->addWidget(advancedMouth);
-        connect(advancedMouth,&QCheckBox::toggled,this,[this](bool value){if(!refreshing&&!busy)change(trText("Advanced variant settings"),[value](Project &p){p.appearance.enabled=value;});});
+        connect(advancedMouth,&QCheckBox::toggled,this,[this](bool value){if(!refreshing&&!busy)change(actionText("Advanced variant settings"),[value](Project &p){p.appearance.enabled=value;});});
         auto mouthSettings=new QPushButton(trText("Advanced variant settings"));mouthSettings->setObjectName("advancedMouthButton");assetLayout->addWidget(mouthSettings);connect(mouthSettings,&QPushButton::clicked,this,[this]{showMouthSettings();});
         assets=new QTableWidget(0,2);
         assets->setHorizontalHeaderLabels( {
@@ -612,23 +272,24 @@ namespace chosuta {
         fallback=new QComboBox;
         fallback->setEditable(true);
         fallbackRow->addWidget(fallback);
-        connect(fallback,&QComboBox::currentTextChanged,this,[this](const QString&s) {
-            if(!refreshing&&!s.isEmpty())change(trText("Fallback"),[s](Project&p) {
-                p.fallback=s;
+        connect(fallback,&QComboBox::currentTextChanged,this,[this](const QString&) {
+            const auto id=selectedId(fallback);
+            if(!refreshing&&!id.isEmpty())change(actionText("Fallback"),[id](Project&p) {
+                p.fallback=id;
             });
         });
         connect(assets,&QTableWidget::cellDoubleClicked,this,[this](int row,int) {
-            QString id=assets->item(row,0)->text();
+            QString id=assets->item(row,0)->data(Qt::UserRole).toString();
             auto path=QFileDialog::getOpenFileName(this,trText("Import PNGs"),{},"PNG (*.png)");
-            if(!path.isEmpty())change(trText("Assets"),[=](Project&p) {
-                p.assets[id]=path;
+            if(!path.isEmpty())change(actionText("Assets"),[=](Project&p) {
+                auto scan=scanAssetFiles({path},{});if(scan.entries.size()!=1)throw Failure("Invalid PNG");scan.entries[0].id=id;applyAssetImport(p,scan.entries,{id});
             });
         });
         tabs->addTab(assetPage,trText("Assets"));
-        performancePage=buildPerformancePanel();tabs->addTab(performancePage,pt("Performance","演出","演出"));
+        performancePage=buildPerformancePanel();tabs->addTab(performancePage,trText("Performance","演出","演出"));
         canvasPage=buildCanvasPanel();tabs->addTab(canvasPage,trText("Canvas"));
-        auto rulePage=new QWidget;
-        auto ruleLayout=new QVBoxLayout(rulePage);
+        auto rulePage=new QScrollArea;rulePage->setWidgetResizable(true);rulePage->setObjectName("rulesPage");auto ruleBody=new QWidget;rulePage->setWidget(ruleBody);
+        auto ruleLayout=new QVBoxLayout(ruleBody);
         auto form=new QFormLayout;
         ruleLayout->addLayout(form);
         language=new QComboBox;
@@ -649,7 +310,7 @@ namespace chosuta {
             trText("Special"),trText("Mode"),trText("Shape"),trText("Hold (seconds)")
         });
         special->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-        special->setMinimumHeight(230);
+        special->setMinimumHeight(210);
         ruleLayout->addWidget(special);
         auto scopeHint=new QLabel(trText("These rules also apply to advanced variants: they determine mouth states and timing; advanced settings select images that preserve pose and expression."));
         scopeHint->setObjectName("rulesAdvancedScopeHint");
@@ -673,9 +334,7 @@ namespace chosuta {
             special->setCellWidget(i,1,mode);
             auto s=new QComboBox;
             s->setEditable(true);
-            s->addItems( {
-                "closed","rest","breath","unknown","A","I","U","E","O"
-            });
+            for(const auto &id:mouthStates())s->addItem(mouthLabel(uiLanguage,id),id);
             special->setCellWidget(i,2,s);
             auto hold=new QDoubleSpinBox;
             hold->setRange(0,60);
@@ -688,7 +347,7 @@ namespace chosuta {
         });
         button(ruleLayout,"English Dictionary",[this] {
             auto path=QFileDialog::getOpenFileName(this,trText("English Dictionary"));
-            if(!path.isEmpty())change(trText("English Dictionary"),[=](Project&p) {
+            if(!path.isEmpty())change(actionText("English Dictionary"),[=](Project&p) {
                 p.rules.englishDictionary=path;
             });
         });
@@ -698,10 +357,11 @@ namespace chosuta {
             if(refreshing)return;
             Project next=project;
             collectRules(next);
-            history.push(new ProjectCommand(this,project,next,trText("Rules")));
+            history.push(new ProjectCommand(this,project,next,actionText("Rules")));
         };
         connect(language,&QComboBox::currentIndexChanged,this,updateRules);
         connect(takeover,&QCheckBox::toggled,this,updateRules);
+        connect(consonantLimit,qOverload<double>(&QDoubleSpinBox::valueChanged),this,updateRules);
         connect(consonant,&QDoubleSpinBox::valueChanged,this,updateRules);
         for(int i=0;i<special->rowCount();++i) {
             connect(qobject_cast<QComboBox*>(special->cellWidget(i,1)),&QComboBox::currentIndexChanged,this,updateRules);
@@ -718,7 +378,7 @@ namespace chosuta {
         preview=new PreviewCanvas;preview->setProperty("missingAssetLabel",trText("Missing compatible pose"));
         rightLayout->addWidget(preview,1);
         connect(layoutTarget,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)updateLayoutTarget();});
-        connect(preview,&PreviewCanvas::layoutEdited,this,[this](Project p){changeSubtitles(trText("Canvas"),[p](Project&next){next.canvas=p.canvas;next.subtitles=p.subtitles;});});
+        connect(preview,&PreviewCanvas::layoutEdited,this,[this](Project p){changeSubtitles(actionText("Canvas"),[p](Project&next){next.canvas=p.canvas;next.subtitles=p.subtitles;});});
         auto playerRow=new QHBoxLayout;
         rightLayout->addLayout(playerRow);
         playButton=button(playerRow,"Play / Stop",[this] {
@@ -729,7 +389,7 @@ namespace chosuta {
         });
         button(playerRow,"Remove Audio",[this] {
             stopPlayback();
-            change(trText("Remove Audio"),[](Project&p) {
+            change(actionText("Remove Audio"),[](Project&p) {
                 p.audioPath.clear();p.audioDuration=0;
             });
             if(player)player->setSource({});
@@ -748,15 +408,12 @@ namespace chosuta {
         });
         selectionLabel=new QLabel(trText("Selection"));
         selectionLabel->setObjectName("selectionLabel");selectionLabel->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
-        rightLayout->addWidget(selectionLabel);
-        auto properties=new QHBoxLayout;
-        rightLayout->addLayout(properties);
-        auto labeled=[&](const char*text,QWidget*w) {
-            auto col=new QVBoxLayout;
-            col->addWidget(new QLabel(trText(text)));
-            col->addWidget(w);
-            properties->addLayout(col);
-        };
+        auto mouthScroll=new QScrollArea;mouthScroll->setWidgetResizable(true);mouthScroll->setObjectName("mouthPropertiesPage");mouthPage=mouthScroll;
+        auto mouthBody=new QWidget;mouthScroll->setWidget(mouthBody);auto mouthLayout=new QVBoxLayout(mouthBody);mouthLayout->addWidget(selectionLabel);
+        mouthProperties=new QWidget;mouthProperties->setObjectName("mouthProperties");auto mouthFields=new QVBoxLayout(mouthProperties);mouthFields->setContentsMargins(0,0,0,0);mouthLayout->addWidget(mouthProperties);mouthLayout->addStretch();
+        auto properties=new QFormLayout;properties->setRowWrapPolicy(QFormLayout::WrapLongRows);mouthFields->addLayout(properties);
+        tabs->addTab(mouthPage,trText("Mouth","口形","口形"));
+        auto labeled=[&](const char*text,QWidget*w){properties->addRow(trText(text),w);};
         start=new QDoubleSpinBox;
         end=new QDoubleSpinBox;
         for(auto spin: {
@@ -780,9 +437,9 @@ namespace chosuta {
         labeled("Anchor",anchor);
         lock=new QCheckBox(trText("Locked"));
         lock->setChecked(true);
-        properties->addWidget(lock);fixedImage=new QCheckBox(pt("Fixed image","固定整图","画像を固定"));fixedImage->setObjectName("fixedImage");properties->addWidget(fixedImage);
+        properties->addRow(lock);fixedImage=new QCheckBox(trText("Fixed image","固定整图","画像を固定"));fixedImage->setObjectName("fixedImage");properties->addRow(fixedImage);
         auto editButtons=new QGridLayout;
-        rightLayout->addLayout(editButtons);
+        mouthFields->addLayout(editButtons);
         QStringList buttons= {
             "Apply to selection","Split at cursor","Merge selection","Batch offset","Correct pronunciation","Delete selection"
         };
@@ -804,7 +461,7 @@ namespace chosuta {
         for(int i=0;i<buttons.size();++i) {
             auto b=new QPushButton(trText(buttons[i].toUtf8().constData()));
             if(i==0)b->setObjectName("apply");
-            editButtons->addWidget(b,i/3,i%3);
+            editButtons->addWidget(b,i/2,i%2);
             connect(b,&QPushButton::clicked,this,functions[i]);
         }
         horizontal->setSizes( {
@@ -817,7 +474,7 @@ namespace chosuta {
             trText("Seconds"),trText("Bars / Beats")
         });
         timelineRow->addWidget(units);
-        auto snap=new QComboBox;snap->setObjectName("cursorSnap");snap->addItem(pt("Cursor: free","游标：不吸附","カーソル：自由"),"off");snap->addItem(pt("Cursor: beat","游标：吸附节拍","カーソル：拍に吸着"),"beat");snap->addItem(pt("Cursor: syllable","游标：吸附音节","カーソル：音節に吸着"),"syllable");snap->setCurrentIndex(snap->findData(preferences.cursorSnap));snap->setToolTip(pt("Ruler clicks and drags snap. Hold Alt to bypass. Typed positions and playback stay exact.","标尺点击、拖动时吸附；按住 Alt 临时关闭。手动输入位置和播放不吸附。","目盛のクリック・ドラッグに適用。Altで一時解除。数値入力と再生は吸着しません。"));timelineRow->addWidget(snap);connect(snap,&QComboBox::currentIndexChanged,this,[this,snap]{preferences.cursorSnap=snap->currentData().toString();timeline->setCursorSnap(preferences.cursorSnap);saveViewPreferences();});
+        auto snap=new QComboBox;snap->setObjectName("cursorSnap");snap->addItem(trText("Cursor: free","游标：不吸附","カーソル：自由"),"off");snap->addItem(trText("Cursor: beat","游标：吸附节拍","カーソル：拍に吸着"),"beat");snap->addItem(trText("Cursor: syllable","游标：吸附音节","カーソル：音節に吸着"),"syllable");snap->setCurrentIndex(snap->findData(preferences.cursorSnap));snap->setToolTip(trText("Ruler clicks and drags snap. Hold Alt to bypass. Typed positions and playback stay exact.","标尺点击、拖动时吸附；按住 Alt 临时关闭。手动输入位置和播放不吸附。","目盛のクリック・ドラッグに適用。Altで一時解除。数値入力と再生は吸着しません。"));timelineRow->addWidget(snap);connect(snap,&QComboBox::currentIndexChanged,this,[this,snap]{preferences.cursorSnap=snap->currentData().toString();timeline->setCursorSnap(preferences.cursorSnap);saveViewPreferences();});
 
         timelineRow->addWidget(new QLabel(trText("Zoom")));
         auto zoom=new QSlider(Qt::Horizontal);
@@ -826,13 +483,13 @@ namespace chosuta {
         zoom->setMaximumWidth(200);
         timelineRow->addWidget(zoom);
         subtitleEnabled=new QCheckBox(trText("Add subtitles"));subtitleEnabled->setObjectName("subtitlesEnabled");timelineRow->addWidget(subtitleEnabled);
-        connect(subtitleEnabled,&QCheckBox::toggled,this,[this](bool enabled){if(refreshing||busy)return;changeSubtitles(trText("Subtitles"),[this,enabled](Project&p){p.subtitlesEnabled=enabled;if(enabled&&p.subtitles.isEmpty()){SubtitleTrack t;t.id=QUuid::createUuid().toString(QUuid::Id128);t.name=trText("Subtitle track")+" 1";if(p.score.tracks.size()==1)t.sourceTrack=p.score.tracks[0].id;p.subtitles.append(t);}});if(enabled&&subtitlePage)tabs->setCurrentWidget(subtitlePage);});
+        connect(subtitleEnabled,&QCheckBox::toggled,this,[this](bool enabled){if(refreshing||busy)return;changeSubtitles(actionText("Subtitles"),[this,enabled](Project&p){p.subtitlesEnabled=enabled;if(enabled&&p.subtitles.isEmpty()){SubtitleTrack t;t.id=QUuid::createUuid().toString(QUuid::Id128);t.name=trText("Subtitle track")+" 1";if(p.score.tracks.size()==1)t.sourceTrack=p.score.tracks[0].id;p.subtitles.append(t);}});if(enabled&&subtitlePage)tabs->setCurrentWidget(subtitlePage);});
         auto resetHeights=new QPushButton(trText("Restore timeline heights"));resetHeights->setObjectName("resetTimelineHeights");timelineRow->addWidget(resetHeights);connect(resetHeights,&QPushButton::clicked,this,[this]{timeline->resetLaneHeights();preferences.timelineHeight=250;timelineSplitter->setSizes({600,290});saveViewPreferences();});
         timelineRow->addStretch();
-        button(timelineRow,"Export Settings",[this] {
+        button(canvasBanner,"Export Settings",[this] {
             showExportSettings();
         });
-        button(timelineRow,"Export Video",[this] {
+        button(canvasBanner,"Export Video",[this] {
             startExport();
         });
         waveformControls=new QWidget;waveformControls->setObjectName("waveformControls");auto waveRow=new QHBoxLayout(waveformControls);waveRow->setContentsMargins(0,0,0,0);
@@ -856,7 +513,7 @@ namespace chosuta {
         timeline->setWaveformHeight(preferences.waveformLaneHeight);
         timeline->setPerformanceLane(preferences.performanceLaneHeight,preferences.performanceLaneVisible);
         connect(timeline,&Timeline::performanceSelected,this,&Window::selectPerformance);
-        connect(timeline,&Timeline::performanceEdited,this,[this](QString id,double a,double b){if(busy)return;for(auto m:project.performance.manual)if(m.id==id){change(pt("Move performance","移动演出段","演出区間を移動"),[=](Project &p)mutable{setPerformanceTime(p,m,a,b,m.anchor=="beats");putPerformanceSegment(p,m);},true);break;}});
+        connect(timeline,&Timeline::performanceEdited,this,[this](QString id,double a,double b){if(busy)return;for(auto m:project.performance.manual)if(m.id==id){change(actionText("Move performance","移动演出段","演出区間を移動"),[=](Project &p)mutable{setPerformanceTime(p,m,a,b,m.anchor=="beats");putPerformanceSegment(p,m);},true);break;}});
         timelineSplitter->setSizes({600,preferences.timelineHeight+40});
         connect(timelineSplitter,&QSplitter::splitterMoved,this,[this]{preferences.timelineHeight=std::clamp(timelineScroll->height(),180,900);});
         connect(timeline,&Timeline::laneHeightChanged,this,[this](const QString&id,int h){if(id.isEmpty())preferences.mouthLaneHeight=h;else if(id=="@waveform")preferences.waveformLaneHeight=h;else if(id=="@performance")preferences.performanceLaneHeight=h;else preferences.subtitleLaneHeight=h;updateTimelineMinimum();saveViewPreferences();});
@@ -873,12 +530,12 @@ namespace chosuta {
         });
         connect(timeline,&Timeline::selectionChanged,this,[this] {
             performanceId.clear();subtitleCueId.clear();if(subtitlePage){bool old=refreshing;refreshing=true;refreshSubtitles();refreshing=old;}
-            refreshSelection();
+            refreshSelection();if(!timeline->selectedIds().isEmpty())tabs->setCurrentWidget(mouthPage);
         });
         connect(timeline,&Timeline::subtitleCreated,this,&Window::addSubtitle);
         connect(timeline,&Timeline::subtitleSelected,this,&Window::selectSubtitle);
-        connect(timeline,&Timeline::subtitleEdited,this,[this](QString id,SubtitleCue cue){changeSubtitles(trText("Subtitles"),[id,cue](Project&p){for(auto&t:p.subtitles)if(t.id==id)for(auto&c:t.cues)if(c.id==cue.id)c=cue;});});
-        connect(timeline,&Timeline::editRejected,this,[this](const QString&m){statusBar()->showMessage(m,7000);});
+        connect(timeline,&Timeline::subtitleEdited,this,[this](QString id,SubtitleCue cue){changeSubtitles(actionText("Subtitles"),[id,cue](Project&p){for(auto&t:p.subtitles)if(t.id==id)for(auto&c:t.cues)if(c.id==cue.id)c=cue;});});
+        connect(timeline,&Timeline::editRejected,this,[this](const Message&m){statusBar()->showMessage(messageText(uiLanguage,m),7000);});
         connect(scroll->verticalScrollBar(),&QScrollBar::valueChanged,timeline,qOverload<>(&QWidget::update));
         connect(timeline,&Timeline::seek,this,[this](double t) {
             seek(t);
@@ -886,7 +543,7 @@ namespace chosuta {
         connect(timeline,&Timeline::edited,this,[this](const QVector<Event>&events) {
             QString a=anchor->currentData().toString();
             bool locked=lock->isChecked(),fixed=fixedImage->isChecked();
-            change(trText("Selection"),[=](Project&p) {
+            change(actionText("Selection"),[=](Project&p) {
                 for(const auto&e:events)p.edit(e,locked,a);
             });
         });
@@ -911,14 +568,15 @@ namespace chosuta {
         QTimer::singleShot(0,this,[this,paths]{if(busy)return;QFileInfo file(paths.front());auto suffix=file.suffix().toLower();if(file.isDir()||suffix=="png")showMouthSettings(paths);else if(suffix=="svp"||suffix=="chosuta"){if(confirmDiscard())openPath(paths.front());}else attachAudioPath(paths.front());});
     }
     void Window::assignProject(Project p,bool timingOnly) {
-        if(waveform&&waveform->path==p.audioPath)p.audioContentHash=waveform->hash;
+        if(verifiedAudioPath==p.audioPath)p.audioContentHash=verifiedAudioHash;
         else p.audioContentHash.clear();
-        project=std::move(p);
+        project=std::move(p);++revision;
         refresh(timingOnly);
     }
     void Window::refresh(bool timingOnly) {
         const auto horizontalSizes=workspaceSplitter->sizes(),verticalSizes=timelineSplitter->sizes();
         refreshing=true;
+        rebuildEvaluation();
         setWindowTitle("Chosuta — "+(projectPath.isEmpty()?trText("Estimated timing"):QFileInfo(projectPath).fileName())+"[*]");
         setWindowModified(!history.isClean());
         tracks->setRowCount(project.score.tracks.size());
@@ -945,18 +603,18 @@ namespace chosuta {
         assets->setRowCount(simpleShapes.size());
         for(int i=0;i<simpleShapes.size();++i) {
             auto s=simpleShapes[i];
-            assets->setItem(i,0,new QTableWidgetItem(s));
+            auto label=new QTableWidgetItem(mouthLabel(uiLanguage,s));label->setData(Qt::UserRole,s);assets->setItem(i,0,label);
             auto item=new QTableWidgetItem(project.assets.value(s));
             if(!item->text().isEmpty()&&!QFileInfo::exists(item->text()))item->setForeground(Qt::red);
             assets->setItem(i,1,item);
         }
         fallback->clear();
-        fallback->addItems(shapes);
-        fallback->setCurrentText(project.fallback);
-        auto previousShape=shape->currentText();
+        for(const auto &id:shapes)fallback->addItem(mouthLabel(uiLanguage,id),id);
+        selectId(fallback,project.fallback);
+        auto previousShape=selectedId(shape);
         shape->clear();
-        shape->addItems(shapes);
-        shape->setCurrentText(previousShape.isEmpty()?"A":previousShape);
+        for(const auto &id:shapes)shape->addItem(mouthLabel(uiLanguage,id),id);
+        selectId(shape,previousShape.isEmpty()?"A":previousShape);
         language->setCurrentIndex(language->findData(project.rules.language));
         takeover->setChecked(project.rules.harmonyTakeover);
         consonant->setValue(project.rules.consonantRatio);
@@ -965,21 +623,21 @@ namespace chosuta {
             auto policy=project.rules.special.value(special->item(i,0)->data(Qt::UserRole).toString());
             auto mode=qobject_cast<QComboBox*>(special->cellWidget(i,1));
             mode->setCurrentIndex(mode->findData(policy.mode));
-            qobject_cast<QComboBox*>(special->cellWidget(i,2))->setCurrentText(policy.shape);
+            selectId(qobject_cast<QComboBox*>(special->cellWidget(i,2)),policy.shape);
             qobject_cast<QDoubleSpinBox*>(special->cellWidget(i,3))->setValue(policy.holdSeconds);
         }
-        if(timingOnly&&scene)scene->setTiming(project);
-        else scene=std::make_unique<Scene>(project);
+        if(timingOnly&&scene)scene->setTiming(project,evaluation);
+        else scene=std::make_unique<Scene>(project,evaluation);
         QStringList messages {
             trText("Estimated timing")
         };
-        for(const auto&d:project.score.diagnostics)messages<<d.path+"\n"+d.code+": "+d.message;
-        if(!scene->diagnostics.isEmpty())messages<<trText("Scene diagnostics")+": "+scene->diagnostics.join("; ");
-        if(project.appearance.enabled){PerformanceResolver performance(project);messages.append(performance.diagnostics);if(!performanceCurrent(project))messages<<pt("Automatic performance needs regeneration.","自动演出待生成或更新。","自動演出の生成・更新が必要です。");}
+        for(const auto&d:project.score.diagnostics)messages<<d.path+"\n"+d.code+": "+messageText(uiLanguage,d.message);
+        if(!scene->diagnostics.isEmpty())messages<<trText("Scene diagnostics")+": "+messagesText(uiLanguage,scene->diagnostics);
+        if(project.appearance.enabled){messages.append(messagesText(uiLanguage,evaluation->performance->diagnostics));if(!performanceCurrent(project))messages<<trText("Automatic performance needs regeneration.","自动演出待生成或更新。","自動演出の生成・更新が必要です。");}
         auto orphans=project.orphanOverrides();
         if(!orphans.isEmpty())messages<<trText("Orphan manual edits")+"\n"+orphans.join('\n');
         int unknown=0;
-        for(const auto&e:project.effective())if(e.unknown) {
+        for(const auto&e:evaluation->events)if(e.unknown) {
             ++unknown;
             messages<<trText("Unknown pronunciations")+": "+e.text+"\n"+e.source;
         }
@@ -988,10 +646,11 @@ namespace chosuta {
         if(!project.timing.sources.isEmpty()&&!timingCorrectionCurrent(project))messages<<trText("Saved waveform correction is stale; score timing is used. Correct again if needed.");
         diagnostics->setPlainText(messages.join("\n\n"));
         refreshCanvas();
-        timeline->setProject(project);
+        timeline->setProject(project,evaluation);
         refreshSubtitles();
         timeline->setReturnPosition(playStart);
         refreshWaveform();
+        if(auto pages=findChild<QComboBox *>("workspacePageChoice")){QSignalBlocker block(pages);pages->clear();for(int i=0;i<tabs->count();++i)if(tabs->isTabVisible(i))pages->addItem(tabs->tabText(i),i);pages->setCurrentIndex(pages->findData(tabs->currentIndex()));}
         refreshing=false;
         refreshSelection();
         refreshPreview();
@@ -1014,11 +673,12 @@ namespace chosuta {
     }
     void Window::refreshSelection() {
         auto ids=timeline->selectedIds();
-        selectionLabel->setText(trText("Selection")+QString(" (%1)").arg(ids.size()));
-        for(const auto&e:project.effective())if(ids.contains(e.id)) {
+        selectionLabel->setText(ids.isEmpty()?trText("Select a mouth event on the timeline","在时间轴选择口形事件以编辑","タイムラインで口形イベントを選択してください"):trText("Selection")+QString(" (%1)").arg(ids.size()));
+        mouthProperties->setVisible(!ids.isEmpty());
+        for(const auto&e:evaluation->events)if(ids.contains(e.id)) {
             start->setValue(e.start);
             end->setValue(e.end);
-            shape->setCurrentText(e.shape);fixedImage->setChecked(e.appearanceFixed);
+            selectId(shape,e.shape);fixedImage->setChecked(e.appearanceFixed);
             auto it=project.overrides.find(e.id);
             lock->setChecked(it==project.overrides.end()||it->locked);
             anchor->setCurrentIndex(anchor->findData(it==project.overrides.end()?"seconds":it->anchor));
@@ -1032,10 +692,10 @@ namespace chosuta {
         p.rules.consonantRatio=consonant->value();
         p.rules.consonantMaxSeconds=consonantLimit->value()/1000;
         for(int i=0;i<special->rowCount();++i)p.rules.special[special->item(i,0)->data(Qt::UserRole).toString()]= {
-            qobject_cast<QComboBox*>(special->cellWidget(i,1))->currentData().toString(),qobject_cast<QComboBox*>(special->cellWidget(i,2))->currentText(),qobject_cast<QDoubleSpinBox*>(special->cellWidget(i,3))->value()
+            qobject_cast<QComboBox*>(special->cellWidget(i,1))->currentData().toString(),selectedId(qobject_cast<QComboBox*>(special->cellWidget(i,2))),qobject_cast<QDoubleSpinBox*>(special->cellWidget(i,3))->value()
         };
     }
-    void Window::change(const QString&label,const std::function<void(Project&)>&fn,bool timingOnly) {
+    void Window::change(ActionText label,const std::function<void(Project&)>&fn,bool timingOnly) {
         if(busy)return;
         try {
             Project next=project;
@@ -1043,12 +703,14 @@ namespace chosuta {
             history.push(new ProjectCommand(this,project,std::move(next),label,timingOnly));
         }
         catch(const std::exception&e) {
-            error(QString::fromUtf8(e.what()));
+            error(exceptionMessage(e));
         }
     }
     void Window::setBusy(bool value) {
         if(value&&timeline)timeline->finishSubtitleEditing(false);
         busy=value;
+        if(value){taskState=TaskState::Running;jobRevision=revision;++job;}
+        else if(taskState!=TaskState::Review)taskState=TaskState::Idle;
         centralWidget()->setEnabled(!value);
         menuBar()->setEnabled(!value);
         progress->setVisible(value);
@@ -1060,8 +722,21 @@ namespace chosuta {
         }
         else statusBar()->showMessage(trText("Ready"));
     }
-    void Window::error(const QString&message) {
-        QMessageBox::warning(this,trText("Error"),message);
+    void Window::rebuildEvaluation(){++evaluationBuilds;evaluation=std::make_shared<Evaluation>(project);}
+    Progress Window::taskProgress(){const auto id=job,version=jobRevision;return [this,id,version](int value){QMetaObject::invokeMethod(this,[this,id,version,value]{if(job==id&&revision==version&&taskState==TaskState::Running)progress->setValue(value);},Qt::QueuedConnection);};}
+    bool Window::finishTask(){
+        const bool valid=jobRevision==revision&&!(cancel&&cancel->load());
+        setBusy(false);
+        if(closePending){closePending=false;QTimer::singleShot(0,this,[this]{close();});return false;}
+        if(!valid)statusBar()->showMessage(trText("Cancelled"));
+        return valid;
+    }
+    void Window::error(const Message &message) {
+        QMessageBox box(QMessageBox::Warning,trText("Error"),messageText(uiLanguage,message,false),QMessageBox::Ok,this);
+        box.setTextFormat(Qt::PlainText);
+        const auto detail=messageDetails(uiLanguage,message);
+        if(!detail.isEmpty())box.setDetailedText(detail);
+        box.exec();
     }
     bool Window::confirmDiscard() {
         if(timeline)timeline->finishSubtitleEditing(false);
@@ -1084,7 +759,7 @@ namespace chosuta {
             return true;
         }
         catch(const std::exception&e) {
-            error(QString::fromUtf8(e.what()));
+            error(exceptionMessage(e));
             return false;
         }
     }
@@ -1100,11 +775,7 @@ namespace chosuta {
         cancel=std::make_shared<std::atomic_bool>(false);
         auto token=cancel;
         setBusy(true);
-        auto report=[this](int n) {
-            QMetaObject::invokeMethod(this,[this,n] {
-                progress->setValue(n);
-            },Qt::QueuedConnection);
-        };
+        auto report=taskProgress();
         loadWatcher.setFuture(QtConcurrent::run([path,token,report,defaults=preferences.pronunciation,performanceDefaults=preferences.performanceSettings] {
             LoadResult r;
             try {
@@ -1121,7 +792,7 @@ namespace chosuta {
             }
             catch(const std::exception&e) {
                 r.cancelled=token->load();
-                r.error=QString::fromUtf8(e.what());
+                r.error=exceptionMessage(e);
             }
             return r;
         }));
@@ -1142,7 +813,7 @@ namespace chosuta {
                 r.cancelled=token->load();
             }
             catch(const std::exception&e) {
-                r.error=QString::fromUtf8(e.what());
+                r.error=exceptionMessage(e);
             }
             return r;
         }));
@@ -1150,37 +821,28 @@ namespace chosuta {
     void Window::importImages() {
         auto files=QFileDialog::getOpenFileNames(this,trText("Import PNGs"),{},"PNG (*.png)");
         if(files.isEmpty())return;
-        change(trText("Assets"),[files](Project&p) {
-            for(const auto&path:files) {
-                QString id=QFileInfo(path).completeBaseName();
-                if(QStringList {
-                    "a","i","u","e","o"
-                }
-                .contains(id))id=id.toUpper();
-                if(const auto canonical=normalizedAssetId(id))id=*canonical;
-                p.assets[id]=path;
-            }
-        });
+        showMouthSettings(files);
     }
+
     void Window::createDemo() {
         auto directory=QFileDialog::getExistingDirectory(this,trText("Demo Assets"));
         if(directory.isEmpty())return;
         try {
             createDemoAssets(directory);
-            change(trText("Demo Assets"),[directory](Project&p) {
+            change(actionText("Demo Assets"),[directory](Project&p) {
                 for(const auto&s:QStringList {
                     "A","I","U","E","O","closed","rest","breath","unknown"
                 })p.assets[s]=QDir(directory).filePath(s+".png");
             });
         }
         catch(const std::exception&e) {
-            error(QString::fromUtf8(e.what()));
+            error(exceptionMessage(e));
         }
     }
     void Window::relocateAssets() {
         auto directory=QFileDialog::getExistingDirectory(this,trText("Relocate Assets"));
         if(directory.isEmpty())return;
-        change(trText("Relocate Assets"),[directory](Project&p) {
+        change(actionText("Relocate Assets"),[directory](Project&p) {
             for(auto it=p.assets.begin();it!=p.assets.end();++it) {
                 auto path=QDir(directory).filePath(QFileInfo(it.value()).fileName());
                 if(QFileInfo::exists(path))it.value()=path;
@@ -1199,8 +861,8 @@ namespace chosuta {
         auto id=QInputDialog::getText(this,trText("Custom Shape"),trText("Enter shape ID"),QLineEdit::Normal,{},&ok);
         if(!ok||id.trimmed().isEmpty())return;
         auto path=QFileDialog::getOpenFileName(this,trText("Import PNGs"),{},"PNG (*.png)");
-        if(!path.isEmpty())change(trText("Custom Shape"),[=](Project&p) {
-            p.assets[id.trimmed()]=path;
+        if(!path.isEmpty())change(actionText("Custom Shape"),[=](Project&p) {
+            auto scan=scanAssetFiles({path},{});if(scan.entries.size()!=1)throw Failure("Invalid PNG");scan.entries[0].id=id.trimmed();applyAssetImport(p,scan.entries);
         });
     }
     void Window::attachAudio(){
@@ -1208,19 +870,21 @@ namespace chosuta {
         if(!path.isEmpty())attachAudioPath(path);
     }
     void Window::attachAudioPath(const QString&path){
-        if(busy)return;stopPlayback();cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;QString ffmpeg=project.output.ffmpeg;
-        setBusy(true);audioWatcher.setFuture(QtConcurrent::run([path,ffmpeg,token]{return probeAudio(path,ffmpeg,*token);}));
+        if(busy)return;
+        try{auto tools=selectMediaTools(project.output.ffmpeg);stopPlayback();cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;
+            setBusy(true);audioWatcher.setFuture(QtConcurrent::run([path,tools,token]{return probeAudio(path,tools,*token);}));
+        }catch(const std::exception &e){error(exceptionMessage(e));}
     }
     void Window::editSelection() {
         auto ids=timeline->selectedIds();
         if(ids.isEmpty()) {
-            error(trText("No event selected"));
+            error(Message("No event selected"));
             return;
         }
         double a=start->value(),b=end->value();
-        QString s=shape->currentText(),anch=anchor->currentData().toString();
+        QString s=selectedId(shape),anch=anchor->currentData().toString();
         bool locked=lock->isChecked(),fixed=fixedImage->isChecked();
-        change(trText("Apply to selection"),[=](Project&p) {
+        change(actionText("Apply to selection"),[=](Project&p) {
             auto events=p.effective();
             for(auto&e:events)if(ids.contains(e.id)) {
                 if(ids.size()==1) {
@@ -1234,14 +898,14 @@ namespace chosuta {
         });
     }
     void Window::splitSelection() {
-        if(!performanceId.isEmpty()){auto id=performanceId;double t=playTime;change(pt("Split performance","拆分演出段","演出区間を分割"),[=](Project &p){splitPerformance(p,id,t);},true);return;}
+        if(!performanceId.isEmpty()){auto id=performanceId;double t=playTime;change(actionText("Split performance","拆分演出段","演出区間を分割"),[=](Project &p){splitPerformance(p,id,t);},true);return;}
         auto ids=timeline->selectedIds();
         if(ids.size()!=1) {
-            error(trText("Select one event"));
+            error(Message("Select one event"));
             return;
         }
         double cursor=playTime-project.output.syncOffset;
-        change(trText("Split at cursor"),[=](Project&p) {
+        change(actionText("Split at cursor"),[=](Project&p) {
             for(const auto&e:p.effective())if(e.id==ids[0]) {
                 p.split(e,cursor);
                 break;
@@ -1251,7 +915,7 @@ namespace chosuta {
     void Window::mergeSelection() {
         if(!performanceId.isEmpty()){mergePerformance();return;}
         auto ids=timeline->selectedIds();
-        change(trText("Merge selection"),[=](Project&p) {
+        change(actionText("Merge selection"),[=](Project&p) {
             QVector<Event>events;
             for(const auto&e:p.effective())if(ids.contains(e.id))events.append(e);
             p.merge(events);
@@ -1260,7 +924,7 @@ namespace chosuta {
     void Window::offsetSelection() {
         auto ids=timeline->selectedIds();
         if(ids.isEmpty()) {
-            error(trText("No event selected"));
+            error(Message("No event selected"));
             return;
         }
         bool ok=false;
@@ -1268,7 +932,7 @@ namespace chosuta {
         if(!ok)return;
         QString anch=anchor->currentData().toString();
         bool locked=lock->isChecked(),fixed=fixedImage->isChecked();
-        change(trText("Batch offset"),[=](Project&p) {
+        change(actionText("Batch offset"),[=](Project&p) {
             for(auto e:p.effective())if(ids.contains(e.id)) {
                 e.start+=offset;
                 e.end+=offset;
@@ -1279,25 +943,25 @@ namespace chosuta {
     void Window::correctReading() {
         auto ids=timeline->selectedIds();
         if(ids.isEmpty()) {
-            error(trText("No event selected"));
+            error(Message("No event selected"));
             return;
         }
         QString source;
-        for(const auto&e:project.effective())if(ids.contains(e.id)) {
+        for(const auto&e:evaluation->events)if(ids.contains(e.id)) {
             source=e.source.section(';',0,0);
             break;
         }
         bool ok=false;
         auto reading=QInputDialog::getText(this,trText("Correct pronunciation"),trText("Explicit pronunciation for source note"),QLineEdit::Normal,project.rules.readings.value(source),&ok);
         if(!ok)return;
-        change(trText("Correct pronunciation"),[=](Project&p) {
+        change(actionText("Correct pronunciation"),[=](Project&p) {
             if(reading.trimmed().isEmpty())p.rules.readings.remove(source);
             else p.rules.readings[source]=reading.trimmed();
         });
         regenerate();
     }
     void Window::resetOverrides() {
-        change(trText("Reset manual edits"),[](Project&p) {
+        change(actionText("Reset manual edits"),[](Project&p) {
             p.overrides.clear();
         });
     }
@@ -1315,13 +979,13 @@ namespace chosuta {
     void Window::togglePlayback() {
         if(busy&&!performanceCandidate)return;
         if(playing) {
-            playTime=std::min(project.duration(),playOrigin+playbackClock.elapsed()/1000.);
+            playTime=std::min((evaluation?evaluation->duration:project.duration()),playOrigin+playbackClock.elapsed()/1000.);
             stopPlayback();
             if(preferences.returnOnStop)playTime=playStart;
             syncAudio();refreshPreview();followCursor(true);
             return;
         }
-        if(playTime>=project.duration())playTime=0;
+        if(playTime>=(evaluation?evaluation->duration:project.duration()))playTime=0;
         timeline->finishSubtitleEditing(false);
         playing=true;
         playOrigin=playTime;playStart=playTime;timeline->setReturnPosition(playStart);
@@ -1377,15 +1041,15 @@ namespace chosuta {
         });
     }
     void Window::closeEvent(QCloseEvent*e) {
-        if(busy) {
-            if(cancel)cancel->store(true);
-            statusBar()->showMessage(trText("Cancelled"));
-            e->ignore();
-            return;
+        if(taskState==TaskState::Review){
+            const auto answer=QMessageBox::question(this,trText("Unsaved changes"),trText("Discard unapplied performance draft and close?","放弃尚未应用的演出草稿并关闭？","未適用の演出案を破棄して閉じますか？"),QMessageBox::Discard|QMessageBox::Cancel);
+            if(answer!=QMessageBox::Discard||!confirmDiscard()){e->ignore();return;}
+            finishPerformanceDraft(false);taskState=TaskState::Closing;e->accept();return;
         }
-        if(confirmDiscard())e->accept();
-        else e->ignore();
+        if(busy){if(cancel)cancel->store(true);taskState=TaskState::Cancelling;closePending=true;statusBar()->showMessage(trText("Cancelling…","正在取消…","中止中…"));e->ignore();return;}
+        if(confirmDiscard()){taskState=TaskState::Closing;e->accept();}else e->ignore();
     }
+
     void Window::showExportSettings() {
         QDialog dialog(this);
         dialog.setWindowTitle(trText("Export Settings"));
@@ -1443,21 +1107,26 @@ namespace chosuta {
         connect(overrideTool,&QCheckBox::toggled,projectToolRow,&QWidget::setEnabled);
         auto toolHint=new QLabel(trText("Choose ffmpeg; ffprobe and shared DLLs should stay beside it. The default is saved only on this computer when you press OK."));
         toolHint->setWordWrap(true);layout->addWidget(toolHint);
+        auto adopt=new QCheckBox(trText("Adopt project media tool on this computer"));adopt->setObjectName("adoptProjectMediaTool");
+        adopt->setChecked(mediaToolAdopted(s.ffmpeg));layout->addWidget(adopt);
         auto check=new QPushButton(trText("Check media tools"));check->setObjectName("checkMediaTools");layout->addWidget(check);
         auto report=new QPlainTextEdit;report->setObjectName("mediaToolsReport");report->setReadOnly(true);report->setMaximumHeight(160);report->hide();layout->addWidget(report);
         auto inspector=new QFutureWatcher<MediaToolsInfo>(&dialog);auto checkCancel=std::make_shared<std::atomic_bool>(false);
         connect(&dialog,&QDialog::finished,&dialog,[checkCancel]{checkCancel->store(true);});
         connect(check,&QPushButton::clicked,&dialog,[&]{
+            if(overrideTool->isChecked()&&!mediaToolAdopted(ffmpeg->text().trimmed())&&!adopt->isChecked()){
+                report->show();report->setPlainText(trText("Adopt project media tool on this computer"));return;
+            }
             auto selected=(overrideTool->isChecked()?ffmpeg->text():globalFfmpeg->text()).trimmed();
             // Resolve automatic discovery without the old saved global default while editing it.
             if(selected.isEmpty()||selected=="ffmpeg"||selected=="ffmpeg.exe")selected=automaticFfmpegExecutable();
             check->setEnabled(false);report->show();report->setPlainText(trText("Checking…"));checkCancel->store(false);
-            inspector->setFuture(QtConcurrent::run([selected,checkCancel]{return inspectMediaTools(selected,*checkCancel);}));
+            inspector->setFuture(QtConcurrent::run([selected,checkCancel]{return inspectMediaTools(selectMediaTools(selected,ToolSelection::Explicit),*checkCancel);}));
         });
         connect(inspector,&QFutureWatcher<MediaToolsInfo>::finished,&dialog,[&]{
             auto info=inspector->result();check->setEnabled(true);QStringList lines;
             lines<<"FFmpeg: "+info.ffmpeg<<info.ffmpegVersion<<"ffprobe: "+info.ffprobe<<info.ffprobeVersion;
-            lines+=info.errors;
+            for(const auto &message:info.errors)lines<<messageText(uiLanguage,message);
             if(!info.missingEncoders.isEmpty())lines<<trText("Missing encoders")+": "+info.missingEncoders.join(", ");
             if(!info.missingFilters.isEmpty())lines<<trText("Missing filters")+": "+info.missingFilters.join(", ");
             if(info.ready())lines<<trText("Tool startup and listed capabilities passed. Export/playback still require a real media test.");
@@ -1467,7 +1136,7 @@ namespace chosuta {
         layout->addWidget(estimate);
         auto updateEstimate=[&] {
             if(bitrate->value()==0)estimate->setText(trText("Quality mode: size varies"));
-            else estimate->setText(trText("Estimated size")+QString(": ~%1 MB\n").arg(bitrate->value()*(project.duration())/8000.,0,'f',2)+trText("Size estimate excludes audio/container"));
+            else estimate->setText(trText("Estimated size")+QString(": ~%1 MB\n").arg(bitrate->value()*((evaluation?evaluation->duration:project.duration()))/8000.,0,'f',2)+trText("Size estimate excludes audio/container"));
         };
         connect(bitrate,&QSpinBox::valueChanged,&dialog,updateEstimate);
 
@@ -1494,15 +1163,16 @@ namespace chosuta {
                 Project next=project;
                 next.output=s;
                 if(!next.score.raw.isEmpty())validateExport(next);
+                if(overrideTool->isChecked()&&adopt->isChecked())adoptMediaTool(s.ffmpeg);
                 setDefaultFfmpegExecutable(globalFfmpeg->text());
                 waveformKey.clear();
-                change(trText("Export Settings"),[=](Project&p) {
+                change(actionText("Export Settings"),[=](Project&p) {
                     p.output=s;
                 });
                 dialog.accept();
             }
             catch(const std::exception&e) {
-                error(QString::fromUtf8(e.what()));
+                error(exceptionMessage(e));
             }
         });
         dialog.exec();
@@ -1514,14 +1184,14 @@ namespace chosuta {
             for(const auto&t:project.subtitles)if(t.enabled)for(const auto&c:t.cues)end=std::max(end,subtitleInterval(project,c,&sources).end);
             if(end>project.output.duration){auto answer=QMessageBox::question(this,trText("Subtitles"),trText("Some subtitles exceed the fixed duration. Extend before exporting? No exports only the chosen duration."),QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel);
                 if(answer==QMessageBox::Cancel)return;
-                if(answer==QMessageBox::Yes)changeSubtitles(trText("Animation duration"),[end](Project&p){p.output.duration=end;});
+                if(answer==QMessageBox::Yes)changeSubtitles(actionText("Animation duration"),[end](Project&p){p.output.duration=end;});
             }
         }
         try {
             validateExport(project);
         }
         catch(const std::exception&e) {
-            error(QString::fromUtf8(e.what()));
+            error(exceptionMessage(e));
             return;
         }
         auto path=QFileDialog::getSaveFileName(this,trText("Export Video"),{},QString("%1 (*.%1)").arg(project.output.format),nullptr,QFileDialog::DontConfirmOverwrite);
@@ -1534,18 +1204,15 @@ namespace chosuta {
             if(reply!=QMessageBox::Yes)return;
             overwrite=true;
         }
+        std::optional<MediaTools> tools;
+        try{tools.emplace(selectMediaTools(project.output.ffmpeg));}catch(const std::exception &e){error(exceptionMessage(e));return;}
         activePath=path;
         cancel=std::make_shared<std::atomic_bool>(false);
         auto token=cancel;
         auto snapshot=project;
-        setBusy(true);
-        exportWatcher.setFuture(QtConcurrent::run([this,snapshot,path,token,overwrite] {
-            auto report=[this](int n) {
-                QMetaObject::invokeMethod(this,[this,n] {
-                    progress->setValue(n);
-                },Qt::QueuedConnection);
-            };
-            return exportVideo(snapshot,path,*token,report,overwrite);
+        setBusy(true);auto report=taskProgress();
+        exportWatcher.setFuture(QtConcurrent::run([snapshot,path,token,overwrite,tools,report] {
+            return exportVideo(snapshot,*tools,path,*token,report,overwrite);
         }));
     }
     bool Window::runSmokeWorkflow(const QString&directory) {
@@ -1587,9 +1254,9 @@ namespace chosuta {
             std::atomic_bool token=false;
             ExportResult result;
             result.success=true;
-            if(QFileInfo(p.output.ffmpeg).isFile()&&QFileInfo(p.output.ffmpeg).isExecutable())result=exportVideo(project,QDir(directory).filePath("smoke.mp4"),token);
+            if(QFileInfo(p.output.ffmpeg).isFile()&&QFileInfo(p.output.ffmpeg).isExecutable())result=exportVideo(project,selectMediaTools(project.output.ffmpeg,ToolSelection::Explicit),QDir(directory).filePath("smoke.mp4"),token);
             if(!result.success) {
-                qWarning()<<result.error;
+                qWarning()<<result.error.text();
                 return false;
             }
             for(const auto&locale:QStringList {

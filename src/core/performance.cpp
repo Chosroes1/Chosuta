@@ -22,9 +22,9 @@ std::optional<QPair<QString,QString>> parseTonality(QString text){
 QString performanceBasisHash(const Project &p,const std::atomic_bool *cancel){
     QCryptographicHash h(QCryptographicHash::Sha256);
     auto add=[&](const QByteArray &b){h.addData(QByteArray::number(b.size())+':');h.addData(b);};
-    add("performance-v2.0");add(QByteArray::number(p.rules.harmonyTakeover));add(p.score.hash.toUtf8());auto appearance=appearanceJson(p.appearance);appearance.remove("enabled");add(QJsonDocument(appearance).toJson(QJsonDocument::Compact));
+    add("performance-v2.0");add(QByteArray::number(p.rules.harmonyTakeover));add(p.score.hash.toUtf8());auto appearance=analysisSettingsJson(p.performance.analysis);add(QJsonDocument(appearance).toJson(QJsonDocument::Compact));
     auto settings=performanceSettingsJson(p.performance.settings);settings.remove(p.performance.settings.timeBasis==PerformanceTimeBasis::Music?"seconds":"music");
-    const bool degrees=p.appearance.intervalUnit=="diatonic";for(const auto &prefix:{"leap","progression","near","contrast"})settings.remove(QString(prefix)+(degrees?"Semitones":"Degrees"));
+    const bool degrees=p.performance.analysis.intervalUnit=="diatonic";for(const auto &prefix:{"leap","progression","near","contrast"})settings.remove(QString(prefix)+(degrees?"Semitones":"Degrees"));
     auto rules=settings["rules"].toArray();for(int i=0;i<rules.size();++i){auto rule=rules[i].toObject();auto condition=rule["condition"].toString();bool seconds=p.performance.settings.timeBasis==PerformanceTimeBasis::Seconds;
         rule.remove(seconds?"minBeats":"minSeconds");if(condition=="long"){rule.remove(seconds?"threshold":"thresholdSeconds");rule.remove("thresholdDegrees");}else{rule.remove("thresholdSeconds");if(QStringList{"leap","up","down"}.contains(condition))rule.remove(degrees?"threshold":"thresholdDegrees");else rule.remove("thresholdDegrees");}rules[i]=rule;}settings["rules"]=rules;
     add(QJsonDocument(settings).toJson(QJsonDocument::Compact));
@@ -37,20 +37,16 @@ QString performanceBasisHash(const Project &p,const std::atomic_bool *cancel){
 }
 bool performanceCurrent(const Project &p){return !p.performance.basisHash.isEmpty()&&p.performance.basisHash==performanceBasisHash(p);}
 static QString groupFor(const Project &p,const QString &target){return target.startsWith("group:")?target.mid(6):p.performance.roles.value(target,"base");}
-PerformanceResolver::PerformanceResolver(const Project &p,bool buildPlan):project(p){
-    for(const auto &track:project.score.tracks)for(const auto &n:track.notes){notes[n.id]=&n;sourceTracks[n.id]=track.id;tracks[track.id].append(&n);}
-    for(auto &list:tracks)std::sort(list.begin(),list.end(),[](auto a,auto b){return a->onset<b->onset;});
-    for(const auto &e:resolveEvents(project.effective())){
-        auto it=effectiveTimes.find(e.source);
-        if(it==effectiveTimes.end())effectiveTimes[e.source]={e.start,e.end};
-        else {it->first=std::min(it->first,e.start);it->second=std::max(it->second,e.end);}
-    }
+PerformanceResolver::PerformanceResolver(const Project &p,bool buildPlan):project(p),sourceTimes(project){
+    for(const auto &track:project.score.tracks)for(const auto &n:track.notes){notes[n.id]=&n;sourceTracks[n.id]=track.id;}
+    for(const auto &slice:routeSources(project))routes[slice.track].append(slice);
+    diagnostics=sourceTimes.diagnostics;
     if(!buildPlan)return;
-    struct Candidate {PerformanceSlice slice;int priority;};
+    struct Candidate {PerformanceSlice slice;};
     QVector<Candidate> candidates;
-    auto append=[&](const PerformanceSegment &s,bool manual,int priority){
+    auto append=[&](const PerformanceSegment &s,bool manual){
         const auto v=interval(s);
-        if(v.orphan){diagnostics<<"Performance source missing; retained interval: "+s.id; if(!manual)return;}
+        if(v.orphan){diagnostics<<Message::format("Performance source missing; retained interval: %1",{s.id}); if(!manual)return;}
         QVector<double> boundaries={s.phaseStart};
         for(double cut:s.cuts)if(cut>s.phaseStart&&cut<s.phaseEnd)boundaries.append(cut);
         boundaries.append(s.phaseEnd);
@@ -64,14 +60,13 @@ PerformanceResolver::PerformanceResolver(const Project &p,bool buildPlan):projec
         for(int i=0;i+1<boundaries.size();++i){
             const double phase=(boundaries[i]+boundaries[i+1])/2;
             const int slot=int(std::upper_bound(s.cuts.cbegin(),s.cuts.cend(),phase)-s.cuts.cbegin());
-            PerformanceSlice x{time(boundaries[i],false),time(boundaries[i+1],true),groupFor(p,s.targets[slot]),s.id,s.reason,manual,s.protect,v.orphan};
-            if(x.end>x.start)candidates.append({x,priority});
+            PerformanceSlice x{time(boundaries[i],false),time(boundaries[i+1],true),groupFor(p,s.targets[slot]),s.id,s.reasons,manual,s.protect,v.orphan};
+            if(x.end>x.start)candidates.append({x});
         }
     };
-    int priority=0;
-    for(const auto &s:p.performance.generated)append(s,false,priority++);
+    for(const auto &s:p.performance.generated)append(s,false);
     // Manual entries win even when unprotected; unprotecting permits the next generation to replace them.
-    for(const auto &s:p.performance.manual)append(s,true,priority++);
+    for(const auto &s:p.performance.manual)append(s,true);
     struct Edge {double time;int index;bool start;};QVector<Edge> edges;
     for(int i=0;i<candidates.size();++i){edges.append({candidates[i].slice.start,i,true});edges.append({candidates[i].slice.end,i,false});}
     std::sort(edges.begin(),edges.end(),[](const Edge &a,const Edge &b){return a.time==b.time?a.start<b.start:a.time<b.time;});
@@ -85,21 +80,16 @@ PerformanceResolver::PerformanceResolver(const Project &p,bool buildPlan):projec
 }
 double PerformanceResolver::mappedBlick(qint64 tick,const QString &track,bool end)const{
     const double raw=project.score.time.seconds(tick);
-    auto map=[&](const QVector<const Note *> &list)->std::optional<double>{
-        auto it=std::upper_bound(list.cbegin(),list.cend(),tick,[](qint64 t,const Note *n){return t<n->onset;});
-        // At shared boundaries the ending interval belongs to the previous note.
-        if(end&&it!=list.cbegin()&&(*(it-1))->onset==tick)--it;
-        if(it==list.cbegin())return std::nullopt;
-        const Note &n=**(--it);
-        if(tick<n.onset||tick>n.onset+n.duration||!effectiveTimes.contains(n.id))return std::nullopt;
-        const auto v=effectiveTimes.value(n.id);const double a=project.score.time.seconds(n.onset),b=project.score.time.seconds(n.onset+n.duration);
-        return v.first+(raw-a)/(b-a)*(v.second-v.first);
-    };
-    if(!track.isEmpty()){auto t=map(tracks.value(track));if(t)return *t+project.output.syncOffset;}
+    const auto found=routes.constFind(track);
+    if(found!=routes.cend()){
+        const auto &list=*found;auto it=std::upper_bound(list.cbegin(),list.cend(),tick,[](qint64 t,const SourceSlice &s){return t<s.start;});
+        if(end&&it!=list.cbegin()&&(it-1)->start==tick)--it;
+        if(it!=list.cbegin()){--it;if(tick>=it->start&&tick<=it->end){const auto time=sourceTimes.forward(it->source,raw,end);if(time)return *time+project.output.syncOffset;}}
+    }
     return raw+project.output.syncOffset;
 }
 SubtitleInterval PerformanceResolver::interval(const PerformanceSegment &s)const{
-    const bool orphan=(!s.firstSource.isEmpty()&&(!notes.contains(s.firstSource)||!effectiveTimes.contains(s.firstSource)))||(!s.lastSource.isEmpty()&&(!notes.contains(s.lastSource)||!effectiveTimes.contains(s.lastSource)));
+    const bool orphan=sourceTimes.ambiguous(s.firstSource,project.score.time.seconds(s.startBlick))||sourceTimes.ambiguous(s.lastSource,project.score.time.seconds(s.endBlick),true)||(!s.firstSource.isEmpty()&&(!notes.contains(s.firstSource)||!sourceTimes.contains(s.firstSource)))||(!s.lastSource.isEmpty()&&(!notes.contains(s.lastSource)||!sourceTimes.contains(s.lastSource)));
     if(s.anchor=="seconds"||orphan)return {s.start,s.end,orphan};
     double a=mappedBlick(s.startBlick,sourceTracks.value(s.firstSource,s.track)),b=mappedBlick(s.endBlick,sourceTracks.value(s.lastSource,s.track),true);
     return b>a?SubtitleInterval{a,b,false}:SubtitleInterval{s.start,s.end,true};
@@ -118,20 +108,17 @@ void setPerformanceTime(const Project &p,PerformanceSegment &s,double a,double b
     // Select actual routed sources; map corrected boundaries back to the original score.
     const auto events=resolveEvents(p.effective());QHash<QString,const Note *> notes;
     for(const auto &t:p.score.tracks)for(const auto &n:t.notes)notes[n.id]=&n;
-    QHash<QString,QPair<double,double>> times;
-    for(const auto &e:events){if(!times.contains(e.source))times[e.source]={e.start,e.end};else{times[e.source].first=std::min(times[e.source].first,e.start);times[e.source].second=std::max(times[e.source].second,e.end);}}
+    SourceTimeMap mapping(p);
     for(const auto &e:events)if(e.end+p.output.syncOffset>a&&e.start+p.output.syncOffset<b&&notes.contains(e.source)){
         if(s.firstSource.isEmpty()){s.firstSource=e.source;s.track=e.track;}
         s.lastSource=e.source;
     }
-    auto inverse=[&](const QString &id,double time,qint64 fallback){
-        if(!notes.contains(id)||!times.contains(id))return fallback;
-        const auto v=times.value(id);const double t=time-p.output.syncOffset;
-        if(t<v.first||t>v.second||v.second<=v.first)return fallback;
-        const auto n=notes[id];const double x=p.score.time.seconds(n->onset),y=p.score.time.seconds(n->onset+n->duration);
-        return p.score.time.blicks(x+(t-v.first)/(v.second-v.first)*(y-x));
+    auto inverse=[&](const QString &id,double time,bool end)->std::optional<qint64>{
+        auto raw=mapping.inverse(id,time-p.output.syncOffset,end);return raw?std::optional<qint64>(p.score.time.blicks(*raw)):std::nullopt;
     };
-    if(beats){s.startBlick=inverse(s.firstSource,a,s.startBlick);s.endBlick=inverse(s.lastSource,b,s.endBlick);}
+    if(beats){const auto x=inverse(s.firstSource,a,false),y=inverse(s.lastSource,b,true);
+        if(x&&y){s.startBlick=*x;s.endBlick=*y;}else s.anchor="seconds";
+    }
 }
 static PerformanceSegment crop(const Project &p,const PerformanceResolver &resolver,const PerformanceSegment &s,double a,double b){
     auto result=s;const auto v=resolver.interval(s);
@@ -173,7 +160,7 @@ void applyPerformanceDraft(Project &p,const PerformanceDraft &draft,double a,dou
         p.performance.generated=subtract(p,resolver,p.performance.generated,a,b,true);
         for(const auto &s:draft.segments){const auto v=resolver.interval(s);if(v.end>a&&v.start<b)p.performance.generated.append(crop(p,resolver,s,std::max(a,v.start),std::min(b,v.end)));}
         // A local regeneration must not falsely mark untouched old regions current.
-        if(p.performance.basisHash==draft.basisHash)p.performance.basisHash=draft.basisHash;
+
     }
     p.performance.manual=subtract(p,resolver,p.performance.manual,a,b,restore);
     validatePerformance(p);
@@ -192,6 +179,13 @@ void removeVariantGroup(Project &p,const QString &id,const QString &replacement)
     for(auto &value:p.performance.roles)if(value==id)value=replacement;
     for(auto *list:{&p.performance.generated,&p.performance.manual})for(auto &s:*list)for(auto &v:s.targets)if(v=="group:"+id)v="group:"+replacement;
     for(auto &rule:p.performance.settings.rules)if(rule.target=="group:"+id)rule.target="group:"+replacement;
-    for(auto it=p.assets.begin();it!=p.assets.end();)if(it.key().startsWith(id+"/"))it=p.assets.erase(it);else ++it;
+    QMap<QString,QString> members;
+    for(const auto &slot:mouthStates())members[variantAssetId(id,slot)]=variantAssetId(replacement,slot);
+    auto remap=[&](QString &reference){auto it=members.constFind(reference);if(it!=members.cend())reference=*it;};
+    remap(p.fallback);for(auto &policy:p.rules.special)remap(policy.shape);
+    for(auto &e:p.generated)remap(e.shape);
+    for(auto &o:p.overrides)remap(o.event.shape);
+    // Arbitrary custom IDs (including slash-containing IDs) are not group slots.
+    for(auto it=members.cbegin();it!=members.cend();++it)p.assets.remove(it.key());
 }
 }

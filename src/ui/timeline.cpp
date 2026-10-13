@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "timeline.h"
+#include "text.h"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -36,12 +37,12 @@ namespace chosuta {
         setObjectName("timeline");
         setFocusPolicy(Qt::ClickFocus);
     }
-    void Timeline::setProject(const Project&p) {
+    void Timeline::setProject(const Project&p,std::shared_ptr<const Evaluation> view) {
         cancelLaneResize();
-        project=p;appearance=std::make_unique<AppearanceResolver>(p);performance=std::make_unique<PerformanceResolver>(p);performanceDrag=false;performanceMarks.clear();QSet<QString> marks;for(const auto &m:p.performance.suggestions)marks.insert(m.source);for(const auto &track:p.score.tracks)for(const auto &note:track.notes)if(marks.contains(note.id))performanceMarks.append(performance->mappedBlick(note.onset,track.id));
+        evaluation=view?std::move(view):std::make_shared<Evaluation>(p);project=p;appearance=std::make_unique<AppearanceResolver>(evaluation->appearance);performance=evaluation->performance;performanceDrag=false;performanceMarks.clear();QSet<QString> marks;for(const auto &m:p.performance.suggestions)marks.insert(m.source);for(const auto &track:p.score.tracks)for(const auto &note:track.notes)if(marks.contains(note.id))performanceMarks.append(performance->mappedBlick(note.onset,track.id));
         beforeSubtitle.reset();dragging.clear();rulerDragging=false;
         for(auto it=laneHeights.begin();it!=laneHeights.end();) {bool found=false;for(const auto&t:p.subtitles)if(t.id==it.key())found=true;if(!found)it=laneHeights.erase(it);else ++it;}
-        events=p.effective();
+        events=evaluation->events;
         syllableEdges.clear();
         for(const auto &track:p.score.tracks)if(p.selected.contains(track.id))for(const auto &span:lyricSpans(p,track.id)){
             for(double t:{performance->mappedBlick(span.start,track.id),performance->mappedBlick(span.end,track.id,true)})if(t>=0&&t<=21600)syllableEdges.append(t);
@@ -49,7 +50,7 @@ namespace chosuta {
         std::sort(syllableEdges.begin(),syllableEdges.end());syllableEdges.erase(std::unique(syllableEdges.begin(),syllableEdges.end()),syllableEdges.end());
 
         lyrics.clear();intervals.clear();availableSources.clear();
-        if(p.subtitlesEnabled){availableSources=subtitleSources(p);for(const auto&t:p.subtitles){if(t.alignLyrics&&!lyrics.contains(t.sourceTrack))lyrics[t.sourceTrack]=lyricSpans(p,t.sourceTrack);for(const auto&c:t.cues)intervals[c.id]=subtitleInterval(p,c,&availableSources);}}
+        if(p.subtitlesEnabled){availableSources=subtitleSources(p);for(const auto&t:p.subtitles){if(t.alignLyrics&&!lyrics.contains(t.sourceTrack))lyrics[t.sourceTrack]=lyricSpans(p,t.sourceTrack);for(const auto&c:t.cues)intervals[c.id]=evaluation->subtitles.value(c.id);}}
         bool found=false;for(const auto&t:p.subtitles)if(t.id==editingTrack)for(const auto&c:t.cues)if(c.id==editingCue){found=true;if(editor&&editor->toPlainText()!=c.text){QSignalBlocker blocker(editor);editor->setPlainText(c.text);}}
         if(!p.subtitlesEnabled||!found)finishSubtitleEditing(false);
         updateExtent();positionEditor();
@@ -180,7 +181,7 @@ namespace chosuta {
         return beats?project.score.time.seconds(qRound64((x-20)/scale*Blick))+project.output.syncOffset:(x-20)/scale;
     }
     void Timeline::updateExtent() {
-        double end=std::max(project.duration(),cursor);
+        double end=std::max(evaluation?evaluation->duration:.1,cursor);
         for(const auto&e:events)end=std::max(end,e.end+project.output.syncOffset);
         if(!project.audioPath.isEmpty())end=std::max(end,(waveform?waveform->duration():project.audioDuration)+project.output.audioOffset);
         if(project.subtitlesEnabled)for(auto v:intervals)end=std::max(end,v.end);
@@ -375,7 +376,7 @@ namespace chosuta {
                 const auto&v=events[i];
                 const auto selected=appearance->event(project,v);
                 auto text=QString("%1\n%2 – %3 s\n%4\n%5\n%6\n%7").arg(v.text).arg(v.start,0,'f',3).arg(v.end,0,'f',3).arg(v.provenance,v.source,project.appearance.enabled?selected.id:v.shape,v.phone);
-                if(project.appearance.enabled&&!selected.context.intervalReason.isEmpty())text+="\n"+selected.context.intervalReason;
+                if(project.appearance.enabled&&!selected.context.intervalReasons.isEmpty())text+="\n"+messagesText(widgetLanguage(),selected.context.intervalReasons);
                 QToolTip::showText(e->globalPosition().toPoint(),text,this);
             }
             return;
@@ -398,7 +399,7 @@ namespace chosuta {
         if(e->button()==Qt::LeftButton&&resizeRow!=-1){auto id=resizeRow==-2?QString{}:resizeRow==-3?QString("@waveform"):resizeRow==-4?QString("@performance"):project.subtitles[resizeRow].id;int h=resizeRow==-2?mouthHeight:resizeRow==-3?waveformHeight:resizeRow==-4?performanceHeight:subtitleHeight(resizeRow);resizeRow=-1;unsetCursor();emit laneHeightChanged(id,h);return;}
         if(e->button()==Qt::LeftButton&&performanceDrag){performanceDrag=false;if(performanceManual&&(performanceStart!=performanceOldStart||performanceEnd!=performanceOldEnd))emit performanceEdited(performanceId,performanceStart,performanceEnd);update();return;}
         if(e->button()==Qt::LeftButton&&beforeSubtitle){SubtitleCue original=*beforeSubtitle;beforeSubtitle.reset();
-            for(auto&t:project.subtitles)if(t.id==subtitleTrack)for(auto&c:t.cues)if(c.id==subtitleCue){if(c!=original){try{Project check=project;check.subtitles={t};validateSubtitles(check,true);emit subtitleEdited(t.id,c);}catch(const std::exception&ex){c=original;intervals[c.id]=subtitleInterval(project,c,&availableSources);emit editRejected(QString::fromUtf8(ex.what()));update();}}return;}
+            for(auto&t:project.subtitles)if(t.id==subtitleTrack)for(auto&c:t.cues)if(c.id==subtitleCue){if(c!=original){try{Project check=project;check.subtitles={t};validateSubtitles(check,true);emit subtitleEdited(t.id,c);}catch(const std::exception&ex){c=original;intervals[c.id]=subtitleInterval(project,c,&availableSources);emit editRejected(exceptionMessage(ex));update();}}return;}
         }
         if(e->button()!=Qt::LeftButton||dragging.isEmpty())return;
         QVector<Event>changed;

@@ -1,8 +1,8 @@
 # 构建、验证与本地打包
 
-## Linux
+当前根源码为 0.9.2/schema14。C++20、CMake ≥3.24、Qt ≥6.4、ICU ≥67；使用已经安装且状态一致的开发环境，不自动下载依赖。Linux 构建结果不能代替 Windows 原生验证。
 
-使用已经安装且状态一致的 C++20 / Qt 6 / ICU 开发环境。CMake 最低 3.24，Qt 最低 6.4，ICU 最低 67。默认动态链接，未使用 FetchContent 或自动包下载。
+## Linux
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
@@ -11,100 +11,48 @@ ctest --test-dir build --output-on-failure
 ./build/chosuta
 ```
 
-核心库依赖 Qt Core/Gui 和 ICU i18n/uc/data；GUI 另依赖 Widgets/Concurrent/Multimedia，Qt Network 为传递依赖；测试需要 Qt Test。关闭测试可用 `-DBUILD_TESTING=OFF`，产品运行不依赖 Qt Test 或 Python。
+核心依赖 Qt Core/Gui、ICU i18n/uc/data；GUI 另依赖 Widgets/Concurrent/Multimedia，Qt Network 为传递依赖。测试用 Qt Test；`-DBUILD_TESTING=OFF` 可关闭。标准 Qt 控件的中日译文由应用源码编译，不需部署 qm 文件；OS 原生对话框语言仍由系统影响。Python 仅用于开发打包及 Linux 打包预检测试，不是产品运行依赖。
 
-视频导出需系统 FFmpeg 或导出设置中指定的 FFmpeg 路径；附加音频时长探测及测试使用 ffprobe；优先查找所选 FFmpeg 同目录，之后查应用的 tools/ffmpeg、应用目录及 PATH。缺少 ffprobe 时音频仍可附加，时长需手动设置。MP4 需要 libx264，WebM 需要 libvpx-vp9；配音分别需要 AAC/libopus；透明 MOV 需要 qtrle。缺少编码器只禁用对应导出，不影响编辑。0.5.0 的可选波形同样复用 FFmpeg 解码；缺少 FFmpeg 时波形不可用，工程生成/编辑/保存仍可用。没有新增模型或运行依赖。生产 Qt 音频后端仅在试听时初始化；无音频启动不接触声卡。
+媒体执行使用一次选定的 FFmpeg/ffprobe 上下文。工程携带显式工具路径时须在本机采纳；CLI 可用 `--ffmpeg <路径>` 明确选定本次程序。自动标记沿用本机默认、tools/ffmpeg、应用目录、PATH 顺序；ffprobe 优先在所选 FFmpeg 旁边。缺工具仍可编辑保存。MP4 使用 libx264/AAC，WebM 使用 libvpx-vp9/libopus，透明 MOV 使用 qtrle；波形解码复用 FFmpeg，无模型。Qt 试听后端在播放音频时才初始化。
 
-没有桌面时：
+## 当前回归入口
+
+CTest 的 `core`、`ui-workflow`、`gui-smoke` 使用离屏平台；Linux 上找到 Python 时另启用 `packaging-preflight`。缺 FFmpeg 的媒体测试明确跳过。私有样本未提供时私有检查跳过，不复制用户材料到公开测试。
+
+- 当前 Linux Debug/Release 各 CTest 4/4，核心 52、UI 32 无失败/跳过；离屏结果不代表真实桌面或 Windows 验收。
+- 新增 `structuredMessagesAndReasons`、`localizedControlsAndErrors`、`localizedIdsAndUndo`、`localizedPerformanceReasons`、`unknownCopyAndImport`；涵盖三语实际控件、保存点/撤销、结构化理由、错误原文、素材回退与保存重开。
+- 核心覆盖 SVP 引用/整数时间、词典/辅音、人工层、schema14 严格往返、共享来源路由/分段正逆映射（拆分、移动、缩放、同源合并与保存重开）、演出模板/保护/相位、字幕、素材回退、校正与短片编码解码。
+- `strictProjectContract`、`mediaToolTrust`、`routedSourceTime`、`groupReferencesAndImportTransactions`、`exportPreflight` 对应此次读写、工具、裁切、素材事务与音频复核回归。
+- UI 覆盖原生字幕输入/焦点、撤销、播放/停止、标尺/行高、草稿、设置及导入。新增 `projectToolDoesNotExecuteOnOpen`、`damagedPreferences`、`ruleTransactionAndStablePlayback`、`draftCloseKeepsReview`、`compactWorkspace`。
+- 打包预检使用临时目录和合成工具，验证已有交付零写入、失败只清任务暂存目录、成功完整提交暂存产物，不以真实旧 Release 做实验。
 
 ```sh
 QT_QPA_PLATFORM=offscreen ./build/chosuta --smoke-test
+QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/chosuta-ui-tests compactWorkspace waveformWorkflow timelineHeightsAndEditorGeometry subtitleFocusCommandsAndRuler performanceV2Controls
+CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen ./build/chosuta-ui-tests performanceWorkflow performanceTemplateEditing
 ```
 
-工作区 0.6.4 的 ui-workflow 还覆盖默认隐藏的多字幕轴、对齐、布局手柄、撤销、导出尾部选择及保存重开，core 覆盖 schema 9 当前格式读写/旧格式明确拒绝、字幕时间/来源/文字合成与短片解码，以及有界前导/尾辅音预算和自定义规则/锁定覆盖保护。ui-workflow 新增焦点与删除键、原生块内光标/输入法事件、独立标尺/留白不定位/贯穿红线、行高与区域分隔调整、多轴滚动及保存点撤销。该入口自动使用原创夹具验证替换/撤销/保存重开/重生成/导出/三语切换，若 FFmpeg 不在 PATH 中则跳过导出部分。CTest 的 `core`、`ui-workflow` 与 `gui-smoke` 都指定离屏平台；core 的 FFmpeg 集成测试在工具缺失时明确跳过。离屏结果不是实际桌面/高 DPI/声卡验收。
+`CHOSUTA_COMPACT_ARTIFACTS=<本机目录>` 可保存三语 1024×768、1366×768 截图；`CHOSUTA_ADVANCED_ARTIFACTS`、`CHOSUTA_WAVEFORM_ARTIFACTS`、`CHOSUTA_SUBTITLE_ARTIFACTS` 用于对应原创测试产物。这些可选证据不进入公开源码包。离屏/合成色图不等于真实桌面、输入法、声卡、完整立绘效果或 Windows 验收。
 
-## Windows（完整构建/部署入口，原生执行待验证）
+## Windows
 
-具体依赖、MSVC/MinGW 命令、默认可运行目录和验证日志见 [Windows 编译、部署与验证](windows.zh-CN.md)。已有匹配的 x64 开发环境时：
+依赖、MSVC/MinGW、Qt/ICU 部署和双版本媒体工具布局见 [Windows 编译、部署与验证](windows.zh-CN.md)。已有匹配的 x64 环境时：
 
 ```powershell
 .\scripts\build-windows.ps1 -QtPrefix '<Qt x64 SDK 前缀>' -IcuPrefix '<ICU x64 SDK 前缀>'
-.\out\windows\Chosuta\bin\chosuta.exe
+.\out\windows\Chosuta\chosuta.exe
 ```
 
-脚本不再只暂存 EXE：执行 CTest 后部署 Qt/平台/媒体插件、ICU 和离屏插件，并在清除 SDK PATH 的环境中测试 CLI、离屏 GUI、qwindows GUI 启动，成功后输出实际运行依赖清单。脚本不会安装 VC++ 运行库或其他工具；MSVC 目标需要已有官方 x64 Redistributable。当前 Linux 环境不能提供 Windows 原生通过证据。
+脚本部署 Qt/媒体/平台插件、ICU；清理 SDK PATH 后验证 CLI、离屏与 qwindows 启动。`-BothVariants -CreateZip` 可从同次编译部署附带工具及 no-ffmpeg 两版；外部媒体 DLL 与 Qt 媒体依赖隔离。不会下载工具或安装 VC++ 运行库；Windows/PowerShell 原生结果仍需在目标环境记录。
 
 ## 本机开发包
 
 ```sh
-bash scripts/package-linux.sh
+bash scripts/package-linux.sh build-release out/linux-new
 ```
 
-脚本在 `build-release/` 构建、测试并用 CPack 输出 `out/linux/Chosuta-<当前代码版本>-Linux.zip`；相邻 `Chosuta-<当前代码版本>-source.zip` 是 Chosuta 对应源码，`runtime-dependencies.txt` 为本机直接动态库记录。源码归档使用明确白名单，排除用户原始材料、调研样本、build/out、Git/凭据目录；Python 只用于此开发辅助。旧版 0.2.1 交付包保留，不覆盖。
+输出目录必须尚不存在；在任何构建或打包写入之前检查。所有打包步骤先写本次独有暂存目录，成功后以不覆盖方式移至目标；过程中出现的目标也保留原样。包含 Linux ZIP、对应白名单源码 ZIP、runtime-dependencies.txt。失败/取消只清理本次暂存目录，旧包不覆盖。
 
-发行版安装包、AUR 配方和目标环境要求见 [Linux 发行版打包](packaging.zh-CN.md)。Linux 安装增加标准桌面菜单项和原创 SVG 图标；Windows 安装布局仍为 bin 与 share。
+发行版安装包见 [Linux 发行版打包](packaging.zh-CN.md)。应用包动态链接本机 Qt/ICU/系统库，不是跨发行版自包含包；应在目标发行版重编。也可用 `cmake --install build --prefix '<自己拥有的目录>'` 安装到本机目录，不需管理员权限。缺依赖按项目授权处理；Arch 不以局部升级或归档旧包拼接环境。
 
-这些包只包含应用自身，不捆绑 Qt、ICU、FFmpeg 或系统库，必须使用匹配的系统环境。Arch 上构建成功不意味着兼容所有 Linux 发行版。未创建便携 AppImage、远端 CI 或公开发布；不把本地包当作依赖许可审查完整的最终分发包。对应源码 ZIP 若已经存在，脚本拒绝覆盖，需使用新输出目录。
-
-`cmake --install build --prefix '<自己拥有的目录>'` 也可只安装应用与说明。不要为本地验证使用管理员目录。缺少依赖需按项目授权规则处理；Arch 软件库过期时不能通过局部升级或旧包拼接解决。
-
-## 0.5.0 波形回归
-
-`core` 增加原创 PCM/WAV 的流式解码、峰值摘要、工程偏移/时长上限、比例/身份不变、重复不累加、歧义/连续音回退、人工保护、schema 5 保存/非法参数、失效/取消/缺工具与 Scene 帧求值。`ui-workflow` 增加导入不校正、主动执行/回退/撤销/重开、准备取消/重读、波形行高/偏好、共享标尺/秒拍/字幕编辑器几何。两倍离屏可运行 `waveformWorkflow timelineHeightsAndEditorGeometry subtitleFocusCommandsAndRuler`；这些仍不代表真实声卡/输入法/Windows 验收。
-
-CLI 保留独立 `correct/revert` 入口，参数与操作见 [user-guide](user-guide.zh-CN.md)。波形摘要为 10 ms 的最小/最大振幅及 RMS 加逐级峰值层，不保存整首 PCM 或谱图；最多解码六小时。当前会话内复用一个共享摘要，重新打开音频需重建，不增加模型/磁盘摘要缓存或隐式下载。
-
-## 0.5.0 GUI 复验修复
-
-本轮修改仅涉及时间轴布局与偏好默认值，使用 `cmake --build build --parallel 4`、`ctest --test-dir build -R '^(ui-workflow|gui-smoke)$' --output-on-failure --verbose` 验证。`waveformWorkflow` 增加最小显示区域内点击波形/字幕/发音后首字幕行仍可见、最小高度不变与工程字幕不变；`timelineHeightsAndEditorGeometry` 检查默认发音高度 96、收紧留白处的绘制/命中及恢复/保存。旧测试的字幕点击改为实际行几何，避免把历史行高常数当行为契约。两倍离屏相关回归使用 `QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/chosuta-ui-tests waveformWorkflow timelineHeightsAndEditorGeometry subtitleFocusCommandsAndRuler subtitlesAndCanvasDrag`。本轮证据另存 `out/timeline-layout-validation`；历史核心/视频证据仍在 `out/waveform-validation`，不因 GUI 留白修订重复编码，也不重打包。
-
-
-## 高级差分回归（0.6.4）
-
-新增 core 的 configurableConsonants、advancedClassificationAndSwitches、advancedSpecialsRenderingAndExport、advancedPersistenceImportAndCache，验证三语所有入口的辅音覆盖/音素来源、8 个维度开关组合、首音/同音/幅度边界/复合拍/变速/实例与重叠、上行促音/闭口/呼吸/休息、缺图/坏图回退与导出拒绝、锁定保护、schema 9 保存重开/旧格式拒绝、文件夹大小写/冲突/取消、按需与共用图片缓存、布局拖动不重解码，以及原创 100 fps 短片逐帧解码对比。
-
-UI 增加 advancedMouthWorkflow、consonantRuleWorkflow、mouthFolderImportWorkflow，使用实际 Qt 鼠标/键盘与模态窗口验证固定五/三槽、选择与禁用/恢复、逐个/文件夹草稿/取消/应用/撤销、收起的辅音编辑/恢复/生成/锁定/校正回退，以及开关外观保留已采用的波形校正。设置窗口打开时推迟排队的波形准备，退出后恢复，防止后台忙状态吞掉草稿提交。
-
-```sh
-CHOSUTA_ADVANCED_ARTIFACTS="$PWD/out/advanced-mouth-validation/core-ui" ctest --test-dir build --output-on-failure --verbose
-QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/chosuta-ui-tests advancedMouthWorkflow consonantRuleWorkflow mouthFolderImportWorkflow
-```
-
-可选 CHOSUTA_ADVANCED_ARTIFACTS 只保存原创 PNG/工程和离屏截图，不纳入公开源码/Release。功能复用 Qt/ICU/FFmpeg，无新运行依赖；QtTest 数量包含初始化/结束。离屏/合成色图验证不等于 Windows、实际桌面输入法/声卡或大量完整立绘性能已通过。
-
-
-0.6.4 的 diatonicClassification 与扩展 UI 流程验证真实度数/七种教会调式、和声/旋律/自定义音阶、音名/异名同音/未知、同音反复方向素材/通用提示（选择栏保持可用）、开关阈值保持、单下划线/固定引用/同槽冲突及 schema9 当前格式及校正保留。
-
-```sh
-QT_QPA_PLATFORM=offscreen ./build/chosuta-tests diatonicClassification advancedClassificationAndSwitches advancedPersistenceImportAndCache
-CHOSUTA_TEST_UI_LANGUAGE=en QT_QPA_PLATFORM=offscreen ./build/chosuta-ui-tests advancedMouthWorkflow
-CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/chosuta-ui-tests advancedMouthWorkflow
-```
-
-0.6.4 只接受单下划线高级命名，schema9 只读写当前格式；旧 schema、旧辅音预设、旧同音槽及缺字段补值已删除。回归还覆盖无旧预设控件、取消/恢复自定义辅音、当前工程保存重开/撤销与波形校正保留。
-
-0.6.4 的特殊图回归新增通用/基础/全局回退、精确图优先、B/P/M上/下行闭口，以及不存在额外许可控件；实际tachie素材短片验证闭口时不空白。schema仍为9。
-
-## 0.8.0 谱面演出v2回归
-
-当前schema11，原有CLI/Widgets构建方式及运行依赖不变。新增核心入口`performance_analysis.*`按原谱路由计算背景与有限动机候选，`performance_rules.cpp`输出确定性的演出区段；渲染不重新分析。`--performance-analysis <file>`可保存本地诊断。
-
-`core`增加音乐时值下的120/220 BPM与移调稳定性、微小起音扰动、短音动机/窄音域反例、持续回落与高位落点、控制音高排除、分句/段落区别、单位配置严格读写及全曲/局部等价检查。`ui-workflow`的`performanceV2Controls`操作主音/调式、时间/距离单位记忆、自定义规则、区域禁用、时间显示与锚定、边界和保存重开。既有人工保护、校正和编码边界检查继续运行。
-
-```sh
-cmake --build build --parallel 4
-ctest --test-dir build --output-on-failure
-CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/chosuta-ui-tests performanceV2Controls performanceWorkflow performanceTemplateEditing
-```
-
-没有新增运行库、模型、词典或下载步骤。Linux离屏与原创结构测试不代替Windows、真实桌面、其他歌曲或主观自然表现验收。
-
-## 0.8.1 操作回归
-
-保持schema11与原依赖。UI新增 `acceptedSettingsAndStableLayout`、`cursorSnapping`、`arbitraryPngDropAndMapping`，验证高级设置一次应用/取消/撤销/人工保护，草稿前后分区尺寸，任意文件名PNG拖放映射、重复目标拒绝及未保存工程确认，拍号/变速下的标尺吸附。`preferencesAndTransport` 已按后续纠正验证空格/画布按钮/菜单的统一播放／停止、返回开关开关两态、播放中seek不改起播点及无重复停止入口；原时间轴行高拖动继续检查。核心 `variantFolderAndCache` 增补任意文件名、坏图、重复路径/槽位和取消。仍使用正常CMake/CTest入口；真实桌面跨应用拖放与Windows另需原生验收。
-
-## 0.8.2 媒体工具与双版本 Windows 部署
-
-`src/core/executable.*` 统一全局配置、工具目录／应用目录／PATH 查找及 ffprobe 同目录定位；显式工程路径优先。`src/render/audio.*` 提供有超时、输出上限和取消的能力检查，GUI 后台调用，CLI `--check-media-tools` 输出 JSON。当前检查覆盖已有 MP4／WebM／QTRLE MOV 与 PCM 波形所需编码器／滤镜，不宣称新增封装或实际剪辑器兼容。
-
-新增 `mediaToolResolution`／`mediaToolSettings` 回归覆盖优先级、Unicode 路径、本机保存／取消、工程覆盖及缺失报告；测试使用隔离 QSettings。Windows 脚本的 `-BothVariants -CreateZip` 从同一次编译分别部署附带工具和 no-ffmpeg 目录，详见 [Windows 构建](windows.zh-CN.md)。Linux 验证不能代替 Windows／PowerShell 原生验证；不会自动下载 BtbN 或其他依赖。
+应用图标已内置于GUI资源，Linux安装到`share/icons/hicolor/512x512/apps/chosuta.png`并关联chosuta桌面项；Windows GUI/CLI安装在部署根目录，图标ICO编译进GUI EXE。PNG/ICO均已提供，构建不新增图像处理工具依赖。

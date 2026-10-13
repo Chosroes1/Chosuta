@@ -3,6 +3,34 @@
 #include <array>
 #include <cmath>
 namespace chosuta {
+void validateAnalysisSettings(const AnalysisSettings &a){
+    if(a.intervalUnit!="semitones"&&a.intervalUnit!="diatonic")throw Failure("Invalid interval unit");
+    validateDegreeSettings(a);
+    if(a.strongBeats.size()>64)throw Failure("Too many accent templates");
+    for(auto it=a.strongBeats.cbegin();it!=a.strongBeats.cend();++it){const auto f=it.key().split('/');bool no=false,de=false;int n=f.value(0).toInt(&no),d=f.value(1).toInt(&de);
+        if(f.size()!=2||!no||!de||n<1||n>64||d<1||d>64||(d&(d-1))||it->isEmpty())throw Failure("Invalid accent template");
+        QSet<int> seen;for(int b:*it){if(b<1||b>n||seen.contains(b))throw Failure("Invalid accent beat");seen.insert(b);}}
+}
+QJsonObject analysisSettingsJson(const AnalysisSettings &a){
+    validateAnalysisSettings(a);QJsonObject spellings,accents;QJsonArray scale;
+    for(auto it=a.noteSpellings.cbegin();it!=a.noteSpellings.cend();++it)spellings[it.key()]=it.value();
+    for(int n:a.customDegreeScale)scale.append(n);
+    for(auto it=a.strongBeats.cbegin();it!=a.strongBeats.cend();++it){QJsonArray v;for(int n:*it)v.append(n);accents[it.key()]=v;}
+    return {{"tonalityEnabled",a.tonalityEnabled},{"intervalUnit",a.intervalUnit},{"degreeTonic",a.degreeTonic},{"degreeMode",a.degreeMode},{"customDegreeScale",scale},{"noteSpellings",spellings},{"strongBeats",accents}};
+}
+AnalysisSettings readAnalysisSettings(const QJsonValue &v){
+    if(!v.isObject())throw Failure("Invalid performance analysis settings");
+    auto o=v.toObject();AnalysisSettings a;
+    for(const auto &k:{"tonalityEnabled"})if(!o[k].isBool())throw Failure("Invalid performance analysis switch");
+    for(const auto &k:{"intervalUnit","degreeTonic","degreeMode"})if(!o[k].isString())throw Failure("Invalid performance analysis text");
+    a.tonalityEnabled=o["tonalityEnabled"].toBool();a.intervalUnit=o["intervalUnit"].toString();a.degreeTonic=o["degreeTonic"].toString();a.degreeMode=o["degreeMode"].toString();
+    if(!o["customDegreeScale"].isArray()||!o["noteSpellings"].isObject()||!o["strongBeats"].isObject())throw Failure("Invalid degree settings");
+    a.customDegreeScale.clear();for(auto value:o["customDegreeScale"].toArray()){if(!value.isDouble()||value.toDouble()!=value.toInt())throw Failure("Invalid scale offset");a.customDegreeScale.append(value.toInt());}
+    const auto names=o["noteSpellings"].toObject();for(auto it=names.cbegin();it!=names.cend();++it){if(!it->isString())throw Failure("Invalid written pitch");a.noteSpellings[it.key()]=it->toString();}
+    const auto accents=o["strongBeats"].toObject();for(auto it=accents.cbegin();it!=accents.cend();++it){if(!it->isArray())throw Failure("Invalid accent list");auto &beats=a.strongBeats[it.key()];for(auto value:it->toArray()){if(!value.isDouble()||value.toDouble()!=value.toInt())throw Failure("Invalid accent beat");beats.append(value.toInt());}}
+    validateAnalysisSettings(a);return a;
+}
+
     static constexpr std::array<int,7> natural={0,2,4,5,7,9,11};
     static const QString letters="CDEFGAB";
     std::optional<WrittenPitch> parseWrittenPitch(QString name){
@@ -28,7 +56,7 @@ namespace chosuta {
         };
         return modes;
     }
-    void validateDegreeSettings(const Project::Appearance &a){
+    void validateDegreeSettings(const AnalysisSettings &a){
         static const QRegularExpression tonicPattern("^[A-G](?:#{1,3}|b{1,3})?$");
         if(!tonicPattern.match(a.degreeTonic).hasMatch()||!parseWrittenPitch(a.degreeTonic+"4"))throw Failure("Invalid tonic spelling");
         if(a.degreeMode!="custom"&&!degreeModes().contains(a.degreeMode))throw Failure("Invalid diatonic mode");
@@ -36,7 +64,7 @@ namespace chosuta {
         for(int i=0;i<7;++i)if(a.customDegreeScale[i]<0||a.customDegreeScale[i]>11||(i&&a.customDegreeScale[i]<=a.customDegreeScale[i-1]))throw Failure("Invalid custom scale offsets");
         for(auto it=a.noteSpellings.cbegin();it!=a.noteSpellings.cend();++it)if(it.key().isEmpty()||!parseWrittenPitch(it.value()))throw Failure("Invalid written note spelling");
     }
-    std::optional<WrittenPitch> writtenPitch(const Project::Appearance &a,const Note &n){
+    std::optional<WrittenPitch> writtenPitch(const AnalysisSettings &a,const Note &n){
         const auto manual=a.noteSpellings.constFind(n.id);
         if(manual!=a.noteSpellings.cend()){
             auto result=parseWrittenPitch(*manual);
@@ -57,10 +85,5 @@ namespace chosuta {
             return WrittenPitch{n.pitch,octave*7+letter,QString(letters[letter])+accidental+QString::number(octave)};
         }
         return std::nullopt;
-    }
-    std::optional<int> intervalDegree(const Project::Appearance &a,const Note &from,const Note &to){
-        const auto first=writtenPitch(a,from),second=writtenPitch(a,to);
-        if(!first||!second)return std::nullopt;
-        return std::abs(second->staffPosition-first->staffPosition)+1;
     }
 }

@@ -4,6 +4,7 @@
 #include "core/executable.h"
 #include <QScopeGuard>
 using namespace chosuta;
+static MediaTools testMediaTools(const QString &path="ffmpeg"){return selectMediaTools(path,ToolSelection::Explicit);}
 #if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
 using DropPoint=QPointF;
 #else
@@ -27,6 +28,117 @@ class UiTest:public QObject {
     private slots:
     void initTestCase(){QVERIFY(settings.isValid());QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());}
     void init(){setDefaultFfmpegExecutable({});Preferences p;const auto language=qEnvironmentVariable("CHOSUTA_TEST_UI_LANGUAGE");if(!language.isEmpty())p.language=language;savePreferences(p);}
+    void localizedControlsAndErrors(){
+        for(const auto &language:QStringList{"zh","en","ja"}){
+            auto prefs=loadPreferences();prefs.language=language;savePreferences(prefs);Window w;w.show();
+            const QString cancel=language=="zh"?"取消":language=="ja"?"キャンセル":"Cancel";
+            QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("preferencesDialog");QVERIFY(d);auto guard=qScopeGuard([d]{d->reject();});auto buttons=d->findChild<QDialogButtonBox *>();QVERIFY(buttons);QCOMPARE(buttons->button(QDialogButtonBox::Cancel)->text().remove('&'),cancel);});
+            w.findChild<QAction *>("preferencesAction")->trigger();
+            QLineEdit edit("text");edit.selectAll();auto menu=std::unique_ptr<QMenu>(edit.createStandardContextMenu());bool copy=false;
+            for(auto action:menu->actions())if(action->text().remove('&').section('\t',0,0)==(language=="zh"?"复制":language=="ja"?"コピー":"Copy"))copy=true;QVERIFY(copy);
+            QTemporaryDir dir;auto p=mouthUiProject();const auto path=dir.filePath("old.chosuta");saveProject(p,path);QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();root["schema"]=13;QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();
+            bool captured=false;QTimer poll;poll.setInterval(10);connect(&poll,&QTimer::timeout,&w,[&]{auto box=w.findChild<QMessageBox *>();if(!box||!box->isVisible())return;poll.stop();captured=true;const auto body=box->text();box->accept();QVERIFY(body.contains(language=="zh"?"不支持此工程格式":language=="ja"?"このプロジェクト形式":"Unsupported project format/schema"));});
+            poll.start();w.openPath(path);QTRY_VERIFY(captured);QVERIFY(w.currentProject().generated.isEmpty());
+            w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(w.currentProject().generated.size(),4);w.findChild<QDoubleSpinBox *>("consonantLimit")->setValue(40);
+            QTimer::singleShot(0,&w,[&]{auto box=w.findChild<QMessageBox *>();QVERIFY(box);const auto text=box->button(QMessageBox::Discard)->text().remove('&');box->button(QMessageBox::Cancel)->click();QCOMPARE(text,QString(language=="zh"?"不保存":language=="ja"?"保存しない":"Discard"));});QVERIFY(!w.close());QCOMPARE(w.currentProject().rules.consonantMaxSeconds,.04);
+        }
+        const auto message=Message::format("Missing audio: %1",{"名前 %2 <A>"}).withDetail("external stderr");
+        QVERIFY(messageText("zh",message,false).contains("名前 %2 <A>"));QVERIFY(!messageText("zh",message,false).contains("external stderr"));QCOMPARE(messageDetails("zh",message),QString("external stderr"));
+        Message unknown("Unrecognized future diagnostic");QCOMPARE(messageDetails("ja",unknown),unknown.text());QVERIFY(messageText("ja",unknown).contains(unknown.key));
+    }
+    void localizedIdsAndUndo(){
+        auto prefs=loadPreferences();prefs.language="zh";savePreferences(prefs);QTemporaryDir dir;auto p=mouthUiProject();const auto path=dir.filePath("language.chosuta");saveProject(p,path);
+        Window w;w.show();w.openPath(path);QTRY_COMPARE(w.currentProject().generated.size(),4);w.findChild<Timeline *>()->selectIds({p.generated[0].id});
+        auto shapes=w.findChild<QComboBox *>("eventShape");QVERIFY(shapes);QCOMPARE(shapes->itemText(shapes->findData("closed")),QString("闭口"));shapes->setCurrentIndex(shapes->findData("closed"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides.first().event.shape,QString("closed"));
+        auto action=[&](QKeySequence::StandardKey key)->QAction *{for(auto a:w.findChildren<QAction *>())if(a->shortcut()==QKeySequence(key))return a;return nullptr;};
+        QVERIFY(action(QKeySequence::Undo));QVERIFY(action(QKeySequence::Undo)->text().contains("应用到所选事件"));
+        QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("preferencesDialog");QVERIFY(d);auto choice=d->findChild<QComboBox *>("uiLanguageChoice");choice->setCurrentIndex(choice->findData("ja"));d->accept();});w.findChild<QAction *>("preferencesAction")->trigger();
+        QVERIFY(w.isWindowModified());QVERIFY(!action(QKeySequence::Undo)->text().contains("应用"));QVERIFY(action(QKeySequence::Undo)->text().contains("選択"));action(QKeySequence::Undo)->trigger();QVERIFY(w.currentProject().overrides.isEmpty());QVERIFY(!w.isWindowModified());action(QKeySequence::Redo)->trigger();QCOMPARE(w.currentProject().overrides.first().event.shape,QString("closed"));
+        w.findChild<Timeline *>()->selectIds({p.generated[0].id});shapes=w.findChild<QComboBox *>("eventShape");QCOMPARE(shapes->itemText(shapes->findData("closed")),QString("閉口"));
+        shapes->setEditText("custom %2 帽子");w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides.first().event.shape,QString("custom %2 帽子"));
+        const auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);QCOMPARE(loadProject(saved).overrides.first().event.shape,QString("custom %2 帽子"));
+    }
+    void localizedPerformanceReasons(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.appearance.enabled=true;applyPerformanceDraft(p,generatePerformance(p));QVERIFY(!p.performance.generated.isEmpty());
+        p.performance.generated[0].reasons={Message("A1: arrival supported by sounding notes"),Message::format("%1 degree %2",{"C %2","3"})};const auto path=dir.filePath("reasons.chosuta");saveProject(p,path);
+        for(const auto &lang:QStringList{"zh","en","ja"}){auto prefs=loadPreferences();prefs.language=lang;savePreferences(prefs);Window w;w.show();w.openPath(path);QTRY_COMPARE(w.currentProject().generated.size(),4);
+            const auto seg=w.currentProject().performance.generated[0];w.findChild<Timeline *>()->performanceSelected(seg.id,seg.start,seg.end);const auto text=w.findChild<QPlainTextEdit *>("performanceReasons")->toPlainText();
+            QVERIFY(text.contains("A1"));QVERIFY(text.contains("C %2"));if(lang!="en")QVERIFY(!text.contains("arrival supported by sounding notes"));QCOMPARE(w.currentProject().performance.generated[0].reasons,p.performance.generated[0].reasons);
+            w.findChild<QPushButton *>("generatePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());const auto differences=w.findChild<QPlainTextEdit *>("performanceReasons")->toPlainText();if(lang!="en"){QVERIFY(!differences.contains("insufficient structural evidence"));QVERIFY(!differences.contains("Limited preceding background"));}w.findChild<QPushButton *>("performanceReview3")->click();QCOMPARE(w.currentProject().performance.generated[0].reasons,p.performance.generated[0].reasons);
+        }
+    }
+    void unknownCopyAndImport(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.performance.groups.append(VariantGroup{"g","Original"});QImage image(16,16,QImage::Format_RGBA8888);image.fill(Qt::red);const auto red=dir.filePath("red.png");QVERIFY(image.save(red));image.fill(Qt::green);const auto green=dir.filePath("green.png");QVERIFY(image.save(green));
+        p.assets["g/unknown"]=red;p.assets["unknown"]=green;const auto path=dir.filePath("copy.chosuta");saveProject(p,path);Window w;w.show();w.openPath(path);QTRY_COMPARE(w.currentProject().generated.size(),4);
+        QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{if(d->isVisible())d->reject();});d->findChild<QListWidget *>("variantGroups")->setCurrentRow(1);
+            QTimer::singleShot(0,d,[d]{auto input=d->findChild<QInputDialog *>();QVERIFY(input);input->setTextValue("Copy");input->accept();});d->findChild<QPushButton *>("copyVariantGroup")->click();d->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});w.findChild<QAction *>("advancedMouthAction")->trigger();
+        QCOMPARE(w.currentProject().performance.groups.size(),3);const auto group=w.currentProject().performance.groups.back().id;QCOMPARE(w.currentProject().assets.value(variantAssetId(group,"unknown")),red);auto copied=w.currentProject();copied.appearance.enabled=true;auto selected=AppearanceResolver(copied).select(copied,"unknown",AppearanceContext{group});QCOMPARE(copied.assets[selected.id],red);
+        QDir folder(dir.filePath("import"));QVERIFY(folder.mkpath("."));const auto imported=folder.filePath("unknown.png");QVERIFY(image.save(imported));
+        QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{if(d->isVisible())d->reject();});d->findChild<QLineEdit *>("mouthImportFolder")->setText(folder.path());d->findChild<QPushButton *>("mouthScanFolder")->click();auto table=d->findChild<QTableWidget *>("mouthImportTable");QTRY_COMPARE(table->rowCount(),1);
+            auto mouth=qobject_cast<QComboBox *>(table->cellWidget(0,2));QCOMPARE(mouth->currentData().toString(),QString("unknown"));auto choice=qobject_cast<QComboBox *>(table->cellWidget(0,1));choice->setCurrentIndex(choice->findData(group));table->item(0,0)->setCheckState(Qt::Checked);d->findChild<QPushButton *>("mouthApplyImport")->click();QCOMPARE(w.currentProject().assets.value(variantAssetId(group,"unknown")),red);d->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});w.findChild<QAction *>("advancedMouthAction")->trigger();
+        QCOMPARE(w.currentProject().assets.value(variantAssetId(group,"unknown")),imported);saveProject(w.currentProject(),path);QCOMPARE(loadProject(path).assets.value(variantAssetId(group,"unknown")),imported);
+        for(auto a:w.findChildren<QAction *>())if(a->shortcut()==QKeySequence(QKeySequence::Undo)){a->trigger();break;}QCOMPARE(w.currentProject().assets.value(variantAssetId(group,"unknown")),red);
+    }
+    void projectToolDoesNotExecuteOnOpen(){
+#ifdef Q_OS_UNIX
+        QTemporaryDir dir;const auto marker=dir.filePath("executed"),tool=dir.filePath("project-tool");
+        QFile script(tool);QVERIFY(script.open(QIODevice::WriteOnly));script.write(("#!/bin/sh\nprintf executed > '"+marker+"'\n").toUtf8());script.close();QVERIFY(script.setPermissions(QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner));
+        auto p=mouthUiProject();p.output.ffmpeg=tool;p.audioPath=dir.filePath("audio.wav");writeWaveformFixture(p.audioPath);const auto file=dir.filePath("untrusted.chosuta");saveProject(p,file);
+        Window w;w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().generated.size(),4);QTest::qWait(80);QVERIFY(!QFileInfo::exists(marker));
+        QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("exportSettingsDialog");QVERIFY(d);auto adopt=d->findChild<QCheckBox *>("adoptProjectMediaTool");QVERIFY(!adopt->isChecked());d->findChild<QPushButton *>("checkMediaTools")->click();QVERIFY(!QFileInfo::exists(marker));d->reject();});w.findChild<QAction *>("exportSettingsAction")->trigger();
+        std::atomic_bool cancel=false;inspectMediaTools(selectMediaTools(tool,ToolSelection::Explicit),cancel);QVERIFY(QFileInfo::exists(marker));QVERIFY(!mediaToolAdopted(tool));
+#else
+        QSKIP("POSIX marker fixture; native Windows execution needs platform test");
+#endif
+    }
+    void damagedPreferences() {
+        QSettings settings(QSettings::IniFormat,QSettings::UserScope,"Chosuta","Chosuta");
+        settings.setValue("performance/v2-defaults",QByteArray("{bad"));settings.setValue("pronunciation/settings",QByteArray("[]"));settings.sync();
+        auto p=loadPreferences();QCOMPARE(p.invalidFields.size(),2);QCOMPARE(p.diagnostics.size(),2);
+        p.language="ja";savePreferences(p);settings.sync();QCOMPARE(settings.value("performance/v2-defaults").toByteArray(),QByteArray("{bad"));
+        Window window;QCOMPARE(window.currentProject().generated.size(),0);
+        p.invalidFields.clear();savePreferences(p);QVERIFY(loadPreferences().invalidFields.isEmpty());
+    }
+    void sourceFragmentUndo() {
+        QTemporaryDir dir;auto p=mouthUiProject();const auto source=p.generated[0].source;p.split(p.generated[0],.25);const auto id=p.effective()[0].id;
+        const auto file=dir.filePath("split.chosuta");saveProject(p,file);Window w;w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().overrides.size(),3);
+        auto timeline=w.findChild<Timeline *>();timeline->selectIds({id});
+        w.findChild<QDoubleSpinBox *>("eventStart")->setValue(.05);w.findChild<QDoubleSpinBox *>("eventEnd")->setValue(.30);w.findChild<QPushButton *>("apply")->click();
+        auto mapped=[&]{return SourceTimeMap(w.currentProject()).forward(source,.125).value_or(-1);};QVERIFY(std::abs(mapped()-.175)<1e-9);
+        auto history=[&](QKeySequence::StandardKey key){for(auto action:w.findChildren<QAction *>())if(action->shortcut()==QKeySequence(key)&&action->isEnabled()){action->trigger();return true;}return false;};
+        QVERIFY(history(QKeySequence::Undo));QVERIFY(std::abs(mapped()-.125)<1e-9);QVERIFY(history(QKeySequence::Redo));QVERIFY(std::abs(mapped()-.175)<1e-9);
+        const auto saved=dir.filePath("moved.chosuta");saveProject(w.currentProject(),saved);QVERIFY(std::abs(SourceTimeMap(loadProject(saved)).forward(source,.125).value()-.175)<1e-9);
+    }
+    void variantUnknownRemovalUndo() {
+        QTemporaryDir dir;auto p=mouthUiProject();p.performance.groups.append(VariantGroup{"g","Group"});
+        const auto image=dir.filePath("unknown.png");QImage png(16,16,QImage::Format_RGBA8888);png.fill(Qt::red);QVERIFY(png.save(image));
+        p.assets["g/unknown"]=image;p.assets["unknown"]=image;p.assets["g/hat"]=image;p.fallback="g/unknown";
+        p.generated[0].shape=p.fallback;p.generated[0].appearanceFixed=true;p.edit(p.generated[0]);
+        const auto file=dir.filePath("group.chosuta");saveProject(p,file);Window w;w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().performance.groups.size(),2);
+        QTimer::singleShot(0,&w,[&]{
+            auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto list=dialog->findChild<QListWidget *>("variantGroups");
+            for(int i=0;i<list->count();++i)if(list->item(i)->data(Qt::UserRole).toString()=="g")list->setCurrentRow(i);
+            QTimer::singleShot(0,dialog,[&w]{auto combo=w.findChild<QComboBox *>("replacementGroup");QVERIFY(combo);combo->setCurrentIndex(combo->findData("base"));auto choice=qobject_cast<QDialog *>(combo->parentWidget());QVERIFY(choice);choice->accept();});
+            dialog->findChild<QPushButton *>("removeVariantGroup")->click();dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();
+        });
+        w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().fallback,QString("unknown"));QCOMPARE(w.currentProject().overrides.first().event.shape,QString("unknown"));QVERIFY(w.currentProject().assets.contains("g/hat"));
+        bool undone=false;for(auto action:w.findChildren<QAction *>())if(action->shortcut()==QKeySequence::Undo&&action->isEnabled()){action->trigger();undone=true;break;}QVERIFY(undone);
+        QCOMPARE(w.currentProject().fallback,QString("g/unknown"));QCOMPARE(w.currentProject().overrides.first().event.shape,QString("g/unknown"));QVERIFY(w.currentProject().assets.contains("g/unknown"));QVERIFY(w.currentProject().assets.contains("g/hat"));QCOMPARE(w.currentProject().performance.groups.size(),2);
+    }
+    void invalidPerformanceDefaults() {
+        QSettings store(QSettings::IniFormat,QSettings::UserScope,"Chosuta","Chosuta");
+        for(const auto &target:QStringList{"group:missing","not-a-role","normal"}){
+            PerformanceSettings settings;PerformanceRule rule;rule.target=target;if(target=="normal")rule.track="old-track";settings.rules={rule};
+            const auto raw=QJsonDocument(performanceSettingsJson(settings)).toJson();store.setValue("performance/v2-defaults",raw);store.sync();
+            auto prefs=loadPreferences();QVERIFY(prefs.invalidFields.contains("performance/v2-defaults"));QVERIFY(!prefs.diagnostics.isEmpty());QCOMPARE(prefs.performanceSettings,PerformanceSettings{});
+            prefs.language="ja";savePreferences(prefs);store.sync();QCOMPARE(store.value("performance/v2-defaults").toByteArray(),raw);
+            auto invalid=prefs;invalid.invalidFields.clear();invalid.performanceSettings=settings;QVERIFY_EXCEPTION_THROWN(savePreferences(invalid),Failure);
+            Window window;window.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(window.currentProject().generated.size(),4);
+            QTemporaryDir dir;const auto file=dir.filePath("new.chosuta");saveProject(window.currentProject(),file);QCOMPARE(loadProject(file).generated.size(),4);
+        }
+        Preferences valid;PerformanceRule rule;rule.target="emphasis";valid.performanceSettings.rules={rule};savePreferences(valid);
+        auto loaded=loadPreferences();QVERIFY(loaded.invalidFields.isEmpty());QCOMPARE(loaded.performanceSettings,valid.performanceSettings);
+    }
     void mediaToolSettings() {
         auto cleanup=qScopeGuard([]{setDefaultFfmpegExecutable({});});
         Window window;window.show();window.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(window.currentProject().generated.size(),4);
@@ -50,12 +162,40 @@ class UiTest:public QObject {
         QCOMPARE(resolveExecutable(second.currentProject().output.ffmpeg),first);
         // Async check tests the entered value without committing it and remains cancellable.
         QTimer::singleShot(0,&window,[&]{
-            auto d=window.findChild<QDialog*>("exportSettingsDialog");QVERIFY(d);
+            auto d=window.findChild<QDialog*>("exportSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{d->reject();});
             auto report=d->findChild<QPlainTextEdit*>("mediaToolsReport");auto check=d->findChild<QPushButton*>("checkMediaTools");
             check->click();QVERIFY(!check->isEnabled());QTRY_VERIFY_WITH_TIMEOUT(check->isEnabled(),5000);
-            QVERIFY(report->toPlainText().contains(other));QVERIFY(report->toPlainText().contains("no version information"));d->reject();
+            QVERIFY(report->toPlainText().contains(other));QVERIFY(report->toPlainText().contains(messageText(widgetLanguage(),Message("FFmpeg: no version information"))));d->reject();
         });window.findChild<QAction*>("exportSettingsAction")->trigger();
         QCOMPARE(defaultFfmpegExecutable(),first);
+    }
+    void compactWorkspace(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.appearance.enabled=true;p.audioPath=dir.filePath("audio.wav");writeWaveformFixture(p.audioPath);const auto file=dir.filePath("compact.chosuta");saveProject(p,file);
+        for(const auto &language:QStringList{"zh","en","ja"})for(int width:{1024,1366}){
+            auto preferences=loadPreferences();preferences.language=language;savePreferences(preferences);
+            Window w;w.resize(width,768);w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().generated.size(),4);QTRY_VERIFY(w.centralWidget()->isEnabled());
+            w.resize(width,768);QTest::qWait(30);QCOMPARE(w.size(),QSize(width,768));
+            auto pages=w.findChild<QComboBox *>("workspacePageChoice");QVERIFY(pages);auto rules=w.findChild<QScrollArea *>("rulesPage");QVERIFY(rules);
+            auto tabs=qobject_cast<QTabWidget *>(rules->parentWidget()->parentWidget());QVERIFY(tabs);tabs->setCurrentWidget(rules);QTest::qWait(10);QVERIFY(rules->isVisible());
+            rules->ensureWidgetVisible(w.findChild<QDoubleSpinBox *>("consonantLimit"));QVERIFY(w.findChild<QDoubleSpinBox *>("consonantLimit")->isVisible());
+            if(qEnvironmentVariableIsSet("CHOSUTA_COMPACT_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_COMPACT_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(w.grab().save(out.filePath(language+QString("-%1-rules.png").arg(width))));}
+            auto timeline=w.findChild<Timeline *>();timeline->selectIds({w.currentProject().generated[0].id});QVERIFY(w.findChild<QWidget *>("mouthProperties")->isVisible());
+        }
+    }
+    void ruleTransactionAndStablePlayback(){
+        Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(w.currentProject().generated.size(),4);
+        auto limit=w.findChild<QDoubleSpinBox *>("consonantLimit");const auto generated=w.currentProject().generated[0].end;
+        limit->setValue(40);QCOMPARE(w.currentProject().rules.consonantMaxSeconds,.04);QVERIFY(w.isWindowModified());QCOMPARE(w.currentProject().generated[0].end,generated);
+        QTemporaryDir dir;auto file=dir.filePath("rules.chosuta");saveProject(w.currentProject(),file);QCOMPARE(loadProject(file).rules.consonantMaxSeconds,.04);
+        auto timeline=w.findChild<Timeline *>();timeline->setFocus();w.activateWindow();QTest::qWait(10);QTest::keySequence(timeline,QKeySequence::Undo);QCOMPARE(w.currentProject().rules.consonantMaxSeconds,.08);
+        auto count=w.evaluationBuildCount();w.findChild<QPushButton *>("play")->click();QTest::qWait(120);w.findChild<QPushButton *>("play")->click();QCOMPARE(w.evaluationBuildCount(),count);
+    }
+    void draftCloseKeepsReview(){
+        QTemporaryDir dir;auto p=mouthUiProject();p.appearance.enabled=true;const auto file=dir.filePath("review.chosuta");saveProject(p,file);
+        Window w;w.show();w.openPath(file);QTRY_COMPARE(w.currentProject().generated.size(),4);w.findChild<QPushButton *>("generatePerformance")->click();
+        auto bar=w.findChild<QWidget *>("performanceDraftBar");QTRY_VERIFY(bar->isVisible());
+        QTimer::singleShot(0,&w,[&]{auto box=w.findChild<QMessageBox *>();QVERIFY(box);box->button(QMessageBox::Cancel)->click();});QVERIFY(!w.close());QVERIFY(bar->isVisible());
+        w.findChild<QPushButton *>("performanceReview3")->click();QVERIFY(!bar->isVisible());QVERIFY(w.close());
     }
     void preferencesAndTransport() {
         QCOMPARE(loadPreferences().language,QString("auto"));QVERIFY(!loadPreferences().returnOnStop);
@@ -102,7 +242,7 @@ class UiTest:public QObject {
         group["notes"]=notes;track["mainGroup"]=group;root["tracks"]=QJsonArray{track};
         const auto path=dir.filePath("custom.svp");QFile source(path);QVERIFY(source.open(QIODevice::WriteOnly));source.write(QJsonDocument(root).toJson());source.close();
         Window window;window.show();window.openPath(path);QTRY_COMPARE(window.currentProject().generated.size(),4);
-        QCOMPARE(shapeAt(window.currentProject(),window.currentProject().effective(),.2),QString("unknown"));
+        QCOMPARE(AppearanceResolver(window.currentProject()).at(window.currentProject(),window.currentProject().effective(),.2).shape,QString("unknown"));
         QTimer::singleShot(0,&window,[&] {
             auto dialog=window.findChild<QDialog*>("advancedSettingsDialog");QVERIFY(dialog);
             QCOMPARE(dialog->findChild<QTabWidget*>("advancedSettingsTabs")->currentIndex(),0);
@@ -111,20 +251,22 @@ class UiTest:public QObject {
             auto table=dialog->findChild<QTableWidget*>("dictionaryTable");QCOMPARE(table->rowCount(),1);
             table->item(0,1)->setText("testword");table->item(0,3)->setText("UW");
             dialog->findChild<QCheckBox*>("japaneseKanji")->setChecked(true);
+            QVERIFY(!dialog->findChild<QCheckBox*>("dictionaryDefaults")->isChecked());dialog->findChild<QCheckBox*>("dictionaryDefaults")->setChecked(true);
             dialog->findChild<QDialogButtonBox*>("advancedSettingsButtons")->button(QDialogButtonBox::Save)->click();
         });
         window.findChild<QAction*>("advancedSettingsAction")->trigger();
         QCOMPARE(window.currentProject().rules.pronunciation.words["en"]["testword"].text,QString("UW"));
         QCOMPARE(loadPreferences().pronunciation,window.currentProject().rules.pronunciation);
         window.findChild<QPushButton*>("generate")->click();
-        QTRY_COMPARE(shapeAt(window.currentProject(),window.currentProject().effective(),.2),QString("U"));
+        QTRY_COMPARE(AppearanceResolver(window.currentProject()).at(window.currentProject(),window.currentProject().effective(),.2).shape,QString("U"));
         const auto saved=loadPreferences().pronunciation;
         QTimer::singleShot(0,&window,[&] {
             auto dialog=window.findChild<QDialog*>("advancedSettingsDialog");QVERIFY(dialog);
             auto table=dialog->findChild<QTableWidget*>("dictionaryTable");QCOMPARE(table->rowCount(),1);
             table->item(0,3)->setText("invalid-phone");
             auto buttons=dialog->findChild<QDialogButtonBox*>("advancedSettingsButtons");buttons->button(QDialogButtonBox::Save)->click();
-            QVERIFY(dialog->isVisible());QVERIFY(dialog->findChild<QLabel*>("dictionaryStatus")->text().contains("Unrecognized"));
+            auto guard=qScopeGuard([dialog]{dialog->reject();});
+            QVERIFY(dialog->isVisible());QVERIFY(dialog->findChild<QLabel*>("dictionaryStatus")->text().contains(messageText(widgetLanguage(),Message::format("Unrecognized dictionary reading: %1",{"en / testword"}))));
             buttons->button(QDialogButtonBox::Cancel)->click();
         });
         window.findChild<QAction*>("advancedSettingsAction")->trigger();QCOMPARE(loadPreferences().pronunciation,saved);
@@ -132,9 +274,9 @@ class UiTest:public QObject {
         auto changed=loadPreferences();changed.pronunciation.words["en"]["testword"]={"IY",true};savePreferences(changed);
         Window restored;restored.show();restored.openPath(projectPath);
         QTRY_COMPARE(restored.currentProject().rules.pronunciation,saved);
-        restored.findChild<QPushButton*>("generate")->click();QTRY_COMPARE(shapeAt(restored.currentProject(),restored.currentProject().effective(),.2),QString("U"));
+        restored.findChild<QPushButton*>("generate")->click();QTRY_COMPARE(AppearanceResolver(restored.currentProject()).at(restored.currentProject(),restored.currentProject().effective(),.2).shape,QString("U"));
         Window fresh;fresh.show();fresh.openPath(path);
-        QTRY_COMPARE(shapeAt(fresh.currentProject(),fresh.currentProject().effective(),.2),QString("I"));
+        QTRY_COMPARE(AppearanceResolver(fresh.currentProject()).at(fresh.currentProject(),fresh.currentProject().effective(),.2).shape,QString("I"));
         // General preferences must not erase advanced defaults.
         QTimer::singleShot(0,&fresh,[&]{fresh.findChild<QDialog*>("preferencesDialog")->accept();});
         fresh.findChild<QAction*>("preferencesAction")->trigger();QCOMPARE(loadPreferences().pronunciation,changed.pronunciation);
@@ -177,7 +319,7 @@ class UiTest:public QObject {
         Window window;window.show();window.openPath(path);QTRY_COMPARE(window.currentProject().generated.size(),4);QTest::qWait(40);
         auto enabled=window.findChild<QCheckBox*>("subtitlesEnabled");QVERIFY(enabled);QVERIFY(!enabled->isChecked());QVERIFY(!window.findChild<QWidget*>("subtitlePage"));QVERIFY(!window.findChild<QPlainTextEdit*>("subtitleText"));auto timeline=window.findChild<Timeline*>("timeline");QCOMPARE(timeline->height(),128);timeline->selectIds({window.currentProject().generated[0].id});QVERIFY(window.findChild<QLabel*>("selectionLabel")->text().contains("(1)"));
         enabled->setChecked(true);QCOMPARE(window.currentProject().subtitles.size(),1);QVERIFY(window.findChild<QWidget*>("subtitlePage"));QVERIFY(timeline->height()>128);
-        QTest::mouseDClick(timeline,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(timeline->xAtTime(3)),qRound(timeline->subtitleLaneRect(0).top()+25)));QCOMPARE(window.currentProject().subtitles[0].cues.size(),1);QCOMPARE(window.currentProject().subtitles[0].cues[0].start,3.);QCOMPARE(window.currentProject().subtitles[0].cues[0].end,5.);QVERIFY(window.findChild<QLabel*>("selectionLabel")->text().contains("(0)"));
+        QTest::mouseDClick(timeline,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(timeline->xAtTime(3)),qRound(timeline->subtitleLaneRect(0).top()+25)));QCOMPARE(window.currentProject().subtitles[0].cues.size(),1);QCOMPARE(window.currentProject().subtitles[0].cues[0].start,3.);QCOMPARE(window.currentProject().subtitles[0].cues[0].end,5.);QVERIFY(window.findChild<QWidget*>("mouthProperties")->isHidden());
         auto text=window.findChild<QPlainTextEdit*>("subtitleText");text->setPlainText("手动字幕 / Hello\nかな");text->setFocus();double position=window.findChild<QDoubleSpinBox*>("playPosition")->value();QTest::keyClick(text,Qt::Key_Space);QCOMPARE(window.findChild<QDoubleSpinBox*>("playPosition")->value(),position);QCOMPARE(window.currentProject().subtitles[0].cues[0].text,text->toPlainText());
         // Save without Apply, then type again; undo must stop at the clean saved text.
         for(auto action:window.findChildren<QAction*>())if(action->shortcut()==QKeySequence::Save){action->trigger();break;}
@@ -316,7 +458,7 @@ class UiTest:public QObject {
         w.findChild<QPushButton*>("reloadWaveform")->click();QTRY_VERIFY(correct->isEnabled());QVERIFY(!timingCorrectionCurrent(w.currentProject()));QCOMPARE(w.currentProject().effective()[0].start,0.);
         QVERIFY(replace(originalBytes));w.findChild<QPushButton*>("reloadWaveform")->click();QTRY_VERIFY(correct->isEnabled());QVERIFY(timingCorrectionCurrent(w.currentProject()));QCOMPARE(w.currentProject().effective()[0].start,accepted);
         // A protected manual event survives correction and reverting the independent timing layer.
-        t->selectIds({w.currentProject().generated[0].id});auto eventShape=w.findChild<QComboBox*>("eventShape");QVERIFY(eventShape);eventShape->setCurrentText("O");apply->click();correct->click();QTRY_VERIFY(w.centralWidget()->isEnabled());QVERIFY(!w.currentProject().timing.sources.contains(w.currentProject().generated[0].source));revert->click();QCOMPARE(shapeAt(w.currentProject(),w.currentProject().effective(),.2),QString("O"));
+        t->selectIds({w.currentProject().generated[0].id});auto eventShape=w.findChild<QComboBox*>("eventShape");QVERIFY(eventShape);eventShape->setCurrentText("O");apply->click();correct->click();QTRY_VERIFY(w.centralWidget()->isEnabled());QVERIFY(!w.currentProject().timing.sources.contains(w.currentProject().generated[0].source));revert->click();QCOMPARE(AppearanceResolver(w.currentProject()).at(w.currentProject(),w.currentProject().effective(),.2).shape,QString("O"));
         QTest::mouseDClick(t,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(t->xAtTime(.3)),qRound(t->subtitleLaneRect(0).top()+22)));QVERIFY(t->editingText());auto editor=w.findChild<QPlainTextEdit*>("subtitleText");QVERIFY(editor->isVisible());QVERIFY(editor->cursorRect().intersects(editor->viewport()->rect()));QTest::keyClick(editor,Qt::Key_Escape);
         w.findChild<QPushButton*>("resetTimelineHeights")->click();QCOMPARE(t->waveformLaneRect().height(),80.);QCOMPARE(loadPreferences().waveformLaneHeight,80);
         QCOMPARE(t->mouthLaneRect().height(),96.);QCOMPARE(loadPreferences().mouthLaneHeight,96);
@@ -389,12 +531,12 @@ class UiTest:public QObject {
             dialog->findChild<QPushButton *>("addPerformanceRule")->click();auto rules=dialog->findChild<QTableWidget *>("performanceRules");rules->item(0,3)->setText("7");unit->setCurrentIndex(1);QCOMPARE(rules->item(0,3)->text(),QString("4"));rules->item(0,3)->setText("6");unit->setCurrentIndex(0);QCOMPARE(rules->item(0,3)->text(),QString("7"));basis->setCurrentIndex(0);
             if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");QVERIFY(dialog->grab().save(out.filePath("v2-controls.png")));}
             dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});
-        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_VERIFY(w.centralWidget()->isEnabled());auto &a=w.currentProject().appearance;QCOMPARE(a.degreeTonic,QString("Bb"));QCOMPARE(a.degreeMode,QString("minor"));auto settings=w.currentProject().performance.settings;QCOMPARE(settings.music.support,1.25);QCOMPARE(settings.seconds.support,.8);QCOMPARE(settings.leapDegrees,5);QCOMPARE(settings.rules[0].threshold,7.);QCOMPARE(settings.rules[0].thresholdDegrees,6.);
+        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_VERIFY(w.centralWidget()->isEnabled());auto &a=w.currentProject().performance.analysis;QCOMPARE(a.degreeTonic,QString("Bb"));QCOMPARE(a.degreeMode,QString("minor"));auto settings=w.currentProject().performance.settings;QCOMPARE(settings.music.support,1.25);QCOMPARE(settings.seconds.support,.8);QCOMPARE(settings.leapDegrees,5);QCOMPARE(settings.rules[0].threshold,7.);QCOMPARE(settings.rules[0].thresholdDegrees,6.);
         auto display=w.findChild<QComboBox *>("performanceTimeDisplay");auto start=w.findChild<QDoubleSpinBox *>("performanceStart"),end=w.findChild<QDoubleSpinBox *>("performanceEnd");start->setValue(.5);end->setValue(1.5);display->setCurrentIndex(1);QCOMPARE(start->value(),.5);QCOMPARE(end->value(),1.5);
         auto text=w.findChild<QLineEdit *>("performanceEndMusic");QTest::keyClick(text,Qt::Key_A,Qt::ControlModifier);QTest::keyClicks(text,"1:3:0");w.findChild<QPushButton *>("applyPerformance")->click();QCOMPARE(w.currentProject().performance.manual.size(),1);QCOMPARE(w.currentProject().performance.manual[0].start,.5);QCOMPARE(w.currentProject().performance.manual[0].end,1.);display->setCurrentIndex(0);QCOMPARE(end->value(),1.);
         QTimer::singleShot(0,&w,[&]{auto dialog=qobject_cast<QDialog *>(QApplication::activeModalWidget());QVERIFY(dialog);auto state=dialog->findChild<QComboBox *>("tonalityState");state->setCurrentIndex(state->findData("disabled"));dialog->accept();});w.findChild<QPushButton *>("performanceTonality")->click();QCOMPARE(w.currentProject().performance.tonalities.size(),1);QVERIFY(w.currentProject().performance.tonalities[0].key.isEmpty());
         auto boundary=w.findChild<QComboBox *>("performanceBoundaryMode");boundary->setCurrentIndex(boundary->findData("section-break"));w.findChild<QPushButton *>("applyPerformanceBoundary")->click();QCOMPARE(w.currentProject().performance.boundaries.size(),1);QCOMPARE(w.currentProject().performance.boundaries[0].mode,QString("section-break"));
-        auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);auto reopened=loadProject(saved);QCOMPARE(reopened.performance.settings,settings);QCOMPARE(reopened.appearance.degreeTonic,QString("Bb"));
+        auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);auto reopened=loadProject(saved);QCOMPARE(reopened.performance.settings,settings);QCOMPARE(reopened.performance.analysis.degreeTonic,QString("Bb"));
     }
     void performanceWorkflow(){
         QTemporaryDir dir;auto p=mouthUiProject();const auto source=dir.filePath("performance.chosuta");saveProject(p,source);Window w;w.resize(1200,850);w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),4);
@@ -405,7 +547,7 @@ class UiTest:public QObject {
             auto tabs=dialog->findChild<QTabWidget *>("mouthSettingsPages");tabs->setCurrentIndex(1);dialog->findChild<QComboBox *>("tonalityState")->setCurrentIndex(1);auto tonic=dialog->findChild<QComboBox *>("tonalityTonic");tonic->setCurrentIndex(tonic->findData("D"));auto mode=dialog->findChild<QComboBox *>("tonalityMode");mode->setCurrentIndex(mode->findData("dorian"));dialog->findChild<QCheckBox *>("performanceSaveDefaults")->setChecked(true);
             if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));out.mkpath(".");dialog->grab().save(out.filePath("performance-rules.png"));tabs->setCurrentIndex(0);dialog->grab().save(out.filePath("variant-groups.png"));}
             dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply)->click();});
-        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_VERIFY(w.currentProject().appearance.enabled);QCOMPARE(w.currentProject().appearance.degreeMode,QString("dorian"));QCOMPARE(w.currentProject().performance.groups.size(),2);QCOMPARE(timingCorrectionJson(w.currentProject()),timing);
+        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_VERIFY(w.currentProject().appearance.enabled);QCOMPARE(w.currentProject().performance.analysis.degreeMode,QString("dorian"));QCOMPARE(w.currentProject().performance.groups.size(),2);QCOMPARE(timingCorrectionJson(w.currentProject()),timing);
         auto timeline=w.findChild<Timeline *>("timeline");QCOMPARE(timeline->performanceLaneRect().height(),56.);auto generated=w.currentProject().generated.size();
         w.findChild<QPushButton *>("generatePerformance")->click();QTRY_VERIFY(w.findChild<QWidget *>("performanceDraftBar")->isVisible());QVERIFY(!w.currentProject().performance.generated.isEmpty());
         w.findChild<QPushButton *>("performanceReview0")->click();w.findChild<QPushButton *>("performanceReview1")->click();w.findChild<QPushButton *>("performanceReview3")->click();QVERIFY(!w.currentProject().performance.generated.isEmpty());
@@ -423,7 +565,7 @@ class UiTest:public QObject {
     }
     void consonantRuleWorkflow(){
         QTemporaryDir dir;auto p=mouthUiProject(true);auto edited=p.generated[0];edited.shape="O";p.edit(edited);
-        if(!QStandardPaths::findExecutable("ffmpeg").isEmpty()){p.audioPath=dir.filePath("timing.wav");writeWaveformFixture(p.audioPath);std::atomic_bool cancel=false;const auto wave=readWaveform(p.audioPath,"ffmpeg",cancel);QVERIFY(wave.wave);p.audioContentHash=wave.wave->hash;p.timing=correctWaveform(p,*wave.wave,cancel).timing;QCOMPARE(p.timing.sources.size(),3);}
+        if(!QStandardPaths::findExecutable("ffmpeg").isEmpty()){p.audioPath=dir.filePath("timing.wav");writeWaveformFixture(p.audioPath);std::atomic_bool cancel=false;const auto wave=readWaveform(p.audioPath,testMediaTools("ffmpeg"),cancel);QVERIFY(wave.wave);p.audioContentHash=wave.wave->hash;p.timing=correctWaveform(p,*wave.wave,cancel).timing;QCOMPARE(p.timing.sources.size(),3);}
         const auto source=dir.filePath("consonants.chosuta");saveProject(p,source);Window w;w.show();w.openPath(source);QTRY_COMPARE(w.currentProject().generated.size(),5);if(!p.audioPath.isEmpty())QTRY_VERIFY(w.findChild<QPushButton *>("correctWaveformTiming")->isEnabled());
         QTimer::singleShot(0,&w,[&]{
             auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(2);auto editor=dialog->findChild<QWidget *>("consonantEditor");QVERIFY(editor->isHidden());QTest::mouseClick(dialog->findChild<QToolButton *>("consonantCustomize"),Qt::LeftButton);QVERIFY(editor->isVisible());
@@ -435,7 +577,7 @@ class UiTest:public QObject {
             if(qEnvironmentVariableIsSet("CHOSUTA_ADVANCED_ARTIFACTS")){QTest::qWait(20);QDir out(qEnvironmentVariable("CHOSUTA_ADVANCED_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(dialog->grab().save(out.filePath("consonant-settings-ui.png")));}
             auto apply=dialog->findChild<QDialogButtonBox *>("mouthSettingsButtons")->button(QDialogButtonBox::Apply);QVERIFY(apply->text().contains("regenerate")||apply->text().contains(QString::fromUtf8("重新生成"))||apply->text().contains(QString::fromUtf8("再生成")));QTest::mouseClick(apply,Qt::LeftButton);
         });
-        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_COMPARE(w.currentProject().rules.consonants.overrides.value("ja:romaji:d"),QString("closed"));QCOMPARE(w.currentProject().generated[0].shape,QString("closed"));QVERIFY(w.currentProject().timing.sources.isEmpty());QCOMPARE(w.currentProject().overrides[edited.id].event.shape,QString("O"));QCOMPARE(shapeAt(w.currentProject(),w.currentProject().effective(),.02),QString("O"));
+        w.findChild<QAction *>("advancedMouthAction")->trigger();QTRY_COMPARE(w.currentProject().rules.consonants.overrides.value("ja:romaji:d"),QString("closed"));QCOMPARE(w.currentProject().generated[0].shape,QString("closed"));QVERIFY(w.currentProject().timing.sources.isEmpty());QCOMPARE(w.currentProject().overrides[edited.id].event.shape,QString("O"));QCOMPARE(AppearanceResolver(w.currentProject()).at(w.currentProject(),w.currentProject().effective(),.02).shape,QString("O"));
         const auto current=w.currentProject().rules.consonants;
         QTimer::singleShot(0,&w,[&]{auto dialog=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(dialog);auto close=qScopeGuard([dialog]{if(dialog->isVisible())dialog->reject();});dialog->findChild<QTabWidget *>("mouthSettingsPages")->setCurrentIndex(2);QTest::mouseClick(dialog->findChild<QToolButton *>("consonantCustomize"),Qt::LeftButton);QTest::mouseClick(dialog->findChild<QPushButton *>("consonantResetAll"),Qt::LeftButton);dialog->reject();});w.findChild<QAction *>("advancedMouthAction")->trigger();QCOMPARE(w.currentProject().rules.consonants,current);
         const auto saved=dir.filePath("saved.chosuta");saveProject(w.currentProject(),saved);QCOMPARE(loadProject(saved).rules.consonants,current);

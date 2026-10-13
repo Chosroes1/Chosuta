@@ -23,14 +23,14 @@ namespace chosuta {
         }
         QJsonParseError error;
         auto doc=QJsonDocument::fromJson(bytes,&error);
-        if(error.error!=QJsonParseError::NoError||!doc.isObject())throw Failure(QString("Invalid JSON at %1: %2").arg(error.offset).arg(error.errorString()));
+        if(error.error!=QJsonParseError::NoError||!doc.isObject())throw Failure(Message::format("Invalid JSON at %1",{QString::number(error.offset)}).withDetail(error.errorString()));
         return doc;
     }
     static qint64 integer(const QJsonObject&o,const QString&k,qint64 def=0) {
         if(!o.contains(k))return def;
         const auto v=o[k];
         double d=v.toDouble(std::numeric_limits<double>::quiet_NaN());
-        if(!std::isfinite(d)||std::floor(d)!=d||std::abs(d)>MusicLimit)throw Failure("Invalid integer: "+k);
+        if(!std::isfinite(d)||std::floor(d)!=d||std::abs(d)>MusicLimit)throw Failure(Message::format("Invalid integer: %1",{k}));
         return v.toInteger();
     }
     static QString lang(const QString&s) {
@@ -41,7 +41,7 @@ namespace chosuta {
     }
     Score importSvp(const QString&path,const std::atomic_bool*cancel,Progress progress) {
         QFile f(path);
-        if(!f.open(QIODevice::ReadOnly))throw Failure(f.errorString());
+        if(!f.open(QIODevice::ReadOnly))throw Failure(Message("File operation failed").withDetail(f.errorString()));
         if(f.size()>64*1024*1024)throw Failure("Input exceeds 64 MiB");
         return parseSvp(f.readAll(),path,cancel,progress);
     }
@@ -126,7 +126,7 @@ namespace chosuta {
                     Note note;
                     QString p=locator+QString(".notes[%1]").arg(ni);
                     qint64 onset=integer(n,"onset"),duration=integer(n,"duration"),pitch=integer(n,"pitch",60);
-                    if(std::abs(onset+offset)>MusicLimit||duration>MusicLimit||std::abs(onset+offset+duration)>MusicLimit)throw Failure(p+": music position overflow");
+                    if(std::abs(onset+offset)>MusicLimit||duration>MusicLimit||std::abs(onset+offset+duration)>MusicLimit)throw Failure(Message::format("%1: music position overflow",{p}));
                     if(duration<=0) {
                         s.diagnostics.append( {
                             p,"duration","Nonpositive note duration skipped"
@@ -137,7 +137,7 @@ namespace chosuta {
                     note.id=instance+"/"+n["uuid"].toString("note")+QString("@%1").arg(ni);
                     note.onset=onset+offset;
                     note.duration=duration;
-                    if(pitch+pitchOffset<0||pitch+pitchOffset>127)throw Failure(p+": invalid MIDI pitch");
+                    if(pitch+pitchOffset<0||pitch+pitchOffset>127)throw Failure(Message::format("%1: invalid MIDI pitch",{p}));
                     note.pitch=int(pitch+pitchOffset);
                     note.lyrics=n["lyrics"].toString();
                     note.phonemes=n["phonemes"].toString();
@@ -149,7 +149,7 @@ namespace chosuta {
                     if(note.phoneset.isEmpty())note.phoneset=n["phonesetOverride"].toString();
                     if(note.phoneset.isEmpty())note.phoneset=overrideLanguage.isEmpty()?phoneset:QString();
                     if(!QStringList{"auto","ja","zh","en"}.contains(note.language))s.diagnostics.append({
-                        p,"language","Unsupported singing language preserved: "+note.language
+                        p,"language",Message::format("Unsupported singing language preserved: %1",{note.language})
                     });
                     note.original=n;
                     note.muted=t.muted||r["mute"].toBool()||n["attributes"].toObject()["muted"].toBool();
@@ -167,7 +167,7 @@ namespace chosuta {
                 QString key=r["groupID"].toString(),p=QString("$.tracks[%1].groups[%2]").arg(ti).arg(ri);
                 if(!library.contains(key)) {
                     s.diagnostics.append( {
-                        p,"missing-group","Missing library reference: "+key
+                        p,"missing-group",Message::format("Missing library reference: %1",{key})
                     });
                     continue;
                 }

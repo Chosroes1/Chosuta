@@ -9,16 +9,16 @@ struct Stats {double median=0,high=0,sounding=0,coverage=0,ioi=0;int count=0;boo
 bool strongBeat(const Project &p,qint64 tick){
     qint64 base=0;auto meter=p.score.time.meters.front();for(int i=1;i<p.score.time.meters.size();++i){auto next=p.score.time.meters[i];qint64 at=base+qint64(next.bar-meter.bar)*meter.numerator*(Blick*4/meter.denominator);if(tick<at)break;base=at;meter=next;}
     qint64 unit=Blick*4/meter.denominator;auto within=((tick-base)%(unit*meter.numerator)+unit*meter.numerator)%(unit*meter.numerator);if(within%unit)return false;int b=int(within/unit)+1;
-    QString key=QString("%1/%2").arg(meter.numerator).arg(meter.denominator);if(p.appearance.strongBeats.contains(key))return p.appearance.strongBeats[key].contains(b);
+    QString key=QString("%1/%2").arg(meter.numerator).arg(meter.denominator);if(p.performance.analysis.strongBeats.contains(key))return p.performance.analysis.strongBeats[key].contains(b);
     return meter.numerator>3&&meter.numerator%3==0?(b-1)%3==0:meter.numerator==4?(b==1||b==3):b==1;
 }
 }
 PerformanceDraft generatePerformance(const Project &p,const std::atomic_bool *cancel,Progress report){
     PerformanceDraft result;
     try{
-        validateAppearance(p.appearance);validatePerformance(p);auto check=[&]{if(cancel&&cancel->load())throw Failure("Cancelled");};check();result.basisHash=performanceBasisHash(p,cancel);
+        validateAnalysisSettings(p.performance.analysis);validatePerformance(p);auto check=[&]{if(cancel&&cancel->load())throw Failure("Cancelled");};check();result.basisHash=performanceBasisHash(p,cancel);
         auto analysis=analyzePerformance(p,cancel,report);auto &v=analysis.notes;result.suggestions=analysis.suggestions;
-        const auto &s=p.performance.settings;const auto &t=s.timing();const bool music=s.timeBasis==PerformanceTimeBasis::Music,diatonic=p.appearance.intervalUnit=="diatonic";
+        const auto &s=p.performance.settings;const auto &t=s.timing();const bool music=s.timeBasis==PerformanceTimeBasis::Music,diatonic=p.performance.analysis.intervalUnit=="diatonic";
         const double leap=diatonic?s.leapDegrees-1:s.leapSemitones,progression=diatonic?s.progressionDegrees-1:s.progressionSemitones,near=diatonic?s.nearDegrees-1:s.nearSemitones,contrast=diatonic?s.contrastDegrees-1:s.contrastSemitones;
         QVector<int> contexts(v.size()),ends(v.size());int context=0;for(int i=0;i<v.size();++i){if(v[i].hard)context=i;contexts[i]=context;}int end=v.size();for(int i=int(v.size())-1;i>=0;--i){ends[i]=end;if(v[i].hard)end=i;}
         auto stats=[&](double a,double b,int first,int last){Stats r;QVector<QPair<double,double>> pitches;QVector<double> intervals;double named=0;
@@ -65,7 +65,7 @@ PerformanceDraft generatePerformance(const Project &p,const std::atomic_bool *ca
             bool settledHigh=n.named&&analysis.pitched&&background.valid&&n.pitch>=analysis.q75&&n.pitch>=background.median+contrast&&goalSupport>=t.support+t.exit&&distance&&net>=0;
             bool backgroundHeld=s.continuity&&(compatibleMotif||settledHigh||(elevated&&next.median>=target-near));
             bool held=current=="emphasis"&&n.x-since<t.emphasis;
-            QString wanted=current,reason="N0: insufficient structural evidence";bool isCustom=false;
+            QString wanted=current;Message reason="N0: insufficient structural evidence";bool isCustom=false;
             if(a1||a2||a3){wanted="emphasis";reason=a2?"A2: repeated high-register motif":a3?"A3: elevated section and sustained activity":"A1: arrival supported by sounding notes";}
             else if(current=="emphasis"){
                 if(held)reason="H1: minimum emphasis hold";
@@ -80,7 +80,7 @@ PerformanceDraft generatePerformance(const Project &p,const std::atomic_bool *ca
             for(const auto &r:rules){if(!r.enabled||(!r.track.isEmpty()&&r.track!=n.track))continue;double minimum=music?r.minBeats:r.minSeconds;if(n.y-n.x<minimum)continue;
                 auto c=r.condition;double threshold=c=="long"&&!music?r.thresholdSeconds:diatonic&&QStringList{"leap","up","down"}.contains(c)?r.thresholdDegrees-1:r.threshold;
                 bool match=c=="leap"?previous&&std::abs(delta)>=threshold:c=="up"?distance&&net>=threshold:c=="down"?distance&&-net>=threshold:c=="long"?n.y-n.x>=threshold:c=="degree"?n.degree>0&&n.degree==int(threshold):c=="tonic"?n.degree==1:c=="outside"?!n.tone.isEmpty()&&n.degree==0:c=="strong"?strongBeat(p,n.a):c=="high"?n.note->pitch>=threshold:false;
-                if(match){wanted=r.target;reason="User rule: "+c;isCustom=true;break;}}
+                if(match){wanted=r.target;reason=Message::format("User rule: %1",{c});isCustom=true;break;}}
             double switchAt=n.x;QString prefixTarget;
             if(wanted!=current&&!reset&&n.x-since<(current=="emphasis"?t.emphasis:t.minimum)){
                 const double earliest=since+(current=="emphasis"?t.emphasis:t.minimum);
@@ -90,24 +90,25 @@ PerformanceDraft generatePerformance(const Project &p,const std::atomic_bool *ca
             if(wanted!=current){current=wanted;since=switchAt;if(current!="normal")target=a2?motifGoal:a3?next.median:n.pitch;}
             else if((a2||a3||isCustom||(a1&&!same))&&current=="emphasis")target=a2?motifGoal:a3?next.median:n.pitch;
             if(current=="emphasis"&&(a1||a2||a3))falling=false;
-            if(n.breath&&current=="emphasis")reason+="; H4: compatible short breath";
-            if(!n.named)reason+="; unresolved written interval";
-            if(!n.tone.isEmpty())reason+=QString("; %1 degree %2").arg(n.tone).arg(n.degree);
-            if(!background.valid)reason+="; limited preceding background";
-            if(analysis.degraded)reason+="; bounded analysis limit reached";
-            PerformanceSegment segment;segment.id="auto:"+n.note->id+":"+QString::number(n.a);segment.track=n.track;segment.firstSource=segment.lastSource=n.note->id;segment.startBlick=n.a;segment.endBlick=n.b;segment.start=n.start+p.output.syncOffset;segment.end=n.end+p.output.syncOffset;segment.targets={current};segment.protect=false;segment.reason=reason;
+            QVector<Message> reasons{reason};
+            if(n.breath&&current=="emphasis")reasons.append(Message("H4: compatible short breath"));
+            if(!n.named)reasons.append(Message("Unresolved written interval"));
+            if(!n.tone.isEmpty())reasons.append(Message::format("%1 degree %2",{n.tone,QString::number(n.degree)}));
+            if(!background.valid)reasons.append(Message("Limited preceding background"));
+            if(analysis.degraded)reasons.append(Message("Bounded analysis limit reached"));
+            PerformanceSegment segment;segment.id="auto:"+n.note->id+":"+QString::number(n.a);segment.track=n.track;segment.firstSource=segment.lastSource=n.note->id;segment.startBlick=n.a;segment.endBlick=n.b;segment.start=n.start+p.output.syncOffset;segment.end=n.end+p.output.syncOffset;segment.targets={current};segment.protect=false;segment.reasons=reasons;
             if(carryGap&&!result.segments.isEmpty()){auto &previous=result.segments.last();previous.endBlick=n.a;previous.end=n.start+p.output.syncOffset;}
             if(!prefixTarget.isEmpty()){
                 const qint64 tick=music?qRound64(switchAt*Blick):p.score.time.blicks(switchAt);
-                auto prefix=segment;prefix.endBlick=tick;prefix.end=p.score.time.seconds(tick)+p.output.syncOffset;prefix.targets={prefixTarget};prefix.reason="H1: minimum automatic hold before confirmed change";
+                auto prefix=segment;prefix.endBlick=tick;prefix.end=p.score.time.seconds(tick)+p.output.syncOffset;prefix.targets={prefixTarget};prefix.reasons={Message("H1: minimum automatic hold before confirmed change")};
                 if(!result.segments.isEmpty()&&!reset&&result.segments.last().targets==prefix.targets&&result.segments.last().track==prefix.track){auto &last=result.segments.last();last.endBlick=prefix.endBlick;last.end=prefix.end;last.lastSource=prefix.lastSource;}
                 else if(prefix.endBlick>prefix.startBlick)result.segments.append(prefix);
                 segment.startBlick=tick;segment.start=prefix.end;segment.id="auto:"+n.note->id+":"+QString::number(tick);
             }
-            if(!result.segments.isEmpty()&&!reset&&result.segments.last().targets==segment.targets&&result.segments.last().track==segment.track){auto &back=result.segments.last();back.endBlick=n.b;back.end=segment.end;back.lastSource=n.note->id;auto reasons=back.reason.split(" | ");if(!reasons.contains(reason)&&reasons.size()<16)back.reason+=" | "+reason;}
+            if(!result.segments.isEmpty()&&!reset&&result.segments.last().targets==segment.targets&&result.segments.last().track==segment.track){auto &back=result.segments.last();back.endBlick=n.b;back.end=segment.end;back.lastSource=n.note->id;for(const auto &item:reasons)if(!back.reasons.contains(item)&&back.reasons.size()<96)back.reasons.append(item);}
             else result.segments.append(segment);
         }
         check();if(report)report(100);
-    }catch(const std::exception &e){result.cancelled=cancel&&cancel->load();result.error=result.cancelled?QString{}:QString::fromUtf8(e.what());result.segments.clear();result.suggestions.clear();}return result;
+    }catch(const std::exception &e){result.cancelled=cancel&&cancel->load();result.error=result.cancelled?Message{}:exceptionMessage(e);result.segments.clear();result.suggestions.clear();}return result;
 }
 }

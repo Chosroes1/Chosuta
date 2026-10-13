@@ -20,8 +20,14 @@ $ProjectDir = Split-Path -Parent $PSScriptRoot
 if ($env:OS -ne 'Windows_NT') { throw 'Run this script on Windows, not Linux or WSL.' }
 
 function Project-Path([string]$Path) {
-    if ([IO.Path]::IsPathRooted($Path)) { return [IO.Path]::GetFullPath($Path) }
-    return [IO.Path]::GetFullPath((Join-Path $ProjectDir $Path))
+    if ([IO.Path]::IsPathRooted($Path)) { $FullPath = [IO.Path]::GetFullPath($Path) }
+    else { $FullPath = [IO.Path]::GetFullPath((Join-Path $ProjectDir $Path)) }
+    # Keep drive/UNC roots intact; normalize other directories before deriving
+    # sibling variants and paths relative to the deployment root.
+    if ($FullPath.Length -gt ([IO.Path]::GetPathRoot($FullPath)).Length) {
+        return $FullPath.TrimEnd([char[]]'\/')
+    }
+    return $FullPath
 }
 function Require-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Required file missing: $Path" }
@@ -164,27 +170,29 @@ try {
         $env:PATH = "$QtBin;$IcuRuntimeDir;$FfmpegDir;$($SavedEnvironment['PATH'])"
         $env:QT_PLUGIN_PATH = Join-Path $QtPrefix 'plugins'
         Invoke-Native 'install application and notices' 'cmake' @('--install', $BuildDir, '--prefix', $StageDir)
-        $BinDir = Join-Path $StageDir 'bin'
+        $AppDir = $StageDir
+        Require-File (Join-Path $AppDir 'chosuta.exe')
+        Require-File (Join-Path $AppDir 'chosuta-cli.exe')
         $ValidationDir = Join-Path $StageDir 'validation'
         New-Item -ItemType Directory -Path $ValidationDir -Force | Out-Null
         $RuntimeFlag = '--no-compiler-runtime'
         if ($Toolchain -eq 'MinGW') { $RuntimeFlag = '--compiler-runtime' }
         # MSVC uses the existing official VC++ x64 Redistributable on the target.
         # Do not copy arbitrary compiler runtime DLLs out of Visual Studio.
-        Invoke-Native 'deploy Qt GUI and multimedia' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $BinDir, (Join-Path $BinDir 'chosuta.exe'))
-        Invoke-Native 'deploy Qt CLI' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $BinDir, (Join-Path $BinDir 'chosuta-cli.exe'))
-        foreach ($Dll in $IcuDlls) { Copy-Checked $Dll.FullName $BinDir }
-        $PlatformDir = Join-Path $BinDir 'platforms'
+        Invoke-Native 'deploy Qt GUI and multimedia' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $AppDir, (Join-Path $AppDir 'chosuta.exe'))
+        Invoke-Native 'deploy Qt CLI' $DeployTool @('--release', '--no-translations', $RuntimeFlag, '--dir', $AppDir, (Join-Path $AppDir 'chosuta-cli.exe'))
+        foreach ($Dll in $IcuDlls) { Copy-Checked $Dll.FullName $AppDir }
+        $PlatformDir = Join-Path $AppDir 'platforms'
         New-Item -ItemType Directory -Path $PlatformDir -Force | Out-Null
         $Offscreen = Join-Path $QtPrefix 'plugins/platforms/qoffscreen.dll'
         Require-File $Offscreen
         Copy-Checked $Offscreen $PlatformDir
         Require-File (Join-Path $PlatformDir 'qwindows.dll')
-        "[Paths]`nPrefix=.`nPlugins=.`n" | Set-Content -LiteralPath (Join-Path $BinDir 'qt.conf') -Encoding ASCII
+        "[Paths]`nPrefix=.`nPlugins=.`n" | Set-Content -LiteralPath (Join-Path $AppDir 'qt.conf') -Encoding ASCII
         Copy-LocalNotices $QtPrefix 'Qt'
         Copy-LocalNotices $IcuPrefix 'ICU'
         $FfmpegVersion = ''
-        $MediaDir = Join-Path $BinDir 'tools/ffmpeg'
+        $MediaDir = Join-Path $AppDir 'tools/ffmpeg'
         if ($BundleMedia) {
             New-Item -ItemType Directory -Path $MediaDir -Force | Out-Null
             $VersionOutput = & (Join-Path $FfmpegDir 'ffmpeg.exe') -version
@@ -207,19 +215,24 @@ try {
     
         # Test with SDK/plugin/PATH overrides removed; qt.conf must find local plugins.
         foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $null, 'Process') }
-        $env:PATH = "$BinDir;$env:SystemRoot\System32;$env:SystemRoot"
+        $env:PATH = "$AppDir;$env:SystemRoot\System32;$env:SystemRoot"
         if ($BundleMedia) {
-            Invoke-SelfTest 'media-capabilities' (Join-Path $BinDir 'chosuta-cli.exe') @('--check-media-tools', '--ffmpeg', 'bin/tools/ffmpeg/ffmpeg.exe')
+            Invoke-SelfTest 'media-capabilities' (Join-Path $AppDir 'chosuta-cli.exe') @('--check-media-tools', '--ffmpeg', 'tools/ffmpeg/ffmpeg.exe')
         }
-        Invoke-SelfTest 'cli' (Join-Path $BinDir 'chosuta-cli.exe') @('--version')
+        Invoke-SelfTest 'cli' (Join-Path $AppDir 'chosuta-cli.exe') @('--version')
         $env:QT_QPA_PLATFORM = 'offscreen'
-        Invoke-SelfTest 'gui-offscreen' (Join-Path $BinDir 'chosuta.exe') @('--smoke-test')
+        Invoke-SelfTest 'gui-offscreen' (Join-Path $AppDir 'chosuta.exe') @('--smoke-test')
         $env:QT_QPA_PLATFORM = 'windows'
-        Invoke-SelfTest 'gui-windows' (Join-Path $BinDir 'chosuta.exe') @('--smoke-test')
+        Invoke-SelfTest 'gui-windows' (Join-Path $AppDir 'chosuta.exe') @('--smoke-test')
     
-        $Files = @(Get-ChildItem -LiteralPath $BinDir -File -Recurse | Sort-Object FullName | ForEach-Object {
+        # Runtime paths are relative to the deployment root. Exclude evidence,
+        # documentation and notices from the runtime byte total.
+        $Files = @(Get-ChildItem -LiteralPath $AppDir -File -Recurse | Where-Object {
+            $Relative = $_.FullName.Substring($AppDir.Length + 1).Replace('\', '/')
+            $Relative -notmatch '^(validation|dependency-notices|share)/'
+        } | Sort-Object FullName | ForEach-Object {
             [ordered]@{
-                path = $_.FullName.Substring($BinDir.Length + 1).Replace('\', '/')
+                path = $_.FullName.Substring($AppDir.Length + 1).Replace('\', '/')
                 sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
                 fileVersion = $_.VersionInfo.FileVersion
                 bytes = $_.Length
@@ -228,11 +241,13 @@ try {
         $Manifest = [ordered]@{
             version = $BuildInfo.chosutaVersion
             target = 'Windows x64'
+            entryPoint = 'chosuta.exe'
+            runtimeDirectory = '.'
             build = $BuildInfo
             windeployqt = ($DeployVersion -join "`n")
             ffmpegBundled = $BundleMedia
             variant = $(if ($BundleMedia) { 'with-ffmpeg' } else { 'no-ffmpeg' })
-            mediaToolsDirectory = $(if ($BundleMedia) { 'bin/tools/ffmpeg' } else { $null })
+            mediaToolsDirectory = $(if ($BundleMedia) { 'tools/ffmpeg' } else { $null })
             runtimeBytes = ($Files | Measure-Object -Property bytes -Sum).Sum
             mediaToolsBytes = $(if ($BundleMedia) { ($Files | Where-Object { $_.path.StartsWith('tools/ffmpeg/') } | Measure-Object -Property bytes -Sum).Sum } else { 0 })
             mediaCapabilities = $(if ($BundleMedia) { 'passed; see validation/media-capabilities.stdout.log (not codec/GUI playback acceptance)' } else { 'not bundled' })
@@ -246,9 +261,9 @@ try {
         $Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StageDir 'runtime-manifest.json') -Encoding UTF8
         @'
 Chosuta local Windows build
-Start bin\chosuta.exe directly. Keep the whole directory, including DLLs and plugins.
+Start chosuta.exe in this directory directly. Keep the whole directory, including DLLs and plugins.
 MSVC builds require the official VC++ x64 Redistributable to be installed.
-FFmpeg/ffprobe are optional command-line tools, isolated under bin/tools/ffmpeg.
+FFmpeg/ffprobe are optional command-line tools, isolated under tools/ffmpeg.
 For no-ffmpeg builds, choose ffmpeg.exe in Export Settings; keep ffprobe.exe and
 its shared DLLs beside it. Qt media DLLs/plugins must remain in the application.
 Missing FFmpeg disables video export and waveform decoding/correction.
@@ -257,7 +272,7 @@ See runtime-manifest.json and validation/ for this machine's actual results.
 The dependency notices collected here do not replace a complete redistribution
 source/NOTICE review of the specific Qt, ICU and media dependencies you deploy.
 '@ | Set-Content -LiteralPath (Join-Path $StageDir 'RUN.txt') -Encoding ASCII
-        Write-Host "Ready: $(Join-Path $BinDir 'chosuta.exe')"
+        Write-Host "Ready: $(Join-Path $AppDir 'chosuta.exe')"
         Write-Host "Evidence: $(Join-Path $StageDir 'runtime-manifest.json')"
     }
     # Archive only after every requested deployment has passed. Never overwrite.
