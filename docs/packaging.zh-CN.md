@@ -78,7 +78,7 @@ Chosuta 代码、配方和桌面项继续 GPL-3.0-or-later；当前PNG标识由�
 
 ## Windows 附带工具与 no-ffmpeg
 
-0.9.3 的 `scripts/build-windows.ps1 -FfmpegDir <已有工具bin> -BothVariants -CreateZip` 支持编译一次、分别部署并压缩两种目录（其他 Qt／ICU 参数见 [Windows 说明](windows.zh-CN.md)）。GUI/CLI可执行文件位于部署根目录，外部 ffmpeg／ffprobe 及其共享 DLL 独立位于 `tools/ffmpeg/`；无工具版仍保留 Qt 媒体后端。脚本记录各自大小／哈希／检测结果，不覆盖现有产物。当前环境未执行 Windows 部署，没有新的 Release；指定工具的许可和对应源码义务按实际构建核对。
+0.9.3 的 `scripts/build-windows.ps1 -FfmpegDir <已有工具bin> -BothVariants -CreateZip` 支持编译一次、分别部署并压缩两种目录；也可将 `-FfmpegDir <已有工具bin>` 换成 `-DownloadFfmpeg`，显式校验下载并缓存 BtbN win64 GPL shared 9.0（其他 Qt／ICU 参数见 [Windows 说明](windows.zh-CN.md)）。GUI/CLI可执行文件位于部署根目录，外部 ffmpeg／ffprobe 及其共享 DLL 独立位于 `tools/ffmpeg/`；无工具版仍保留 Qt 媒体后端。脚本记录各自大小／哈希／检测结果，不覆盖现有产物。当前环境未执行 Windows 部署，没有新的 Release；指定工具的许可和对应源码义务按实际构建核对。
 
 ## 当前 Arch 环境下准备 DEB／RPM（0.9.3）
 

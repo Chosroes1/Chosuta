@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 
 ## 当前回归入口
 
-CTest 的 `core`、`ui-workflow`、`gui-smoke` 在Windows使用原生 `windows` 平台及系统字体（需要可用桌面会话），其他平台使用 `offscreen`；Linux 上找到 Python 时另启用 `packaging-preflight`。缺 FFmpeg 的媒体测试明确跳过。私有样本未提供时私有检查跳过，不复制用户材料到公开测试。
+CTest 的 `core`、`ui-workflow`、`gui-smoke` 在Windows使用原生 `windows` 平台及系统字体（需要可用桌面会话），其他平台使用 `offscreen`；Linux 上找到 Python 时另启用 `packaging-preflight`；Windows 使用 PowerShell 5.1+ 运行离线夹具 `btbn-download-policy`，不联网或执行夹具 EXE。缺 FFmpeg 的媒体测试明确跳过。私有样本未提供时私有检查跳过，不复制用户材料到公开测试。
 
 - 当前 Linux Debug/Release 各 CTest 4/4，核心 52、UI 32 无失败/跳过；离屏结果不代表真实桌面或 Windows 验收。
 - 新增 `structuredMessagesAndReasons`、`localizedControlsAndErrors`、`localizedIdsAndUndo`、`localizedPerformanceReasons`、`unknownCopyAndImport`；涵盖三语实际控件、保存点/撤销、结构化理由、错误原文、素材回退与保存重开。
@@ -45,7 +45,7 @@ CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen ./build/chosuta-ui-tests p
 .\out\windows\Chosuta\chosuta.exe
 ```
 
-脚本部署 Qt/媒体/平台插件、ICU；清理 SDK PATH 后验证 CLI、离屏与 qwindows 启动。`-BothVariants -CreateZip` 可从同次编译部署附带工具及 no-ffmpeg 两版；外部媒体 DLL 与 Qt 媒体依赖隔离。不会下载工具或安装 VC++ 运行库；Windows/PowerShell 原生结果仍需在目标环境记录。
+脚本部署 Qt/媒体/平台插件、ICU；清理 SDK PATH 后验证 CLI、离屏与 qwindows 启动。`-BothVariants -CreateZip` 可从同次编译部署附带工具及 no-ffmpeg 两版；外部媒体 DLL 与 Qt 媒体依赖隔离。显式传 `-DownloadFfmpeg` 可校验下载并缓存 BtbN win64 GPL shared 9.0，或用 `-FfmpegDir` 选择已有工具；默认不下载，不安装 VC++ 运行库；Windows/PowerShell 原生结果仍需在目标环境记录。
 
 ## 本机开发包
 

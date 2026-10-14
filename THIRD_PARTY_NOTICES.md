@@ -48,7 +48,7 @@
 
 没有新增第三方代码、词典、字体或素材。Qt 入口/Windows 子系统、UTF-8 和 ICU i18n/uc/data 继续使用上表的已有组件。当前 Linux 宿主没有 MSVC/MinGW Windows SDK、Windows Qt/ICU，因此没有实际复制或分发 Windows 第三方二进制。
 
-`scripts/build-windows.ps1` 在用户的 Windows 机器上，使用其明确指定的现有 Qt/ICU SDK 部署运行库和 Qt 插件；FFmpeg/ffprobe 只有传入 `-FfmpegDir` 才复制。Qt Multimedia 的 FFmpeg 后端 DLL（若所选 SDK 提供）是 Qt 部署的一部分，与独立 ffmpeg.exe 分开记录。脚本记录真实 Qt/ICU/编译器版本、全部运行文件 SHA-256，收集 SDK 中已有的许可证，并检查所选独立 FFmpeg 不含 enable-nonfree。MSVC 使用已安装的官方 Visual C++ x64 Redistributable，不从编译器目录复制未核来源的 CRT DLL；MinGW 运行库由所选 Qt 的 windeployqt 收集。
+`scripts/build-windows.ps1` 在用户的 Windows 机器上，使用其明确指定的现有 Qt/ICU SDK 部署运行库和 Qt 插件；FFmpeg/ffprobe 只有传入 `-FfmpegDir` 或显式 `-DownloadFfmpeg` 才复制。Qt Multimedia 的 FFmpeg 后端 DLL（若所选 SDK 提供）是 Qt 部署的一部分，与独立 ffmpeg.exe 分开记录。脚本记录真实 Qt/ICU/编译器版本、全部运行文件 SHA-256，收集 SDK 中已有的许可证，并检查所选独立 FFmpeg 不含 enable-nonfree。MSVC 使用已安装的官方 Visual C++ x64 Redistributable，不从编译器目录复制未核来源的 CRT DLL；MinGW 运行库由所选 Qt 的 windeployqt 收集。
 
 Windows 构建依赖的具体许可证、附带媒体库和源码义务以其实际 SDK/二进制为准，不能套用本机 Linux 版本表。MSVC 工具与 Visual C++ Redistributable 使用 Microsoft 的相应许可；当前仅提供调用脚本，没有下载、捆绑或安装它们。Windows 本地构建目录会含运行库，不能仅凭自动收集的许可文件就宣称已完成公开分发审查。源码 ZIP 仅含 Chosuta 自有源码、原有许可文本与原创夹具，没有第三方运行二进制或用户材料。
 
@@ -66,3 +66,9 @@ no-ffmpeg 版不复制该外部工具目录或其许可附件，但仍捆绑所�
 本次图标以维护者提供的原图为唯一像素来源，采用本地工具裁剪留白、白底居中、等比缩放及PNG/ICO编码；保留原有两组笔画和深蓝配色。生成服务曾给出改变笔画的草稿，未采用，也未放入任何源码/应用资源。PNG与多尺寸ICO的字节哈希由公开源码审计脚本逐项固定，其他二进制文件不因此获准进入公开清单。旧原创SVG已从当前根源码移除，历史交付未替换。
 
 预处理使用本机已有Pillow 12.3.0，安装元数据标明MIT-CMU；它仅用于这次资源制作，不移植/捆绑其代码，普通构建和应用运行均不依赖Pillow。Windows资源编译属于已有目标工具链；Linux下使用已有LLVM工具检查资源，仅作开发验证，无新增运行组件或依赖下载。Windows目录调整保留Qt/ICU/媒体依赖的既有许可义务；当前外部工具位置为部署根目录的`tools/ffmpeg/`，历史0.8.2说明中的bin布局不回写。
+
+### 2026-10-14 显式 BtbN 下载与缓存
+
+新增 PowerShell 下载/校验代码和离线测试为 Chosuta 原创 GPL-3.0-or-later 代码，没有复制 BtbN 的构建脚本；仅通过其[官方发布](https://github.com/BtbN/FFmpeg-Builds/releases)取得用户选择的 FFmpeg 9.0 / win64 GPL shared 二进制。缓存记录日期标签、资产名、官方 URL、上游 SHA-256，并保留 ZIP 和原许可；部署复制上游 LICENSE.txt/可用许可证目录以及来源和校验清单。两个媒体工具的 nonfree 配置拒绝规则保持。
+
+FFmpeg 及捆绑库的实际许可和对应源码义务仍需按所选构建核查；BtbN 构建仓库的许可、GitHub 自动生成的该仓库源码 ZIP、SHA-256 或单份 LICENSE 都不能代替完整的 FFmpeg/传递依赖对应源码。缓存和第三方二进制不进入 Chosuta 公开源码。本次环境没有 PowerShell/Windows，未下载该二进制、验证其运行或生成分发包；此处说明取得和记录机制，不宣称已完成具体 Windows 包的许可审核。

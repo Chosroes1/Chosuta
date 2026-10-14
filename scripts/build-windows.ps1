@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Native Windows build + local deployment. No downloads or installations.
+# Native Windows build + local deployment. BtbN download is explicitly opt-in.
 # PowerShell 5.1+; use an existing x64 MSVC developer shell or matching MinGW.
 [CmdletBinding()]
 param(
@@ -8,6 +8,9 @@ param(
     [ValidateSet('MSVC', 'MinGW')][string]$Toolchain = 'MSVC',
     [string]$IcuRuntimeDir = '',
     [string]$FfmpegDir = '',
+    [switch]$DownloadFfmpeg,
+    [string]$FfmpegCacheDir = 'out/deps/btbn',
+    [string]$FfmpegRelease = '',
     [switch]$BothVariants,
     [switch]$CreateZip,
     [string]$BuildDir = 'build-windows',
@@ -18,6 +21,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProjectDir = Split-Path -Parent $PSScriptRoot
 if ($env:OS -ne 'Windows_NT') { throw 'Run this script on Windows, not Linux or WSL.' }
+if ($DownloadFfmpeg -and $FfmpegDir) { throw 'Choose -DownloadFfmpeg or -FfmpegDir, not both.' }
+if (-not $DownloadFfmpeg -and ($PSBoundParameters.ContainsKey('FfmpegCacheDir') -or $PSBoundParameters.ContainsKey('FfmpegRelease'))) {
+    throw '-FfmpegCacheDir and -FfmpegRelease require -DownloadFfmpeg.'
+}
+. (Join-Path $PSScriptRoot 'btbn-ffmpeg.ps1')
+$DownloadedFfmpeg = $null
 
 function Project-Path([string]$Path) {
     if ([IO.Path]::IsPathRooted($Path)) { $FullPath = [IO.Path]::GetFullPath($Path) }
@@ -125,8 +134,8 @@ $IcuDlls = @(Get-ChildItem -LiteralPath $IcuRuntimeDir -Filter '*.dll' -File | W
 foreach ($Pattern in @('^(lib)?icuuc', '^(lib)?icu(in|i18n)', '^(lib)?icu(dt|data)')) {
     if (@($IcuDlls | Where-Object { $_.Name -match $Pattern }).Count -eq 0) { throw "ICU DLL component missing ($Pattern) in $IcuRuntimeDir." }
 }
-if ($BothVariants -and -not $FfmpegDir) { throw '-BothVariants requires -FfmpegDir (existing BtbN GPL shared bin directory).' }
-$Stages = @([pscustomobject]@{ Path = $StageDir; Bundled = [bool]$FfmpegDir })
+if ($BothVariants -and -not ($FfmpegDir -or $DownloadFfmpeg)) { throw '-BothVariants requires -DownloadFfmpeg or -FfmpegDir.' }
+$Stages = @([pscustomobject]@{ Path = $StageDir; Bundled = [bool]($FfmpegDir -or $DownloadFfmpeg) })
 if ($BothVariants) { $Stages += [pscustomobject]@{ Path = "${StageDir}-no-ffmpeg"; Bundled = $false } }
 foreach ($Stage in $Stages) {
     if (Test-Path -LiteralPath $Stage.Path) {
@@ -140,6 +149,19 @@ if ($FfmpegDir) {
     $FfmpegDir = (Resolve-Path -LiteralPath $FfmpegDir).Path
     Require-File (Join-Path $FfmpegDir 'ffmpeg.exe')
     Require-File (Join-Path $FfmpegDir 'ffprobe.exe')
+}
+
+# Network access occurs only after local SDK/tool/output preflight succeeds.
+if ($DownloadFfmpeg) {
+    $FfmpegCacheDir = Project-Path $FfmpegCacheDir
+    foreach ($Directory in @($BuildDir) + @($Stages | ForEach-Object { $_.Path })) {
+        if ($FfmpegCacheDir -eq $Directory -or $FfmpegCacheDir.StartsWith($Directory + '\', [StringComparison]::OrdinalIgnoreCase) -or
+            $Directory.StartsWith($FfmpegCacheDir + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'FfmpegCacheDir must be separate from BuildDir and all StageDir outputs.'
+        }
+    }
+    $DownloadedFfmpeg = Get-BtbnFfmpeg -CacheDir $FfmpegCacheDir -Release $FfmpegRelease
+    $FfmpegDir = $DownloadedFfmpeg.BinDir
 }
 
 # Environment changes are scoped to this invocation and restored on failure.
@@ -206,6 +228,11 @@ try {
             foreach ($Name in @('ffmpeg.exe', 'ffprobe.exe')) { Copy-Checked (Join-Path $FfmpegDir $Name) $MediaDir }
             foreach ($Dll in @(Get-ChildItem -LiteralPath $FfmpegDir -Filter '*.dll' -File)) { Copy-Checked $Dll.FullName $MediaDir }
             Copy-LocalNotices (Split-Path -Parent $FfmpegDir) 'FFmpeg'
+            if ($DownloadedFfmpeg) {
+                foreach ($Name in @('source.json', 'checksums.sha256')) {
+                    Copy-Item -LiteralPath (Join-Path $DownloadedFfmpeg.CacheDir $Name) -Destination (Join-Path $StageDir 'dependency-notices/FFmpeg')
+                }
+            }
             $FfmpegVersion | Set-Content -LiteralPath (Join-Path $ValidationDir 'ffmpeg-version.txt') -Encoding UTF8
         }
         Copy-Item -LiteralPath (Join-Path $BuildDir 'Testing/Temporary/LastTest.log') -Destination (Join-Path $ValidationDir 'ctest.log')
@@ -246,6 +273,7 @@ try {
             build = $BuildInfo
             windeployqt = ($DeployVersion -join "`n")
             ffmpegBundled = $BundleMedia
+            ffmpegDownload = $(if ($BundleMedia -and $DownloadedFfmpeg) { $DownloadedFfmpeg.Source } else { $null })
             variant = $(if ($BundleMedia) { 'with-ffmpeg' } else { 'no-ffmpeg' })
             mediaToolsDirectory = $(if ($BundleMedia) { 'tools/ffmpeg' } else { $null })
             runtimeBytes = ($Files | Measure-Object -Property bytes -Sum).Sum

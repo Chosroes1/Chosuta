@@ -38,7 +38,7 @@ Chosuta是一个导入虚拟歌姬音声合成软件工程与口型立绘后直�
 在本 GitHub 仓库的 **Releases** 页面下载与操作系统和架构匹配的二进制包。文件是否可用、捆绑哪些依赖及验证范围以该 Release 的说明为准；GitHub 自动生成的 Source code ZIP/tar.gz 是源码，需要编译。
 
 - **Arch Linux**：下载 `chosuta-<版本>-<打包修订>-x86_64.pkg.tar.zst`，在下载目录执行 `sudo pacman -U ./chosuta-<版本>-<打包修订>-x86_64.pkg.tar.zst`。安装后运行 `chosuta` 或桌面菜单中的 Chosuta；CLI 为 `chosuta-cli`。本机包不捆绑 Qt/ICU/FFmpeg，由系统包管理器提供依赖。
-- **Windows**：如 Release 提供经过原生验证的运行目录 ZIP，完整解压并运行其中的 `bin/chosuta.exe`；保留 DLL、插件及其他相邻文件。当前仓库提供构建部署脚本，不能据此认定 Windows 二进制已经发布或验证。
+- **Windows**：如 Release 提供经过原生验证的运行目录 ZIP，完整解压并运行其中的 `chosuta.exe`；保留 DLL、插件及其他相邻文件。当前仓库提供构建部署脚本，不能据此认定 Windows 二进制已经发布或验证。
 - **其他 Linux**：只选用 Release 明确匹配目标发行版的包。DEB 可用 `sudo apt install ./<文件名>.deb`，RPM 按目标发行版用其包管理器安装；当前这些目标包尚待实际构建验证。Linux 通用 ZIP 仍需要匹配的系统运行库。
 
 AUR 分发的是构建配方，用户通过 makepkg 得到安装包。当前没有公布 AUR 条目，不能直接给出 yay/paru 安装命令；公开条目需维护者配置真实上游源码地址。详见 [发行版打包说明](docs/packaging.zh-CN.md)。
@@ -65,14 +65,21 @@ cmake --install build --prefix "$PWD/stage"
 
 ### 从源码构建：Windows
 
-在配置好 x64 C++20 工具链的 PowerShell 中，使用已安装的匹配 Qt/ICU 动态 SDK：
+在配置好 x64 C++20 工具链的 PowerShell 5.1+ 中，使用已安装且架构/ABI 匹配的 Qt/ICU 动态 SDK。以下命令自动下载 BtbN FFmpeg，完成构建、测试和部署：
 
 ```powershell
-.\scripts\build-windows.ps1 -QtPrefix '<Qt x64 SDK 前缀>' -IcuPrefix '<ICU x64 SDK 前缀>'
-.\out\windows\Chosuta\bin\chosuta.exe
+.\scripts\build-windows.ps1 `
+  -QtPrefix '<Qt x64 SDK 前缀>' `
+  -IcuPrefix '<ICU x64 SDK 前缀>' `
+  -DownloadFfmpeg
+.\out\windows\Chosuta\chosuta.exe
 ```
 
-脚本构建、测试并部署 Qt/ICU，移除 SDK PATH 后执行启动检查，通过后才显示 Ready。MSVC 为默认工具链；MinGW 需传 `-Toolchain MinGW` 并使用完全匹配的 SDK。脚本不安装依赖、不修改永久 PATH。完整参数和验证边界见 [Windows 构建说明](docs/windows.zh-CN.md)，通用说明见 [构建文档](docs/building.zh-CN.md)。
+`-DownloadFfmpeg` 仅下载 BtbN 的 **win64 GPL shared / FFmpeg 9.0 分支**，同时提供 ffmpeg、ffprobe 和共享 DLL。首次解析日期发布版并校验上游 SHA-256，默认缓存在 `out/deps/btbn/`；后续构建校验并复用缓存，可离线使用，不自动升级。`-FfmpegCacheDir` 可改缓存目录，`-FfmpegRelease 'autobuild-YYYY-MM-DD-HH-MM'` 可指定实际存在的日期发布版。缓存须与构建/部署目录分开；下载失败会停止并报告，不切换供应商或版本。
+
+已有工具时，将 `-DownloadFfmpeg` 换成 `-FfmpegDir '<含 ffmpeg.exe、ffprobe.exe 和 DLL 的 bin 目录>'`，两者互斥。两者都省略则不下载、不附带外部 FFmpeg。添加 `-BothVariants -CreateZip` 可一次编译生成附带工具和 `-no-ffmpeg` 两个目录及 ZIP；无工具版仍保留 Qt 媒体后端。部署目录必须为空，ZIP 不得已存在；重跑可用 `-StageDir 'out/windows/Chosuta-new'` 指定新目录。
+
+Qt、ICU、CMake、Ninja、编译器及官方 VC++ x64 Redistributable 仍需事先准备；脚本不安装它们或修改永久 PATH。MSVC 为默认工具链，MinGW 使用匹配 SDK 并传 `-Toolchain MinGW`。测试和清理 SDK PATH 后的启动检查全部通过才显示 Ready。当前下载路径和部署仍待 Windows 原生验证。详见 [Windows 构建说明](docs/windows.zh-CN.md)与[构建文档](docs/building.zh-CN.md)。
 
 ## 5. 使用说明
 
@@ -137,6 +144,10 @@ THIRD_PARTY_NOTICES.md       实际组件、来源与分发状态
 | Python 3、makepkg、fakeroot | 本地开发打包辅助 | 仅开发用途；不捆绑，不成为应用运行依赖 |
 
 内置中英日轻量读音表、图标和测试素材为 Chosuta 原创，按项目 GPLv3 许可分发。没有集成完整 CMUdict、OpenJTalk、SV 程序或声库，也没有捆绑第三方字体。具体已验证版本、来源与附带条款见 [第三方组件清单](THIRD_PARTY_NOTICES.md)，许可核查见 [兼容性说明](docs/license-review.zh-CN.md)。
+
+Windows 构建辅助需要 PowerShell 5.1+；应用运行不依赖 PowerShell/Python。Qt SDK 需含 Core、Gui、Widgets、Concurrent、Multimedia、Test 和 windeployqt；ICU SDK 需含 i18n/uc/data 的头文件、导入库和共享 DLL，架构/编译器必须匹配。
+
+Windows 可用 `-DownloadFfmpeg` 从 [BtbN 官方发布页](https://github.com/BtbN/FFmpeg-Builds/releases)获取 GPL shared 9.0 工具；也可用 `-FfmpegDir` 提供本地构建。不指定这两个参数时不下载、不附带外部工具。源码仓库不包含下载缓存或第三方二进制。下载校验和许可文件收集不替代具体构建的许可证、传递依赖与对应源码义务核查；实际版本、来源和 SHA-256 随部署记录。
 
 ## 9. AI 使用声明
 

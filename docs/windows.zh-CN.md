@@ -12,7 +12,7 @@
 - MSVC 构建机器已有官方 **Visual C++ x64 Redistributable**。脚本不会安装它，也不会从 Visual Studio 目录随意复制编译器 DLL；部署后移除 SDK PATH 的启动检查会发现缺失运行库。MinGW 使用 windeployqt 部署其对应运行库。
 - FFmpeg/ffprobe 可选。没有音频和编码工具也可运行、导入、预览、编辑与保存；完整视频回归需 libx264、libvpx-vp9、qtrle、AAC/libopus。可在导出设置中指定现有 FFmpeg，或用脚本参数 `-FfmpegDir` 指定现有工具的 `bin` 目录以一起复制。
 
-脚本只使用本机已有组件，不安装、下载依赖或修改系统配置。Qt 部署使用 [官方 windeployqt 流程](https://doc.qt.io/qt-6.8/windows-deployment.html)；额外复制应用直接依赖的 ICU，因为 windeployqt 不负责收集所有非 Qt 第三方库。ICU 的定位使用 [CMake FindICU](https://cmake.org/cmake/help/latest/module/FindICU.html)。
+默认只使用本机已有组件；仅显式传 `-DownloadFfmpeg` 才下载 BtbN。脚本不安装 Qt/ICU/编译器或修改系统配置。Qt 部署使用 [官方 windeployqt 流程](https://doc.qt.io/qt-6.8/windows-deployment.html)；额外复制应用直接依赖的 ICU，因为 windeployqt 不负责收集所有非 Qt 第三方库。ICU 的定位使用 [CMake FindICU](https://cmake.org/cmake/help/latest/module/FindICU.html)。
 
 ## 一条命令完成构建和部署
 
@@ -42,9 +42,29 @@ MinGW：
 
 相对构建/输出路径按**源码根目录**解析，不依赖当前工作目录；支持空格和 Unicode。默认使用 Ninja/Release，启用并运行所有 CTest；失败即停止，不把尚未验证的目录标为就绪。
 
+## 自动下载 BtbN（显式启用）
+
+```powershell
+.\scripts\build-windows.ps1 `
+  -QtPrefix '<Qt x64 SDK 前缀>' `
+  -IcuPrefix '<ICU x64 SDK 前缀>' `
+  -DownloadFfmpeg -BothVariants -CreateZip `
+  -StageDir 'out/windows/Chosuta-auto'
+```
+
+自动取得 **FFmpeg 9.0 分支 / win64 GPL shared** 的 ffmpeg、ffprobe 和共享 DLL。首次通过 [BtbN 官方发布 API](https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=20)选择最新可见日期标签，按该标签读取 ZIP 与 `checksums.sha256`；不直接下载浮动 latest，不回退到 master/static/LGPL/其他架构。若所选发布缺少该分支则明确停止。
+
+默认缓存 `out/deps/btbn/`，相对路径按源码根解析。`selected-release.txt` 固定默认选择，各日期目录保留原 ZIP、校验清单、`source.json` 和完整解包内容。再次执行会校验 ZIP 和解包文件，再离线复用，不静默升级。需要特定/更新日期时传 `-FfmpegRelease 'autobuild-YYYY-MM-DD-HH-MM'`（替换为实际标签）；显式日期不改变默认选择。需要重新选择默认日期，可指定新的 `-FfmpegCacheDir`。缓存与 BuildDir/StageDir 不得互相包含。
+
+下载前先检查本机 SDK、编译工具和输出目录；下载失败、SHA-256 不符、危险 ZIP 路径或缓存损坏均停止，不执行未校验的工具。失败只清理本次临时下载目录，现有缓存不删、不覆盖。出现缓存损坏可先保留现场，再换新缓存目录；网络不可用时可用 `-FfmpegDir` 指向已有合规构建。上游可能清理旧日期发布，已有完整缓存仍可离线复用；固定日期重新下载是否可用取决于上游保留情况。
+
+自动下载不需要 Python、包管理器、管理员权限或账户凭据，不安装 Qt/ICU/编译器/VC++ 运行库，也不修改永久 PATH。首次联网及 ZIP/解包占用是用户选择本参数后的构建成本；具体下载量以所选发布为准。部署仍仅复制两个 EXE、bin 中 DLL 及许可文件，来源/校验清单写入 `dependency-notices/FFmpeg` 和运行清单；no-ffmpeg 版不复制这些外部工具。
+
+Windows CTest 新增 `btbn-download-policy`，使用原创小型 ZIP 和模拟网络，验证选择、离线缓存、损坏/失败清理、路径穿越和错误供应商 URL；测试不联网、不执行夹具 EXE。可单独运行 `powershell -NoProfile -NonInteractive -File .\tests\btbn_download_test.ps1`。当前 Linux 环境没有 PowerShell，尚未执行该夹具或 Windows 真实下载/部署；不能把源码审查和 Linux 打包回归当作原生验证。
+
 ## 一次编译生成两种包
 
-使用已有的 BtbN **win64 GPL shared** 解压目录；`-FfmpegDir` 指向其中同时含 `ffmpeg.exe`、`ffprobe.exe` 和共享 DLL 的 `bin`。此脚本不下载或自行编译 FFmpeg，也不让这套 DLL 与 Qt 共用。
+使用已有的 BtbN **win64 GPL shared** 解压目录；`-FfmpegDir` 指向其中同时含 `ffmpeg.exe`、`ffprobe.exe` 和共享 DLL 的 `bin`。也可将 `-FfmpegDir` 换成 `-DownloadFfmpeg` 自动取得 BtbN；两者互斥。脚本不自行编译 FFmpeg，也不让这套 DLL 与 Qt 共用。
 
 ```powershell
 .\scripts\build-windows.ps1 `
@@ -60,7 +80,7 @@ MinGW：
 - `out/windows/Chosuta-0.9.3/` 和 `.zip`：附带外部工具。
 - `out/windows/Chosuta-0.9.3-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
 
-`-BothVariants` 必须与 `-FfmpegDir` 一起用；不传 `-CreateZip` 只生成目录。只要 no-ffmpeg 版时，省略 `-FfmpegDir`／`-BothVariants`，直接把 `-StageDir` 命名为所需的 no-ffmpeg 名称。目录必须为空，ZIP 必须不存在，不覆盖原产物。
+`-BothVariants` 必须与 `-FfmpegDir` 或 `-DownloadFfmpeg` 一起用；不传 `-CreateZip` 只生成目录。只要 no-ffmpeg 版时，省略 `-FfmpegDir`／`-DownloadFfmpeg`／`-BothVariants`，直接把 `-StageDir` 命名为所需的 no-ffmpeg 名称。目录必须为空，ZIP 必须不存在，不覆盖原产物。
 
 no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.exe`，同目录保留 `ffprobe.exe` 和该构建的共享 DLL，然后“检测媒体工具”，确定保存。检测报告显示实际工具路径、版本及缺失能力；这不能替代实际导出和剪辑软件导入验收。命令行也可检查：
 
@@ -118,7 +138,7 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 
 qwindows 冒烟证明可启动并跑完整原创流程，仍需人工检查真实输入法、高 DPI、拖动、音频设备播放和视频封装。用户歌曲/立绘只用于自己的本地验收，公开源码包只有原创最小夹具。
 
-应用源码为 **GPL-3.0-or-later**。本地部署目录会包含用户所选 SDK 的实际 DLL/插件；收集到的 SDK 许可不等于已完成其所有分发义务。对外分发前需按该目录的具体 Qt/ICU/媒体库/编译器运行库补齐对应源码、NOTICE 和许可条款；当前仅更新根目录构建入口，没有下载 BtbN、生成新的 Windows 包或更新已有源码包。实际组件记录见 `THIRD_PARTY_NOTICES.md`。
+应用源码为 **GPL-3.0-or-later**。本地部署目录会包含用户所选 SDK 的实际 DLL/插件；收集到的 SDK 许可不等于已完成其所有分发义务。对外分发前需按该目录的具体 Qt/ICU/媒体库/编译器运行库补齐对应源码、NOTICE 和许可条款；本次新增显式下载入口及离线夹具，没有在本机下载 BtbN 二进制或生成 Windows 包，既有 Release 未改写。实际组件记录见 `THIRD_PARTY_NOTICES.md`。
 
 Qt 常用标准控件采用应用内原创中日译文，随应用编译；部署脚本的 `--no-translations` 不会删掉这些译文，不需另下载 qm。系统原生文件/颜色对话框仍可能跟随 Windows 语言；本轮只在 Linux 非原生 Qt 对话框验证，不能据此称 Windows 本地化验收完成。
 
