@@ -3,6 +3,7 @@
 #include "ui/window.h"
 #include "core/executable.h"
 #include <QScopeGuard>
+#include <QRawFont>
 using namespace chosuta;
 static MediaTools testMediaTools(const QString &path="ffmpeg"){return selectMediaTools(path,ToolSelection::Explicit);}
 #if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
@@ -26,7 +27,13 @@ class UiTest:public QObject {
     Q_OBJECT
     QTemporaryDir settings;
     private slots:
-    void initTestCase(){QVERIFY(settings.isValid());QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());}
+    void initTestCase(){
+        QVERIFY(settings.isValid());QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
+        const auto font=QRawFont::fromFont(QApplication::font());
+        qInfo().noquote()<<"UI test platform:"<<QGuiApplication::platformName()<<"font:"<<font.familyName();
+        // Qt's missing-font box engine can report valid=true, but has no family.
+        QVERIFY2(font.isValid()&&!font.familyName().isEmpty(),"UI layout tests require a usable font. On Windows run CTest with the native windows platform in a desktop session; offscreen may lack system fonts.");
+    }
     void init(){setDefaultFfmpegExecutable({});Preferences p;const auto language=qEnvironmentVariable("CHOSUTA_TEST_UI_LANGUAGE");if(!language.isEmpty())p.language=language;savePreferences(p);}
     void localizedControlsAndErrors(){
         for(const auto &language:QStringList{"zh","en","ja"}){

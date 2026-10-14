@@ -1,6 +1,6 @@
 # 构建、验证与本地打包
 
-当前根源码为 0.9.2/schema14。C++20、CMake ≥3.24、Qt ≥6.4、ICU ≥67；使用已经安装且状态一致的开发环境，不自动下载依赖。Linux 构建结果不能代替 Windows 原生验证。
+当前根源码为 0.9.3/schema14。C++20、CMake ≥3.24、Qt ≥6.4、ICU ≥67；使用已经安装且状态一致的开发环境，不自动下载依赖。Linux 构建结果不能代替 Windows 原生验证。
 
 ## Linux
 
@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 
 ## 当前回归入口
 
-CTest 的 `core`、`ui-workflow`、`gui-smoke` 使用离屏平台；Linux 上找到 Python 时另启用 `packaging-preflight`。缺 FFmpeg 的媒体测试明确跳过。私有样本未提供时私有检查跳过，不复制用户材料到公开测试。
+CTest 的 `core`、`ui-workflow`、`gui-smoke` 在Windows使用原生 `windows` 平台及系统字体（需要可用桌面会话），其他平台使用 `offscreen`；Linux 上找到 Python 时另启用 `packaging-preflight`。缺 FFmpeg 的媒体测试明确跳过。私有样本未提供时私有检查跳过，不复制用户材料到公开测试。
 
 - 当前 Linux Debug/Release 各 CTest 4/4，核心 52、UI 32 无失败/跳过；离屏结果不代表真实桌面或 Windows 验收。
 - 新增 `structuredMessagesAndReasons`、`localizedControlsAndErrors`、`localizedIdsAndUndo`、`localizedPerformanceReasons`、`unknownCopyAndImport`；涵盖三语实际控件、保存点/撤销、结构化理由、错误原文、素材回退与保存重开。
@@ -33,6 +33,8 @@ CHOSUTA_TEST_UI_LANGUAGE=ja QT_QPA_PLATFORM=offscreen ./build/chosuta-ui-tests p
 ```
 
 `CHOSUTA_COMPACT_ARTIFACTS=<本机目录>` 可保存三语 1024×768、1366×768 截图；`CHOSUTA_ADVANCED_ARTIFACTS`、`CHOSUTA_WAVEFORM_ARTIFACTS`、`CHOSUTA_SUBTITLE_ARTIFACTS` 用于对应原创测试产物。这些可选证据不进入公开源码包。离屏/合成色图不等于真实桌面、输入法、声卡、完整立绘效果或 Windows 验收。
+
+0.9.3 修正 Windows 离屏环境缺少字体导致的小屏布局测试失败；UI 测试入口检查真实字体可用性并输出平台/字体，保留三语及1024×768/1366×768尺寸断言。仅修改脚本外的环境变量不能代替重新运行CMake，因为CTest属性会指定测试平台。
 
 ## Windows
 

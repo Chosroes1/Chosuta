@@ -1,10 +1,10 @@
 # Windows 编译、部署与验证
 
-当前源码版本 **0.9.2**。这里提供 Windows 原生编译和编译后运行的完整入口。当前开发环境为 Linux，没有 Windows 编译器和 Windows 版 Qt/ICU，因此尚无 Windows EXE 或原生测试通过的证据；以下脚本将在 Windows 上执行构建、测试、DLL/插件部署和部署后启动验证。
+当前源码版本 **0.9.3**。这里提供 Windows 原生编译和编译后运行的完整入口。0.9.2的Windows反馈已确认程序进入CTest、核心与GUI烟测通过，但离屏字体缺失使小屏测试失败。0.9.3改为原生平台执行CTest；本地开发环境为Linux，没有Windows编译器和Windows版Qt/ICU，这次修复仍需在Windows原生复验，不宣称部署已通过。
 
 ## 所需已有环境
 
-- Windows 10/11 **x64**，PowerShell 5.1 或更新版本。
+- Windows 10/11 **x64**，PowerShell 5.1 或更新版本；测试时需要已登录、可用的交互桌面会话。
 - C++20 编译器。默认使用 MSVC（例如 Visual Studio 2022 的 C++ 工具），在 **x64 Native Tools / Developer PowerShell** 中执行；也可用与 Qt 完全匹配的 x86_64 MinGW，通过 `-Toolchain MinGW` 选择。
 - CMake ≥3.24、Ninja，均在当前终端 PATH 中。
 - 同一架构/编译器的 **Qt ≥6.4 动态 SDK**，包含 Core、Gui、Widgets、Concurrent、Multimedia、Test 及 `bin/windeployqt.exe`。`QtPrefix` 指向具体编译器套件目录，其下有 `bin`、`lib/cmake/Qt6` 和 `plugins`，不是 Qt 安装器根目录。
@@ -52,20 +52,20 @@ MinGW：
   -IcuPrefix '<ICU x64 SDK 前缀>' `
   -FfmpegDir '<BtbN GPL shared 的 bin 目录>' `
   -BothVariants -CreateZip `
-  -StageDir 'out/windows/Chosuta-0.9.2'
+  -StageDir 'out/windows/Chosuta-0.9.3'
 ```
 
 只编译／跑 CTest 一次，再各自部署、验证两种目录；全部成功后才压缩：
 
-- `out/windows/Chosuta-0.9.2/` 和 `.zip`：附带外部工具。
-- `out/windows/Chosuta-0.9.2-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
+- `out/windows/Chosuta-0.9.3/` 和 `.zip`：附带外部工具。
+- `out/windows/Chosuta-0.9.3-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
 
 `-BothVariants` 必须与 `-FfmpegDir` 一起用；不传 `-CreateZip` 只生成目录。只要 no-ffmpeg 版时，省略 `-FfmpegDir`／`-BothVariants`，直接把 `-StageDir` 命名为所需的 no-ffmpeg 名称。目录必须为空，ZIP 必须不存在，不覆盖原产物。
 
 no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.exe`，同目录保留 `ffprobe.exe` 和该构建的共享 DLL，然后“检测媒体工具”，确定保存。检测报告显示实际工具路径、版本及缺失能力；这不能替代实际导出和剪辑软件导入验收。命令行也可检查：
 
 ```powershell
-.\out\windows\Chosuta-0.9.2-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
+.\out\windows\Chosuta-0.9.3-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
 ```
 
 如果手动从完整版复制出 no-ffmpeg 目录，删的是副本中的整个 `tools/ffmpeg/`，而不是只删两个 EXE，更不能删除部署根目录中的 Qt DLL。手动修改会令原来的清单和验证日志失效，正式交付建议直接使用双版本脚本。
@@ -95,14 +95,14 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 
 必须保留整个 `Chosuta` 目录，不能只拿走 EXE。目录内有 Qt DLL、平台/图像/媒体插件、ICU DLL、`qt.conf`、应用许可与操作说明。GUI 使用 Windows 子系统，启动不附带控制台；CLI 保留控制台输出。
 
-0.9.2 将附带的外部命令行工具放在 `tools/ffmpeg/`，与 Qt 的媒体 DLL 分开。查找顺序为本机已采纳的工程路径 → 本机默认 → `tools/ffmpeg/` → 应用 EXE 同目录 → PATH；明确指定的错误路径不会静默换用其他 FFmpeg。ffprobe 先查所选 FFmpeg 同目录，再查附带工具、应用目录、PATH。导出设置提供本机默认路径、工程路径建议/采纳、浏览及后台检测；未采纳的显式工程路径不会执行，FFmpeg/ffprobe文件身份变化后需重新采纳。
+0.9.3 将附带的外部命令行工具放在 `tools/ffmpeg/`，与 Qt 的媒体 DLL 分开。查找顺序为本机已采纳的工程路径 → 本机默认 → `tools/ffmpeg/` → 应用 EXE 同目录 → PATH；明确指定的错误路径不会静默换用其他 FFmpeg。ffprobe 先查所选 FFmpeg 同目录，再查附带工具、应用目录、PATH。导出设置提供本机默认路径、工程路径建议/采纳、浏览及后台检测；未采纳的显式工程路径不会执行，FFmpeg/ffprobe文件身份变化后需重新采纳。
 
 缺少外部 FFmpeg 时视频导出、波形解码和重新进行波形时间校正不可用；工程生成、编辑、保存仍可用。ffprobe 缺失时音频时长需手动设置。试听依赖 Qt Multimedia，no-ffmpeg 版也必须保留 windeployqt 部署的 Qt 媒体 DLL／插件。
 
 ## 脚本实际检查什么
 
 1. 检查 SDK、编译器与目标 Windows x64，配置 C++20、MSVC UTF-8、Qt 应用入口和 ICU i18n/uc/data。
-2. 构建 GUI/CLI/测试，执行 `ctest --output-on-failure`。公开源码包不含用户原始 SVP，私有样本回归会明确跳过；缺少 FFmpeg/ffprobe 的可选编码测试也会跳过，实际详情保存在日志中。
+2. 构建 GUI/CLI/测试，执行 `ctest --output-on-failure`。Windows三组CTest统一使用原生 `windows` 平台读取系统字体，UI测试输出平台/字体并检查可用性，保留小窗口尺寸断言。公开源码包不含用户原始 SVP，私有样本回归会明确跳过；缺少 FFmpeg/ffprobe 的可选编码测试也会跳过，实际详情保存在日志中。
 3. 以 CMake 安装应用和许可，使用所选 SDK 的 windeployqt 部署 GUI/CLI；单独复制 ICU 和离屏插件，检查 qwindows，写入相对插件路径的 `qt.conf`。
 4. 如果选择复制 FFmpeg，分别检查 ffmpeg/ffprobe 的版本/构建配置并拒绝 `--enable-nonfree`；两个 EXE 和指定 bin 目录的全部 DLL 原样放到 `tools/ffmpeg/`，不复制 ffplay、不自行裁剪供应商 DLL。Qt 所需 DLL 留在原位置；同一目标位置的同名文件哈希不同时拒绝覆盖。
 5. 清除当前进程的 Qt 插件/SDK 环境覆盖，并把 PATH 限于部署目录与 Windows 系统目录；附带版先运行 `--check-media-tools` 检查两个工具启动及当前编码器/滤镜，再分别运行 CLI `--version`、GUI 离屏完整冒烟、**Windows qwindows 实际窗口启动**完整冒烟。每项有 45 秒超时及独立 stdout/stderr 日志；这几项均通过后才生成成功清单并显示 Ready。
@@ -144,3 +144,11 @@ Chosuta/
 CMake只对Windows将应用安装到前缀根目录，Linux继续使用bin。构建脚本的部署、清理SDK环境后的启动验证、RUN说明和清单均指向根chosuta.exe；媒体工具仍相对程序目录查找。MSVC的`/utf-8`限定为C++编译，不传给RC；ICO路径通过资源包含目录传递，避免把本机绝对路径或Unicode目录写进RC字符串。
 
 本轮Linux下用已有llvm-rc/llvm-cvtres检查了7张图层及图标组资源，不能替代Windows完整链接、资源管理器显示或PowerShell部署验证。
+
+## 0.9.3：重试此前的小屏测试失败
+
+0.9.2使用offscreen时可能因找不到Qt SDK下的字体目录，使compactWorkspace窗口宽度被撑大而失败。0.9.3在CMake中选择Windows原生测试平台，不依赖向SDK复制字体，也不跳过该测试。
+
+用0.9.3源码，在已有SDK/编译器终端重新运行上面的构建脚本即可；它会重新配置CMake，将CTest平台更新为windows。SDK/编译器没有变化时可复用原BuildDir以增量编译；StageDir请选择新的空目录，例如 `out/windows/Chosuta-0.9.3`。README由作者维护，若其中版本较旧，以本页和实际CMake版本为准。
+
+若需要单独复验，在相同Qt/ICU运行环境中执行 `ctest --test-dir build-windows -R ui-workflow -V`，检查日志显示 `QT_QPA_PLATFORM=windows` 以及UI测试的平台/字体输出。环境变量设置不会替代CMake重新配置。完整脚本还会继续执行核心/GUI测试、部署以及两种平台烟测，全部成功后才产生打包结果。此次Linux验证不替代这一步Windows验证。

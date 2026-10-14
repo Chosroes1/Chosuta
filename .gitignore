@@ -27,3 +27,6 @@ __pycache__/
 /docs/feasibility.zh-CN.md
 /docs/svp-controlled-diff.json
 *.pkg.tar.*
+
+# User-provided local build diagnostics
+/winlog/
