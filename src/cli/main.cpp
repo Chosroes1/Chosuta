@@ -80,7 +80,7 @@ int main(int argc,char**argv) {
     std::signal(SIGTERM,cancelSignal);
     try {
         if(parser.isSet("check-media-tools")){
-            const auto info=inspectMediaTools(selectMediaTools(parser.isSet("ffmpeg")?parser.value("ffmpeg"):QString("ffmpeg"),ToolSelection::Explicit),cancelled);
+            const auto info=inspectMediaTools(selectMediaTools(parser.isSet("ffmpeg")?parser.value("ffmpeg"):QString("ffmpeg")),cancelled);
             QJsonObject result{{"ready",info.ready()},{"ffmpeg",info.ffmpeg},{"ffprobe",info.ffprobe},
                 {"ffmpegVersion",info.ffmpegVersion},{"ffprobeVersion",info.ffprobeVersion},
                 {"errors",QJsonArray::fromStringList(messageStrings(info.errors))},{"missingEncoders",QJsonArray::fromStringList(info.missingEncoders)},
@@ -268,13 +268,12 @@ int main(int argc,char**argv) {
         if(!input.endsWith(".chosuta",Qt::CaseInsensitive)||parser.isSet("tracks")||parser.isSet("language")||parser.isSet("dictionary")||parser.isSet("custom-dictionary")||parser.isSet("japanese-kanji")||parser.isSet("no-japanese-kanji")||parser.isSet("consonant-settings"))p.regenerate();
         auto importPlan=[&](const AssetImportPlan &plan){
             if(!plan.error.isEmpty())throw Failure(plan.error);
-            QVector<AssetImportEntry> entries;QSet<QString> replace;
+            QVector<AssetImportEntry> entries;
             for(const auto &entry:plan.entries){
-                if(entry.status=="conflict"||entry.status=="invalid")throw Failure(entry.status+": "+entry.path+": "+entry.message.text());
-                if(entry.status=="new"||(entry.status=="replace"&&parser.isSet("force"))){entries.append(entry);if(parser.isSet("force"))replace.insert(entry.id);}
+                if(entry.status=="new"||entry.status=="conflict"||(entry.status=="replace"&&parser.isSet("force")))entries.append(entry);
                 else std::cerr<<(entry.status+": skipped "+entry.path).toStdString()<<"\n";
             }
-            applyAssetImport(p,entries,replace);
+            applyAssetImport(p,entries);
             for(const auto &group:plan.groups)p.performance.groups.append(group);
             validatePerformance(p);
         };
@@ -317,7 +316,7 @@ int main(int argc,char**argv) {
             p.timing.sources.clear();p.timing.enabled=false;
             double shift=p.timing.maxShift*1000,stretch=p.timing.maxDurationChange*100;real("max-shift",shift);real("max-duration-change",stretch);
             p.timing.maxShift=shift/1000;p.timing.maxDurationChange=stretch/100;validateTimingCorrection(p);
-            auto decoded=readWaveform(p.audioPath,selectMediaTools(p.output.ffmpeg,parser.isSet("ffmpeg")?ToolSelection::Explicit:ToolSelection::Project),cancelled,{},p.audioDuration);
+            auto decoded=readWaveform(p.audioPath,selectMediaTools(p.output.ffmpeg),cancelled,{},p.audioDuration);
             if(decoded.cancelled)return 130;if(!decoded.error.isEmpty())throw Failure(decoded.error);
             std::cout<<"Waveform: "<<decoded.wave->bins.size()<<" bins, "<<decoded.wave->storageBytes()<<" summary bytes, "<<decoded.wave->duration()<<" seconds\n";
             auto result=correctWaveform(p,*decoded.wave,cancelled);
@@ -335,7 +334,7 @@ int main(int argc,char**argv) {
             std::cout<<p.generated.size()<<" estimated events\n";
             return 0;
         }
-        auto result=exportVideo(p,selectMediaTools(p.output.ffmpeg,parser.isSet("ffmpeg")?ToolSelection::Explicit:ToolSelection::Project),args[2],cancelled,[](int n) {
+        auto result=exportVideo(p,selectMediaTools(p.output.ffmpeg),args[2],cancelled,[](int n) {
             std::cerr<<"\r"<<n<<"%   "<<std::flush;
         },parser.isSet("force"));
         std::cerr<<'\n';

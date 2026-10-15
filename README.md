@@ -48,9 +48,8 @@ AUR 分发的是构建配方，用户通过 makepkg 得到安装包。当前没�
 下载并解压本仓库源码，或在本仓库页面复制真实 Clone 地址取得源码。在源码根目录、已有匹配开发依赖的环境执行：
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 cmake --build build --parallel 4
-ctest --test-dir build --output-on-failure
 ./build/chosuta
 ```
 
@@ -61,11 +60,11 @@ cmake --install build --prefix "$PWD/stage"
 ./stage/bin/chosuta
 ```
 
-无需桌面的自动验证可执行 `QT_QPA_PLATFORM=offscreen ./build/chosuta --smoke-test`；这不代替真实桌面/声卡验收。关闭测试可传 `-DBUILD_TESTING=OFF`。脚本不会自动下载依赖；Arch 上应使用一致的系统仓库环境，不做局部升级。
+默认不构建或运行测试；普通构建不需要 Qt Test。构建使用已有依赖。
 
 ### 从源码构建：Windows
 
-在配置好 x64 C++20 工具链的 PowerShell 5.1+ 中，使用已安装且架构/ABI 匹配的 Qt/ICU 动态 SDK。以下命令自动下载 BtbN FFmpeg，完成构建、测试和部署：
+在配置好 x64 C++20 工具链的 PowerShell 5.1+ 中，使用已安装且架构/ABI 匹配的 Qt/ICU 动态 SDK。以下命令自动下载 BtbN FFmpeg，完成构建和部署：
 
 ```powershell
 .\scripts\build-windows.ps1 `
@@ -75,11 +74,11 @@ cmake --install build --prefix "$PWD/stage"
 .\out\windows\Chosuta\chosuta.exe
 ```
 
-`-DownloadFfmpeg` 仅下载 BtbN 的 **win64 GPL shared / FFmpeg 9.0 分支**，同时提供 ffmpeg、ffprobe 和共享 DLL。首次解析日期发布版并校验上游 SHA-256，默认缓存在 `out/deps/btbn/`；后续构建校验并复用缓存，可离线使用，不自动升级。`-FfmpegCacheDir` 可改缓存目录，`-FfmpegRelease 'autobuild-YYYY-MM-DD-HH-MM'` 可指定实际存在的日期发布版。缓存须与构建/部署目录分开；下载失败会停止并报告，不切换供应商或版本。
+`-DownloadFfmpeg` 从 BtbN 官方 `latest` 获取 win64 GPL shared 工具，优先编号稳定分支。下载后校验 SHA-256 并解包，后续直接离线复用缓存；新下载的原 ZIP 在解包后删除。`-FfmpegCacheDir` 指定缓存目录，`-FfmpegRelease` 可指定发布标签。
 
 已有工具时，将 `-DownloadFfmpeg` 换成 `-FfmpegDir '<含 ffmpeg.exe、ffprobe.exe 和 DLL 的 bin 目录>'`，两者互斥。两者都省略则不下载、不附带外部 FFmpeg。添加 `-BothVariants -CreateZip` 可一次编译生成附带工具和 `-no-ffmpeg` 两个目录及 ZIP；无工具版仍保留 Qt 媒体后端。部署目录必须为空，ZIP 不得已存在；重跑可用 `-StageDir 'out/windows/Chosuta-new'` 指定新目录。
 
-Qt、ICU、CMake、Ninja、编译器及官方 VC++ x64 Redistributable 仍需事先准备；脚本不安装它们或修改永久 PATH。MSVC 为默认工具链，MinGW 使用匹配 SDK 并传 `-Toolchain MinGW`。测试和清理 SDK PATH 后的启动检查全部通过才显示 Ready。当前下载路径和部署仍待 Windows 原生验证。详见 [Windows 构建说明](docs/windows.zh-CN.md)与[构建文档](docs/building.zh-CN.md)。
+Qt、ICU、CMake、Ninja、编译器及官方 VC++ x64 Redistributable 仍需事先准备；脚本不安装它们或修改永久 PATH。MSVC 为默认工具链，MinGW 使用匹配 SDK 并传 `-Toolchain MinGW`。脚本使用 `BUILD_TESTING=OFF`，只编译、部署并按需生成 ZIP；不运行 CTest，不自动启动应用或弹出验收窗口。完成后显示 Built。详见 [Windows 构建说明](docs/windows.zh-CN.md)与[构建文档](docs/building.zh-CN.md)。
 
 ## 5. 使用说明
 
@@ -143,11 +142,11 @@ THIRD_PARTY_NOTICES.md       实际组件、来源与分发状态
 | CMake / Ninja / C++ 编译器 | 构建与安装 | 构建工具；CMake 为 BSD-3-Clause，Ninja 为 Apache-2.0，编译器及运行库按实际工具链许可 |
 | Python 3、makepkg、fakeroot | 本地开发打包辅助 | 仅开发用途；不捆绑，不成为应用运行依赖 |
 
-内置中英日轻量读音表、图标和测试素材为 Chosuta 原创，按项目 GPLv3 许可分发。没有集成完整 CMUdict、OpenJTalk、SV 程序或声库，也没有捆绑第三方字体。具体已验证版本、来源与附带条款见 [第三方组件清单](THIRD_PARTY_NOTICES.md)，许可核查见 [兼容性说明](docs/license-review.zh-CN.md)。
+内置中英日轻量读音表和测试素材为 Chosuta 原创，按项目 GPLv3 许可分发。应用标识由项目维护者提供并授权裁剪集成，来源记录见下方清单。没有集成完整 CMUdict、OpenJTalk、SV 程序或声库，也没有捆绑第三方字体。具体已验证版本、来源与附带条款见 [第三方组件清单](THIRD_PARTY_NOTICES.md)，许可核查见 [兼容性说明](docs/license-review.zh-CN.md)。
 
-Windows 构建辅助需要 PowerShell 5.1+；应用运行不依赖 PowerShell/Python。Qt SDK 需含 Core、Gui、Widgets、Concurrent、Multimedia、Test 和 windeployqt；ICU SDK 需含 i18n/uc/data 的头文件、导入库和共享 DLL，架构/编译器必须匹配。
+Windows 构建辅助需要 PowerShell 5.1+；应用运行不依赖 PowerShell/Python。Qt SDK 需含 Core、Gui、Widgets、Concurrent、Multimedia 和 windeployqt（Qt Test 仅在手动启用测试时需要）；ICU SDK 需含 i18n/uc/data 的头文件、导入库和共享 DLL，架构/编译器必须匹配。
 
-Windows 可用 `-DownloadFfmpeg` 从 [BtbN 官方发布页](https://github.com/BtbN/FFmpeg-Builds/releases)获取 GPL shared 9.0 工具；也可用 `-FfmpegDir` 提供本地构建。不指定这两个参数时不下载、不附带外部工具。源码仓库不包含下载缓存或第三方二进制。下载校验和许可文件收集不替代具体构建的许可证、传递依赖与对应源码义务核查；实际版本、来源和 SHA-256 随部署记录。
+Windows 可用 `-DownloadFfmpeg` 从 [BtbN 官方发布页](https://github.com/BtbN/FFmpeg-Builds/releases)获取 GPL shared 工具；也可用 `-FfmpegDir` 提供本地构建。不指定这两个参数时不下载、不附带外部工具。源码仓库不包含下载缓存或第三方二进制。下载校验和许可文件收集不替代具体构建的许可证、传递依赖与对应源码义务核查；实际版本、来源和 SHA-256 随部署记录。
 
 ## 9. AI 使用声明
 

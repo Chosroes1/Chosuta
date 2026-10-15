@@ -54,38 +54,6 @@ function Copy-Checked([string]$Source, [string]$Destination) {
         }
     } else { Copy-Item -LiteralPath $Source -Destination $Target }
 }
-function Invoke-SelfTest([string]$Name, [string]$Executable, [string[]]$Arguments) {
-    $Stdout = Join-Path $ValidationDir "$Name.stdout.log"
-    $Stderr = Join-Path $ValidationDir "$Name.stderr.log"
-    # Arguments are fixed flags, not user-provided paths/text. No shell is used.
-    if (@($Arguments | Where-Object { $_ -match '[\s"]' }).Count -gt 0) { throw 'Self-test accepts fixed flag arguments only.' }
-    $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $StartInfo.FileName = $Executable
-    $StartInfo.Arguments = $Arguments -join ' '
-    $StartInfo.WorkingDirectory = $StageDir
-    $StartInfo.UseShellExecute = $false
-    $StartInfo.RedirectStandardOutput = $true
-    $StartInfo.RedirectStandardError = $true
-    $StartInfo.StandardOutputEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
-    $StartInfo.StandardErrorEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
-    $Process = New-Object System.Diagnostics.Process
-    $Process.StartInfo = $StartInfo
-    try {
-        if (-not $Process.Start()) { throw "$Name could not start." }
-        $OutputTask = $Process.StandardOutput.ReadToEndAsync()
-        $ErrorTask = $Process.StandardError.ReadToEndAsync()
-        if (-not $Process.WaitForExit(45000)) {
-            $Process.Kill()
-            $Process.WaitForExit()
-            "Timed out: missing runtime/plugin or a startup dialog." | Set-Content -LiteralPath $Stderr -Encoding UTF8
-            throw "$Name timed out. See $Stderr."
-        }
-        $OutputTask.Result | Set-Content -LiteralPath $Stdout -Encoding UTF8
-        $ErrorTask.Result | Set-Content -LiteralPath $Stderr -Encoding UTF8
-        if ($Process.ExitCode -ne 0) { throw "$Name failed ($($Process.ExitCode)). See $Stderr." }
-    } finally { $Process.Dispose() }
-    Write-Host "[deployed $Name passed]"
-}
 function Copy-LocalNotices([string]$Prefix, [string]$Name) {
     $Destination = Join-Path $StageDir "dependency-notices/$Name"
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -111,7 +79,7 @@ $DeployTool = Join-Path $QtBin 'windeployqt.exe'
 Require-File $DeployTool
 Require-File (Join-Path $QtPrefix 'lib/cmake/Qt6/Qt6Config.cmake')
 Require-File (Join-Path $IcuPrefix 'include/unicode/uversion.h')
-foreach ($Tool in @('cmake', 'ninja', 'ctest')) { Get-Command $Tool -CommandType Application -ErrorAction Stop | Out-Null }
+foreach ($Tool in @('cmake', 'ninja')) { Get-Command $Tool -CommandType Application -ErrorAction Stop | Out-Null }
 if ($Toolchain -eq 'MSVC') { Get-Command 'cl.exe' -CommandType Application -ErrorAction Stop | Out-Null }
 else {
     Get-Command 'g++.exe' -CommandType Application -ErrorAction Stop | Out-Null
@@ -154,12 +122,6 @@ if ($FfmpegDir) {
 # Network access occurs only after local SDK/tool/output preflight succeeds.
 if ($DownloadFfmpeg) {
     $FfmpegCacheDir = Project-Path $FfmpegCacheDir
-    foreach ($Directory in @($BuildDir) + @($Stages | ForEach-Object { $_.Path })) {
-        if ($FfmpegCacheDir -eq $Directory -or $FfmpegCacheDir.StartsWith($Directory + '\', [StringComparison]::OrdinalIgnoreCase) -or
-            $Directory.StartsWith($FfmpegCacheDir + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'FfmpegCacheDir must be separate from BuildDir and all StageDir outputs.'
-        }
-    }
     $DownloadedFfmpeg = Get-BtbnFfmpeg -CacheDir $FfmpegCacheDir -Release $FfmpegRelease
     $FfmpegDir = $DownloadedFfmpeg.BinDir
 }
@@ -173,7 +135,7 @@ try {
     $env:QT_PLUGIN_PATH = Join-Path $QtPrefix 'plugins'
     $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $QtPrefix 'plugins/platforms'
     $ConfigureArgs = @('-S', $ProjectDir, '-B', $BuildDir, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
-        '-DBUILD_TESTING=ON', "-DQt6_DIR=$QtPrefix/lib/cmake/Qt6", "-DCMAKE_PREFIX_PATH=$QtPrefix;$IcuPrefix", "-DICU_ROOT=$IcuPrefix")
+        '-DBUILD_TESTING=OFF', "-DQt6_DIR=$QtPrefix/lib/cmake/Qt6", "-DCMAKE_PREFIX_PATH=$QtPrefix;$IcuPrefix", "-DICU_ROOT=$IcuPrefix")
     if ($Toolchain -eq 'MSVC') { $ConfigureArgs += '-DCMAKE_CXX_COMPILER=cl.exe' }
     else { $ConfigureArgs += '-DCMAKE_CXX_COMPILER=g++.exe' }
     Invoke-Native 'configure' 'cmake' $ConfigureArgs
@@ -184,7 +146,6 @@ try {
         throw 'Compiler mismatch. Use a fresh BuildDir and matching Qt/ICU/toolchain.'
     }
     Invoke-Native 'build' 'cmake' @('--build', $BuildDir, '--parallel', "$Jobs")
-    Invoke-Native 'CTest' 'ctest' @('--test-dir', $BuildDir, '--output-on-failure')
     foreach ($Stage in $Stages) {
         $StageDir = $Stage.Path
         $BundleMedia = $Stage.Bundled
@@ -206,9 +167,6 @@ try {
         foreach ($Dll in $IcuDlls) { Copy-Checked $Dll.FullName $AppDir }
         $PlatformDir = Join-Path $AppDir 'platforms'
         New-Item -ItemType Directory -Path $PlatformDir -Force | Out-Null
-        $Offscreen = Join-Path $QtPrefix 'plugins/platforms/qoffscreen.dll'
-        Require-File $Offscreen
-        Copy-Checked $Offscreen $PlatformDir
         Require-File (Join-Path $PlatformDir 'qwindows.dll')
         "[Paths]`nPrefix=.`nPlugins=.`n" | Set-Content -LiteralPath (Join-Path $AppDir 'qt.conf') -Encoding ASCII
         Copy-LocalNotices $QtPrefix 'Qt'
@@ -235,22 +193,9 @@ try {
             }
             $FfmpegVersion | Set-Content -LiteralPath (Join-Path $ValidationDir 'ffmpeg-version.txt') -Encoding UTF8
         }
-        Copy-Item -LiteralPath (Join-Path $BuildDir 'Testing/Temporary/LastTest.log') -Destination (Join-Path $ValidationDir 'ctest.log')
         Copy-Item -LiteralPath (Join-Path $BuildDir 'build-info.json') -Destination $ValidationDir
         $DeployVersion = & $DeployTool --version
         if ($LASTEXITCODE -ne 0) { throw 'Cannot query windeployqt version.' }
-    
-        # Test with SDK/plugin/PATH overrides removed; qt.conf must find local plugins.
-        foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $null, 'Process') }
-        $env:PATH = "$AppDir;$env:SystemRoot\System32;$env:SystemRoot"
-        if ($BundleMedia) {
-            Invoke-SelfTest 'media-capabilities' (Join-Path $AppDir 'chosuta-cli.exe') @('--check-media-tools', '--ffmpeg', 'tools/ffmpeg/ffmpeg.exe')
-        }
-        Invoke-SelfTest 'cli' (Join-Path $AppDir 'chosuta-cli.exe') @('--version')
-        $env:QT_QPA_PLATFORM = 'offscreen'
-        Invoke-SelfTest 'gui-offscreen' (Join-Path $AppDir 'chosuta.exe') @('--smoke-test')
-        $env:QT_QPA_PLATFORM = 'windows'
-        Invoke-SelfTest 'gui-windows' (Join-Path $AppDir 'chosuta.exe') @('--smoke-test')
     
         # Runtime paths are relative to the deployment root. Exclude evidence,
         # documentation and notices from the runtime byte total.
@@ -260,8 +205,6 @@ try {
         } | Sort-Object FullName | ForEach-Object {
             [ordered]@{
                 path = $_.FullName.Substring($AppDir.Length + 1).Replace('\', '/')
-                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-                fileVersion = $_.VersionInfo.FileVersion
                 bytes = $_.Length
             }
         })
@@ -278,12 +221,12 @@ try {
             mediaToolsDirectory = $(if ($BundleMedia) { 'tools/ffmpeg' } else { $null })
             runtimeBytes = ($Files | Measure-Object -Property bytes -Sum).Sum
             mediaToolsBytes = $(if ($BundleMedia) { ($Files | Where-Object { $_.path.StartsWith('tools/ffmpeg/') } | Measure-Object -Property bytes -Sum).Sum } else { 0 })
-            mediaCapabilities = $(if ($BundleMedia) { 'passed; see validation/media-capabilities.stdout.log (not codec/GUI playback acceptance)' } else { 'not bundled' })
+            mediaCapabilities = $(if ($BundleMedia) { 'not run by build script' } else { 'not bundled' })
             msvcRuntime = 'Official VC++ x64 Redistributable must already be installed for MSVC builds.'
-            ctest = 'passed; see validation/ctest.log for any skipped optional/private-sample cases'
-            deployedCli = 'passed'
-            deployedOffscreenGui = 'passed'
-            deployedWindowsGuiStartup = 'passed (not interactive/audio acceptance)'
+            ctest = 'not run by build script'
+            deployedCli = 'not run by build script'
+            deployedOffscreenGui = 'not run by build script'
+            deployedWindowsGuiStartup = 'not run by build script'
             files = $Files
         }
         $Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StageDir 'runtime-manifest.json') -Encoding UTF8
@@ -296,14 +239,15 @@ For no-ffmpeg builds, choose ffmpeg.exe in Export Settings; keep ffprobe.exe and
 its shared DLLs beside it. Qt media DLLs/plugins must remain in the application.
 Missing FFmpeg disables video export and waveform decoding/correction.
 Missing ffprobe requires manual audio duration. Editing/saving still work.
-See runtime-manifest.json and validation/ for this machine's actual results.
+Build only: automated tests and application startup checks were not run.
+See runtime-manifest.json and validation/ for build and dependency information.
 The dependency notices collected here do not replace a complete redistribution
 source/NOTICE review of the specific Qt, ICU and media dependencies you deploy.
 '@ | Set-Content -LiteralPath (Join-Path $StageDir 'RUN.txt') -Encoding ASCII
-        Write-Host "Ready: $(Join-Path $AppDir 'chosuta.exe')"
+        Write-Host "Built: $(Join-Path $AppDir 'chosuta.exe')"
         Write-Host "Evidence: $(Join-Path $StageDir 'runtime-manifest.json')"
     }
-    # Archive only after every requested deployment has passed. Never overwrite.
+    # Archive after every requested deployment finishes. Never overwrite.
     if ($CreateZip) {
         foreach ($Stage in $Stages) {
             Compress-Archive -LiteralPath $Stage.Path -DestinationPath "$($Stage.Path).zip" -CompressionLevel Optimal

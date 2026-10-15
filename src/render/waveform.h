@@ -7,7 +7,7 @@ namespace chosuta {
 struct WavePeak {float low=0,high=0;};
 struct WaveBin {float low=0,high=0,rms=0;};
 struct Waveform {
-    QString path,hash;
+    QString path;
     qint64 fileBytes=0,fileModified=0,samples=0;
     static constexpr double Step=.01;
     QVector<WaveBin> bins;

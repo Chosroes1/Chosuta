@@ -38,14 +38,11 @@ namespace chosuta {
         private:
         Project project;
         std::shared_ptr<const Evaluation> evaluation;
-        quint64 revision=0,job=0,jobRevision=0,evaluationBuilds=0;
-        enum class TaskState {Idle,Running,Cancelling,Review,Closing};
-        TaskState taskState=TaskState::Idle;
-        bool closePending=false;
+        quint64 evaluationBuilds=0;
         bool finishTask();
         Progress taskProgress();
         void rebuildEvaluation();
-        QString projectPath,uiLanguage,verifiedAudioPath,verifiedAudioHash;
+        QString projectPath,uiLanguage;
         Preferences preferences;
         QScrollArea *timelineScroll=nullptr;
         QSplitter *timelineSplitter=nullptr,*workspaceSplitter=nullptr;

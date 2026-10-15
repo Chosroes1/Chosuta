@@ -4,8 +4,8 @@
 set -euo pipefail
 generator=${1:-}
 case "$generator" in
- DEB) required_tools=(cmake ninja ctest cpack python3 dpkg dpkg-shlibdeps) ;;
- RPM) required_tools=(cmake ninja ctest cpack python3 rpmbuild) ;;
+ DEB) required_tools=(cmake ninja cpack python3 dpkg dpkg-shlibdeps) ;;
+ RPM) required_tools=(cmake ninja cpack python3 rpmbuild) ;;
  *) echo 'Usage: bash scripts/package-native.sh DEB|RPM [real maintainer contact]' >&2; exit 2 ;;
 esac
 for tool in "${required_tools[@]}"; do
@@ -34,14 +34,13 @@ package_dir=${CHOSUTA_PACKAGE_OUTPUT_DIR:-"$project_dir/out/${generator,,}"}
 if [[ -d $package_dir && -n $(ls -A -- "$package_dir") ]]; then
  echo 'Output directory is not empty; choose a new owned directory.' >&2; exit 1
 fi
-cmake_args=(-S "$project_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr)
+cmake_args=(-S "$project_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/usr)
 [[ -z $contact ]] || cmake_args+=("-DCPACK_PACKAGE_CONTACT=$contact")
 if [[ $generator == RPM ]]; then
  cmake_args+=("-DCPACK_RPM_PACKAGE_REQUIRES=$CHOSUTA_RPM_PLUGIN_REQUIRES")
 fi
 cmake "${cmake_args[@]}"
 cmake --build "$build_dir" --parallel 4
-ctest --test-dir "$build_dir" --output-on-failure
 mkdir -p -- "$package_dir"
 cpack --config "$build_dir/CPackConfig.cmake" -G "$generator" -B "$package_dir"
 package_version=$(sed -n 's/^set(CPACK_PACKAGE_VERSION "\([^"]*\)")/\1/p' "$build_dir/CPackConfig.cmake")

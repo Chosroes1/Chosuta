@@ -21,7 +21,7 @@ public:
     void redo()override{window->writeSubtitleText(track,cue,after);}
 };
 void Window::writeSubtitleText(const QString &track,const QString &cue,const QString &text) {
-    auto t=findTrack(project,track);if(!t)return;auto c=findCue(*t,cue);if(!c)return;c->text=text;++revision;
+    auto t=findTrack(project,track);if(!t)return;auto c=findCue(*t,cue);if(!c)return;c->text=text;
     if(scene)scene->setSubtitleText(cue,text);
     if(timeline)timeline->setSubtitleText(cue,text);
     if(subtitlePage&&track==subtitleTrackId&&cue==subtitleCueId&&subtitleText->toPlainText()!=text){QSignalBlocker block(subtitleText);auto cursor=subtitleText->textCursor();int at=cursor.position();subtitleText->setPlainText(text);cursor=subtitleText->textCursor();cursor.setPosition(std::min(at,int(text.size())));subtitleText->setTextCursor(cursor);}

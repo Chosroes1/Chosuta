@@ -18,9 +18,8 @@ python3 scripts/package-arch.py out/arch/0.9.3
 - `Chosuta-0.9.3-source.zip`：对应源码、原创夹具、打包模板和许可，不包含用户材料。
 - `PKGBUILD`：从 `packaging/arch/PKGBUILD.in` 生成的实际配方，带源码 SHA-256。
 - `.SRCINFO`：由 `makepkg --printsrcinfo` 生成的包元数据。
-- `src/build/Testing/Temporary/LastTest.log`：源码包独立构建的测试记录。
 
-脚本使用 `makepkg --noconfirm`，**没有** `--syncdeps` 或 `--install`，缺少依赖时不会自动安装。输出目录存在即拒绝，可以给脚本传另一个新目录。配方当前声明并验证 x86_64；其他架构没有验证。运行依赖 glibc、gcc-libs、Qt 6 Base/Multimedia、ICU；构建依赖 CMake/Ninja，检查依赖 FFmpeg。FFmpeg 对普通用户仍是可选运行依赖，没有它也可编辑。
+脚本使用 `makepkg --noconfirm`，**没有** `--syncdeps` 或 `--install`，缺少依赖时不会自动安装。输出目录存在即拒绝，可以给脚本传另一个新目录。配方当前声明并验证 x86_64；其他架构没有验证。运行依赖 glibc、gcc-libs、Qt 6 Base/Multimedia、ICU；构建依赖 CMake/Ninja；配方关闭测试，不要求 FFmpeg 作为检查依赖。FFmpeg 对普通用户仍是可选运行依赖，没有它也可编辑。
 
 本轮不向系统安装。用户决定安装时可自行执行：
 
@@ -78,7 +77,7 @@ Chosuta 代码、配方和桌面项继续 GPL-3.0-or-later；当前PNG标识由�
 
 ## Windows 附带工具与 no-ffmpeg
 
-0.9.3 的 `scripts/build-windows.ps1 -FfmpegDir <已有工具bin> -BothVariants -CreateZip` 支持编译一次、分别部署并压缩两种目录；也可将 `-FfmpegDir <已有工具bin>` 换成 `-DownloadFfmpeg`，显式校验下载并缓存 BtbN win64 GPL shared 9.0（其他 Qt／ICU 参数见 [Windows 说明](windows.zh-CN.md)）。GUI/CLI可执行文件位于部署根目录，外部 ffmpeg／ffprobe 及其共享 DLL 独立位于 `tools/ffmpeg/`；无工具版仍保留 Qt 媒体后端。脚本记录各自大小／哈希／检测结果，不覆盖现有产物。当前环境未执行 Windows 部署，没有新的 Release；指定工具的许可和对应源码义务按实际构建核对。
+0.9.3 的 `scripts/build-windows.ps1 -FfmpegDir <已有工具bin> -BothVariants -CreateZip` 支持编译一次、分别部署并压缩两种目录（Windows 脚本关闭自动测试和应用启动验收）；也可将 `-FfmpegDir <已有工具bin>` 换成 `-DownloadFfmpeg`，显式校验下载并缓存 BtbN win64 GPL shared（其他 Qt／ICU 参数见 [Windows 说明](windows.zh-CN.md)）。GUI/CLI可执行文件位于部署根目录，外部 ffmpeg／ffprobe 及其共享 DLL 独立位于 `tools/ffmpeg/`；无工具版仍保留 Qt 媒体后端。脚本记录各自大小及测试未运行状态，不覆盖现有产物。当前环境未执行 Windows 部署，没有新的 Release；指定工具的许可和对应源码义务按实际构建核对。
 
 ## 当前 Arch 环境下准备 DEB／RPM（0.9.3）
 

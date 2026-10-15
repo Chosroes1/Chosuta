@@ -30,10 +30,6 @@ WaveformResult readWaveform(const QString &path,const MediaTools &tools,const st
     try {
         QFileInfo before(path);if(!before.isFile())throw Failure(Message::format("Missing audio: %1",{path}));
         auto wave=std::make_shared<Waveform>();wave->path=path;wave->fileBytes=before.size();wave->fileModified=before.lastModified().toMSecsSinceEpoch();
-        QFile input(path);if(!input.open(QIODevice::ReadOnly))throw Failure(Message("File operation failed").withDetail(input.errorString()));QCryptographicHash hash(QCryptographicHash::Sha256);
-        while(!input.atEnd()){if(cancel.load()){result.cancelled=true;return result;}auto bytes=input.read(65536);if(bytes.isEmpty()&&input.error()!=QFileDevice::NoError)throw Failure(Message("File operation failed").withDetail(input.errorString()));hash.addData(bytes);}
-        wave->hash=QString::fromLatin1(hash.result().toHex());input.close();
-        if(progress)progress(5);
         QProcess process;process.setProcessChannelMode(QProcess::SeparateChannels);
         process.start(tools.ffmpeg,{"-v","error","-nostdin","-i",path,"-map","0:a:0","-vn","-ac","1","-ar","16000","-f","f32le","pipe:1"});
         if(!process.waitForStarted(3000))throw Failure(Message("Cannot start FFmpeg").withDetail(process.errorString()));
@@ -53,7 +49,7 @@ WaveformResult readWaveform(const QString &path,const MediaTools &tools,const st
                     if(count==160)bin();
                 }
                 pending.remove(0,consumed);
-                if(progress&&expectedDuration>0)progress(std::clamp(5+int(wave->duration()/expectedDuration*90),5,95));
+                if(progress&&expectedDuration>0)progress(std::clamp(int(wave->duration()/expectedDuration*95),0,95));
             }
             errors.append(process.readAllStandardError());if(errors.size()>4096)errors=errors.right(4096);
             if(process.state()==QProcess::NotRunning&&process.bytesAvailable()==0)break;
@@ -63,7 +59,6 @@ WaveformResult readWaveform(const QString &path,const MediaTools &tools,const st
         if(process.exitStatus()!=QProcess::NormalExit||process.exitCode()!=0)throw Failure(Message("Audio decoding failed").withDetail(QString::fromUtf8(errors)));
         if(!pending.isEmpty()||wave->samples==0)throw Failure("Empty or incomplete decoded audio");
         if(count)bin();
-        QFileInfo after(path);if(after.size()!=wave->fileBytes||after.lastModified().toMSecsSinceEpoch()!=wave->fileModified)throw Failure("Audio changed while reading waveform");
         wave->buildLevels();if(cancel.load()){result.cancelled=true;return result;}if(progress)progress(100);result.wave=std::move(wave);
     }catch(const std::exception &e){result.error=exceptionMessage(e);}
     return result;
@@ -74,7 +69,7 @@ WaveCorrectionResult correctWaveform(const Project &p,const Waveform &wave,const
         validateTimingCorrection(p);
         QFileInfo audio(p.audioPath);
         if(wave.path!=p.audioPath||audio.size()!=wave.fileBytes||audio.lastModified().toMSecsSinceEpoch()!=wave.fileModified||wave.bins.isEmpty())throw Failure("Waveform does not match current audio");
-        layer.audioHash=wave.hash;layer.audioBytes=wave.fileBytes;layer.audioModified=wave.fileModified;layer.basisHash=timingBasisHash(p,&cancel);
+        layer.audioBytes=wave.fileBytes;layer.audioModified=wave.fileModified;layer.basisHash=timingBasisHash(p,&cancel);
         struct Group {QString id;double a=0,b=0;bool skip=false,protect=false;};
         QMap<QString,Group> groups;QMap<QString,QString> eventSources;QSet<QString> chosen;
         for(const auto &e:p.generated){if(cancel.load())throw Failure("Cancelled");eventSources[e.id]=e.source;if(selectedEvents.contains(e.id))chosen.insert(e.source);

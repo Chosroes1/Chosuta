@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
-#include "core/json.h"
 static void initDictionaryResources() {Q_INIT_RESOURCE(data);}
 namespace chosuta {
     QString dictionaryKey(const QString&word,const QString&language) {
@@ -33,11 +32,9 @@ namespace chosuta {
     }
     void validatePronunciationOptions(const PronunciationOptions&o) {
         if(pronunciationDictionaryBytes(o)>DictionaryByteLimit)throw Failure("Pronunciation dictionaries exceed 3 MB");
-        int count=0;
         for(auto language=o.words.cbegin();language!=o.words.cend();++language) {
             if(!QStringList{"en","zh","ja"}.contains(language.key()))throw Failure(Message::format("Invalid dictionary language: %1",{language.key()}));
             for(auto word=language->cbegin();word!=language->cend();++word) {
-                if(++count>20000)throw Failure("Dictionary exceeds 20000 entries");
                 if(word.key().isEmpty()||word.key().size()>128||word.key()!=dictionaryKey(word.key(),language.key())||
                     QStringList{"+","-","ー","br","cl"}.contains(word.key())||word.key().contains(QRegularExpression("[\\p{Cc}]")))
                     throw Failure(Message::format("Invalid dictionary word: %1",{word.key()}));
@@ -50,15 +47,14 @@ namespace chosuta {
     PronunciationOptions pronunciationOptionsRead(const QJsonValue&value) {
         PronunciationOptions options;
         if(!value.isObject())throw Failure("Invalid pronunciation settings");
-        const auto object=jsonFields(value,"pronunciation",{},{},{"japaneseKanji"},{},{"entries"},{"version"});
+        const auto object=value.toObject();
         if(object["version"].toInt()!=1||!object["entries"].isArray()||!object["japaneseKanji"].isBool())
             throw Failure("Invalid pronunciation settings version/fields");
         const auto entries=object["entries"].toArray();
-        if(entries.size()>20000)throw Failure("Dictionary exceeds 20000 entries");
         options.japaneseKanji=object["japaneseKanji"].toBool();
         for(const auto &value:entries) {
             if(!value.isObject())throw Failure("Invalid dictionary entry");
-            const auto entry=jsonFields(value,"pronunciation.entries[]",{"language","word","reading","notation"});
+            const auto entry=value.toObject();
             const auto language=entry["language"].toString();
             const auto word=dictionaryKey(entry["word"].toString(),language);
             const auto notation=entry["notation"].toString();

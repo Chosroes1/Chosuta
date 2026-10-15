@@ -164,7 +164,6 @@ namespace chosuta {
         };
         connect(table,&QTableWidget::itemChanged,&dialog,[&]{updateSize();});
         connect(add,&QPushButton::clicked,&dialog,[&] {
-            if(table->rowCount()>=20000) {status->setText(trText("Dictionary exceeds 20000 entries"));return;}
             appendRow("en",{},{{},true});table->setCurrentCell(table->rowCount()-1,1);updateSize();
         });
         connect(remove,&QPushButton::clicked,&dialog,[&] {
@@ -199,7 +198,7 @@ namespace chosuta {
                 const auto options=pronunciationOptionsRead(rawOptions());
                 if(!project.rules.englishDictionary.isEmpty()&&QFileInfo(project.rules.englishDictionary).size()+pronunciationDictionaryBytes(options)>DictionaryByteLimit)
                     throw Failure("Pronunciation dictionaries exceed 3 MB");
-                if(defaults->isChecked()) {auto next=preferences;next.pronunciation=options;next.invalidFields.remove("pronunciation/settings");savePreferences(next);preferences=next;}
+                if(defaults->isChecked()) {auto next=preferences;next.pronunciation=options;savePreferences(next);preferences=next;}
                 if(project.rules.pronunciation!=options)change(actionText("Advanced settings"),[options](Project&p){p.rules.pronunciation=options;});
                 dialog.accept();
             }catch(const Failure&e){status->setText(messageText(uiLanguage,exceptionMessage(e)));}

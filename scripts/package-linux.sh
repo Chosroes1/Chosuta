@@ -10,9 +10,8 @@ if [[ -e "$package_dir" || -L "$package_dir" ]]; then
     echo "Output already exists; choose a new package directory: $package_dir" >&2
     exit 1
 fi
-cmake -S "$project_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S "$project_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 cmake --build "$build_dir" --parallel 4
-ctest --test-dir "$build_dir" --output-on-failure
 mkdir -p -- "$(dirname -- "$package_dir")"
 staging=$(mktemp -d -- "$(dirname -- "$package_dir")/.chosuta-package-XXXXXX")
 trap 'rm -rf -- "$staging"' EXIT

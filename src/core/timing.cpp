@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "model.h"
-#include "json.h"
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -22,21 +21,13 @@ QString timingBasisHash(const Project &p,const std::atomic_bool *cancel) {
 }
 bool timingCorrectionCurrent(const Project &p) {
     if(p.timing.sources.isEmpty()||p.timing.basisHash!=timingBasisHash(p))return false;
-    if(!p.audioContentHash.isEmpty()&&p.audioContentHash!=p.timing.audioHash)return false;
     QFileInfo audio(p.audioPath);
     return audio.isFile()&&audio.size()==p.timing.audioBytes&&audio.lastModified().toMSecsSinceEpoch()==p.timing.audioModified;
-}
-bool verifyTimingAudio(Project &p,const std::atomic_bool &cancel){
-    if(p.timing.sources.isEmpty()||!p.timing.enabled)return true;
-    QFile file(p.audioPath);if(!file.open(QIODevice::ReadOnly)){p.audioContentHash="missing";return true;}
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    while(!file.atEnd()){if(cancel.load())return false;auto bytes=file.read(65536);if(bytes.isEmpty()&&file.error()!=QFileDevice::NoError){p.audioContentHash="unreadable";return true;}hash.addData(bytes);}
-    p.audioContentHash=QString::fromLatin1(hash.result().toHex());return !cancel.load();
 }
 void validateTimingCorrection(const Project &p) {
     const auto &t=p.timing;
     if(!std::isfinite(t.maxShift)||t.maxShift<0||t.maxShift>1||!std::isfinite(t.maxDurationChange)||t.maxDurationChange<0||t.maxDurationChange>.5||t.sources.size()>500000)throw Failure("Invalid timing correction limits");
-    if(!t.sources.isEmpty()&&(t.basisHash.size()!=64||t.audioHash.size()!=64||t.audioBytes<0))throw Failure("Invalid timing correction identity");
+    if(!t.sources.isEmpty()&&(t.basisHash.size()!=64||t.audioBytes<0))throw Failure("Invalid timing correction identity");
     for(auto i=t.sources.begin();i!=t.sources.end();++i){const auto &s=i.value();double duration=s.originalEnd-s.originalStart;
         if(i.key().isEmpty()||!std::isfinite(s.originalStart)||!std::isfinite(s.originalEnd)||!std::isfinite(s.start)||!std::isfinite(s.end)||duration<=0||s.end<=s.start||std::abs(s.start)>864000||std::abs(s.end)>864000||std::abs(s.start-s.originalStart)>t.maxShift+1e-9||std::abs(s.end-s.originalEnd)>t.maxShift+1e-9||std::abs((s.end-s.start)-duration)>duration*t.maxDurationChange+1e-9)throw Failure("Timing correction exceeds score limits");
     }
@@ -52,20 +43,20 @@ void validateTimingCorrection(const Project &p) {
     }
 }
 QJsonObject timingCorrectionJson(const Project &p) {
-    validateTimingCorrection(p);const auto &t=p.timing;QJsonArray sources;
+    const auto &t=p.timing;QJsonArray sources;
     for(auto i=t.sources.begin();i!=t.sources.end();++i){const auto &s=i.value();sources.append(QJsonObject{{"source",i.key()},{"originalStart",s.originalStart},{"originalEnd",s.originalEnd},{"start",s.start},{"end",s.end}});}
-    return {{"maxShift",t.maxShift},{"maxDurationChange",t.maxDurationChange},{"enabled",t.enabled},{"basisHash",t.basisHash},{"audioHash",t.audioHash},{"audioBytes",QString::number(t.audioBytes)},{"audioModified",QString::number(t.audioModified)},{"sources",sources}};
+    return {{"maxShift",t.maxShift},{"maxDurationChange",t.maxDurationChange},{"enabled",t.enabled},{"basisHash",t.basisHash},{"audioBytes",QString::number(t.audioBytes)},{"audioModified",QString::number(t.audioModified)},{"sources",sources}};
 }
 void readTimingCorrection(Project &p,const QJsonValue &value) {
     if(!value.isObject())throw Failure("Invalid timing correction data");
-    auto o=jsonFields(value,"timingCorrection",{"basisHash","audioHash","audioBytes","audioModified"},{"maxShift","maxDurationChange"},{"enabled"},{},{"sources"});auto &t=p.timing;
+    auto o=value.toObject();auto &t=p.timing;
     auto number=[&](const char *key){auto v=o.value(key);if(!v.isDouble())throw Failure("Invalid timing correction number");return v.toDouble();};
     t.maxShift=number("maxShift");t.maxDurationChange=number("maxDurationChange");
     if(!o.value("enabled").isBool()||!o.value("sources").isArray())throw Failure("Invalid timing correction state");
-    t.enabled=o["enabled"].toBool();t.basisHash=o["basisHash"].toString();t.audioHash=o["audioHash"].toString();
+    t.enabled=o["enabled"].toBool();t.basisHash=o["basisHash"].toString();
     bool a=false,b=false;t.audioBytes=o["audioBytes"].toString().toLongLong(&a);t.audioModified=o["audioModified"].toString().toLongLong(&b);
     if(!a||!b||o["sources"].toArray().size()>500000)throw Failure("Invalid timing correction audio identity");
-    for(const auto &v:o["sources"].toArray()){if(!v.isObject())throw Failure("Invalid timing correction source");auto s=jsonFields(v,"timingCorrection.sources[]",{"source"},{"originalStart","originalEnd","start","end"});
+    for(const auto &v:o["sources"].toArray()){if(!v.isObject())throw Failure("Invalid timing correction source");auto s=v.toObject();
         for(auto key:{"originalStart","originalEnd","start","end"})if(!s.value(key).isDouble())throw Failure("Invalid timing correction interval");
         auto id=s["source"].toString();if(t.sources.contains(id))throw Failure("Duplicate timing correction source");
         t.sources[id]={s["originalStart"].toDouble(),s["originalEnd"].toDouble(),s["start"].toDouble(),s["end"].toDouble()};

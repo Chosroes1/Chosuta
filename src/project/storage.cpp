@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/model.h"
-#include "core/json.h"
 #include "core/appearance.h"
 #include "core/performance.h"
 #include <cmath>
@@ -36,7 +35,7 @@ namespace chosuta {
         };
     }
     static Event eventRead(const QJsonObject&o) {
-        jsonFields(o,"event",{"id","source","track","shape","provenance","text","phone","articulation"},{"start","end"},{"appearanceFixed","unknown"});
+        
         Event e;
         e.id=o["id"].toString();
         e.source=o["source"].toString();
@@ -56,11 +55,13 @@ namespace chosuta {
         return path.isEmpty()?QString{}:base.relativeFilePath(QFileInfo(path).absoluteFilePath());
     }
     static QString absolute(const QDir&base,const QJsonValue&v) {
-        jsonString(v,"file path");auto path=v.toString();
+        auto path=v.toString();
         return path.isEmpty()?QString{}:QDir::cleanPath(base.absoluteFilePath(path));
     }
     void saveProject(const Project&p,const QString&path) {
-        validateProject(p);
+        validatePronunciationOptions(p.rules.pronunciation);
+        validateConsonants(p.rules.consonants);
+        validateSubtitles(p);
         QDir base=QFileInfo(path).absoluteDir();
         QJsonObject root {
             {
@@ -167,9 +168,7 @@ namespace chosuta {
     Project loadProject(const QString&path) {
         QFile file(path);
         if(!file.open(QIODevice::ReadOnly)||file.size()>64*1024*1024)throw Failure(Message("Cannot read project (limit 64 MiB)").withDetail(file.errorString()));
-        auto root=jsonFields(checkedJson(file.readAll()).object(),"project",
-            {"format","sourceBase64","sourcePath","sourceHash","fallback","audioPath"},{"audioDuration"},{},
-            {"priorities","rules","appearance","assets","canvas","output","subtitles","timingCorrection","performance"},{"selected","generated","overrides"},{"schema"});
+        auto root=checkedJson(file.readAll()).object();
         if(root["format"]!="Chosuta"||root["schema"]!=14)throw Failure("Unsupported project format/schema");
         auto decoded=QByteArray::fromBase64Encoding(root["sourceBase64"].toString().toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
         if(!decoded)throw Failure("Invalid embedded source");
@@ -178,16 +177,14 @@ namespace chosuta {
         p.score=parseSvp(decoded.decoded,absolute(base,root["sourcePath"]));
         if(p.score.hash!=root["sourceHash"].toString())throw Failure("Embedded source checksum mismatch");
         for(const auto&v:root["selected"].toArray()) {
-            jsonString(v,"selected[]");auto id=v.toString();
+            auto id=v.toString();
             bool exists=false;
             for(const auto&t:p.score.tracks)if(t.id==id)exists=true;
-            if(!exists)throw Failure("Unknown selected track");
-            if(p.selected.contains(id))throw Failure("Duplicate selected track");
-            p.selected.append(id);
+            if(exists&&!p.selected.contains(id))p.selected.append(id);
         }
         auto priorities=root["priorities"].toObject();
-        for(auto it=priorities.begin();it!=priorities.end();++it){jsonFields(QJsonObject{{"value",it.value()}},"priorities."+it.key(),{},{},{},{},{},{"value"});p.priorities[it.key()]=it.value().toInt();}
-        auto rules=jsonFields(root["rules"],"rules",{"language","englishDictionary"},{"consonantRatio","consonantMaxSeconds"},{"harmonyTakeover"},{"special","readings","consonants","pronunciation"});
+        for(auto it=priorities.begin();it!=priorities.end();++it){p.priorities[it.key()]=it.value().toInt();}
+        auto rules=root["rules"].toObject();
         p.rules.language=rules["language"].toString();
         if(!QStringList {
             "auto","ja","zh","en"
@@ -207,9 +204,8 @@ namespace chosuta {
         p.rules.englishDictionary=absolute(base,rules["englishDictionary"]);
         p.rules.pronunciation=pronunciationOptionsRead(rules.value("pronunciation"));
         auto special=rules["special"].toObject();
-        p.rules.special.clear();
         for(auto it=special.begin();it!=special.end();++it) {
-            auto v=jsonFields(it.value(),"rules.special."+it.key(),{"mode","shape"},{"holdSeconds"});
+            auto v=it.value().toObject();
             Policy policy {
                 v["mode"].toString(),v["shape"].toString(),v["holdSeconds"].toDouble()
             };
@@ -220,7 +216,7 @@ namespace chosuta {
             p.rules.special[it.key()]=policy;
         }
         auto readings=rules["readings"].toObject();
-        for(auto it=readings.begin();it!=readings.end();++it){jsonString(it.value(),"rules.readings."+it.key());p.rules.readings[it.key()]=it.value().toString();}
+        for(auto it=readings.begin();it!=readings.end();++it){p.rules.readings[it.key()]=it.value().toString();}
         auto generated=root["generated"].toArray(),overrides=root["overrides"].toArray();
         if(generated.size()+overrides.size()>500000)throw Failure("Too many saved events");
         QSet<QString>ids;
@@ -231,7 +227,7 @@ namespace chosuta {
             p.generated.append(e);
         }
         for(const auto&v:overrides) {
-            auto o=jsonFields(v,"overrides[]",{"key","anchor","startBlick","endBlick"},{},{"locked","deleted","standalone"},{"event"},{"parentIds","sourceFragments"});
+            auto o=v.toObject();
             Override edit;
             edit.event=eventRead(o["event"].toObject());
             QString key=o["key"].toString();
@@ -239,9 +235,9 @@ namespace chosuta {
             edit.locked=o["locked"].toBool();
             edit.deleted=o["deleted"].toBool();
             edit.standalone=o["standalone"].toBool();
-            for(const auto&parent:o["parentIds"].toArray()){jsonString(parent,"overrides[].parentIds[]");edit.parentIds.append(parent.toString());}
+            for(const auto&parent:o["parentIds"].toArray()){edit.parentIds.append(parent.toString());}
             for(const auto &value:o["sourceFragments"].toArray()){
-                const auto f=jsonFields(value,"overrides[].sourceFragments[]",{"parentId"},{"sourceStart","sourceEnd","start","end"});
+                const auto f=value.toObject();
                 edit.sourceFragments.append({f["parentId"].toString(),f["sourceStart"].toDouble(),f["sourceEnd"].toDouble(),f["start"].toDouble(),f["end"].toDouble()});
             }
             edit.anchor=o["anchor"].toString();
@@ -258,7 +254,7 @@ namespace chosuta {
         for(auto it=assets.begin();it!=assets.end();++it)p.assets[it.key()]=absolute(base,it.value());
         p.fallback=root["fallback"].toString();
         p.audioPath=absolute(base,root["audioPath"]);
-        auto output=jsonFields(root["output"],"output",{"format","ffmpeg"},{"duration","syncOffset","audioOffset"},{},{},{},{"fpsNum","fpsDen","crf","bitrateKbps"});
+        auto output=root["output"].toObject();
         auto&s=p.output;
 
         s.fpsNum=output["fpsNum"].toInt();
@@ -271,9 +267,8 @@ namespace chosuta {
         s.duration=output["duration"].toDouble();
         s.syncOffset=output["syncOffset"].toDouble();
         s.audioOffset=output["audioOffset"].toDouble();
-        if(!std::isfinite(s.duration)||s.duration<0||s.duration>21600||!std::isfinite(s.syncOffset)||std::abs(s.syncOffset)>21600||!std::isfinite(s.audioOffset)||std::abs(s.audioOffset)>21600)throw Failure("Invalid output time settings");
         if(!root["canvas"].isObject())throw Failure("Missing canvas settings");
-        auto canvas=jsonFields(root["canvas"],"canvas",{"background","backgroundImage","backgroundFit"},{"characterScale","characterX","characterY"},{"transparent"},{},{},{"width","height"});
+        auto canvas=root["canvas"].toObject();
         auto &c=p.canvas;c.width=canvas["width"].toInt();c.height=canvas["height"].toInt();
         c.background=QColor(canvas["background"].toString());c.transparent=canvas["transparent"].toBool();
         c.backgroundImage=absolute(base,canvas["backgroundImage"]);c.backgroundFit=canvas["backgroundFit"].toString();
@@ -284,7 +279,6 @@ namespace chosuta {
         readSubtitles(p,root.value("subtitles"));
         readTimingCorrection(p,root.value("timingCorrection"));
         readPerformance(p,root.value("performance"));
-        validateProject(p);
         return p;
     }
 }

@@ -6,21 +6,6 @@ namespace chosuta {
     QJsonDocument checkedJson(QByteArray bytes,bool allowNul) {
         if(bytes.size()>64*1024*1024)throw Failure("Input exceeds 64 MiB");
         if(allowNul&&bytes.endsWith('\0'))bytes.chop(1);
-        if(bytes.contains('\0'))throw Failure("Embedded NUL or multiple JSON segments are unsupported");
-        int depth=0;
-        bool quoted=false,escape=false;
-        for(char c:bytes) {
-            if(quoted) {
-                if(escape)escape=false;
-                else if(c=='\\')escape=true;
-                else if(c=='"')quoted=false;
-            }
-            else if(c=='"')quoted=true;
-            else if(c=='{'||c=='[') {
-                if(++depth>64)throw Failure("JSON nesting exceeds 64");
-            }
-            else if(c=='}'||c==']')--depth;
-        }
         QJsonParseError error;
         auto doc=QJsonDocument::fromJson(bytes,&error);
         if(error.error!=QJsonParseError::NoError||!doc.isObject())throw Failure(Message::format("Invalid JSON at %1",{QString::number(error.offset)}).withDetail(error.errorString()));

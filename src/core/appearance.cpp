@@ -10,7 +10,7 @@ void configureImageReaderLimit(){static std::once_flag flag;std::call_once(flag,
 const QStringList &mouthStates(){static const QStringList states={"A","I","U","E","O","closed","rest","breath","unknown"};return states;}
 static bool state(const QString &s){return mouthStates().contains(s);}
 std::optional<QString> normalizedAssetId(const QString &name){auto s=name.toLower();if(QStringList{"a","i","u","e","o"}.contains(s))s=s.toUpper();return state(s)?std::optional<QString>(s):std::nullopt;}
-AppearanceResolver::AppearanceResolver(const Project &p){validateAnalysisSettings(p.performance.analysis);validatePerformance(p);if(p.appearance.enabled)performance=std::make_shared<PerformanceResolver>(p);}
+AppearanceResolver::AppearanceResolver(const Project &p){if(p.appearance.enabled)performance=std::make_shared<PerformanceResolver>(p);}
 AppearanceResolver::AppearanceResolver(const Project &p,std::shared_ptr<const PerformanceResolver> plan){if(p.appearance.enabled)performance=std::move(plan);}
 AssetSelection AppearanceResolver::select(const Project &p,QString shape,AppearanceContext c,bool fixed,const QSet<QString> *available)const{
     auto exists=[&](const QString &id){return available?available->contains(id):!p.assets.value(id).isEmpty();};
@@ -38,23 +38,18 @@ AssetSelection AppearanceResolver::at(const Project &p,const QVector<Event> &eve
     }
     return select(p,policy.shape,c,false,available);
 }
-    void applyAssetImport(Project &p,const QVector<AssetImportEntry> &entries,const QSet<QString> &replace){
-        QSet<QString> seen;
+    void applyAssetImport(Project &p,const QVector<AssetImportEntry> &entries){
         for(const auto &e:entries){
-            if(e.id.trimmed().isEmpty()||e.status=="invalid"||e.path.isEmpty())throw Failure(Message::format("Invalid asset import target: %1",{e.id}));
-            if(seen.contains(e.id))throw Failure(Message::format("Duplicate asset import target: %1",{e.id}));
-            seen.insert(e.id);
-            if(p.assets.contains(e.id)&&!replace.contains(e.id))throw Failure(Message::format("Asset replacement needs an explicit selection: %1",{e.id}));
+            if(e.id.trimmed().isEmpty()||e.status=="invalid"||e.path.isEmpty())continue;
+            p.assets[e.id]=e.path;
         }
-        for(const auto &e:entries)p.assets[e.id]=e.path;
     }
     AssetImportPlan scanAssetFiles(const QStringList &paths,const QMap<QString,QString> &existing,const std::atomic_bool *cancel,Progress progress) {
         configureImageReaderLimit();AssetImportPlan result;
-        if(paths.size()>10000){result.error="Import exceeds 10000 files";return result;}
         QHash<QString,int> seen;QSet<QString> files;
         for(int i=0;i<paths.size();++i){
             if(cancel&&cancel->load()){result.cancelled=true;result.entries.clear();return result;}
-            QFileInfo file(paths[i]);if(file.isSymLink()||!file.isFile()||file.suffix().compare("png",Qt::CaseInsensitive))continue;
+            QFileInfo file(paths[i]);if(!file.isFile()||file.suffix().compare("png",Qt::CaseInsensitive))continue;
             const auto path=file.absoluteFilePath();if(files.contains(path))continue;files.insert(path);
             AssetImportEntry entry;entry.path=path;auto id=normalizedAssetId(file.completeBaseName());
             entry.id=id.value_or(QString{});entry.status=id?(existing.contains(*id)?"replace":"new"):"unknown";
@@ -71,17 +66,14 @@ AssetSelection AppearanceResolver::at(const Project &p,const QVector<Event> &eve
     }
     AssetImportPlan scanAssetDirectory(const QString &directory,const QMap<QString,QString> &existing,const std::atomic_bool *cancel,Progress progress) {
         QDir dir(directory);if(!dir.exists()){AssetImportPlan r;r.error="Asset directory does not exist";return r;}
-        const auto files=dir.entryInfoList(QDir::Files|QDir::NoSymLinks,QDir::Name);
-        if(files.size()>10000){AssetImportPlan r;r.error="Asset directory exceeds 10000 files";return r;}
+        const auto files=dir.entryInfoList(QDir::Files,QDir::Name);
         QStringList paths;for(const auto &file:files)paths.append(file.absoluteFilePath());return scanAssetFiles(paths,existing,cancel,progress);
     }
     AssetImportPlan scanVariantDirectory(const QString &path,const Project &p,const QString &singleGroup,const std::atomic_bool *cancel,Progress progress){
         AssetImportPlan result;
-        if(QFileInfo(path).isSymLink()){result.error="Symlink folders are not imported";return result;}
-        const QDir dir(path);const auto children=dir.entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot|QDir::NoSymLinks,QDir::Name);
-        bool direct=false;for(const auto &file:dir.entryInfoList(QDir::Files|QDir::NoSymLinks))if(file.suffix().compare("png",Qt::CaseInsensitive)==0)direct=true;
+        const QDir dir(path);const auto children=dir.entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
+        bool direct=false;for(const auto &file:dir.entryInfoList(QDir::Files))if(file.suffix().compare("png",Qt::CaseInsensitive)==0)direct=true;
         QStringList folders;if(direct||children.isEmpty())folders<<path;else for(const auto &child:children)folders<<child.absoluteFilePath();
-        if(folders.size()>1024){result.error="Too many variant folders";return result;}
         for(int i=0;i<folders.size();++i){
             if(cancel&&cancel->load()){result.cancelled=true;result.entries.clear();result.groups.clear();return result;}
             QString group=singleGroup;
@@ -95,7 +87,6 @@ AssetSelection AppearanceResolver::at(const Project &p,const QVector<Event> &eve
             if(!scan.error.isEmpty()||scan.cancelled){result.error=scan.error;result.cancelled=scan.cancelled;result.entries.clear();result.groups.clear();return result;}
             for(auto &entry:scan.entries){entry.group=group;if(!entry.id.isEmpty())entry.id=variantAssetId(group,entry.id);
                 if(entry.status=="new"&&p.assets.contains(entry.id))entry.status="replace";
-                if(result.entries.size()>=10000){result.entries.clear();result.groups.clear();result.error="Import exceeds 10000 files";return result;}
                 result.entries.append(entry);}
             if(progress)progress((i+1)*100/std::max(1,int(folders.size())));
         }return result;

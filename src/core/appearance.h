@@ -27,7 +27,7 @@ namespace chosuta {
     };
     struct AssetImportEntry {QString path,id,status;Message message;QString group;};
     struct AssetImportPlan {QVector<AssetImportEntry> entries;bool cancelled=false;Message error;QVector<VariantGroup> groups;};
-    void applyAssetImport(Project &,const QVector<AssetImportEntry> &,const QSet<QString> &replace={});
+    void applyAssetImport(Project &,const QVector<AssetImportEntry> &);
     void configureImageReaderLimit();
     AssetImportPlan scanAssetFiles(const QStringList &,const QMap<QString,QString> &,const std::atomic_bool *cancel=nullptr,Progress progress={});
     AssetImportPlan scanAssetDirectory(const QString &,const QMap<QString,QString> &,const std::atomic_bool *cancel=nullptr,Progress progress={});

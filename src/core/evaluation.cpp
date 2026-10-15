@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "evaluation.h"
 namespace chosuta {
-Evaluation::Evaluation(const Project &p):project(p),events(p.effective()),resolved(resolveEvents(events)),performance(std::make_shared<PerformanceResolver>(project)),appearance(project,performance){
+Evaluation::Evaluation(const Project &p):project(p),events(p.effective()),resolved(resolveEvents(events)),performance(std::make_shared<PerformanceResolver>(project,p.appearance.enabled)),appearance(project,performance){
     const auto sources=subtitleSources(p);
     for(const auto &track:p.subtitles)for(const auto &cue:track.cues)subtitles[cue.id]=subtitleInterval(p,cue,&sources);
     if(p.output.duration>0){duration=p.output.duration;return;}

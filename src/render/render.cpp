@@ -6,6 +6,12 @@
 #include <QFontInfo>
 #include <QTextCharFormat>
 #include <cmath>
+#include <cstdio>
+#include <cerrno>
+#include <cstring>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 namespace chosuta {
     void Scene::setTiming(const Project &p,std::shared_ptr<const Evaluation> view){evaluation=view?std::move(view):std::make_shared<Evaluation>(p);project=p;events=evaluation->resolved;appearance=evaluation->appearance;prepareSubtitles();}
     Scene::Scene(const Project &p,std::shared_ptr<const Evaluation> view):evaluation(view?std::move(view):std::make_shared<Evaluation>(p)),project(p),events(evaluation->resolved),appearance(evaluation->appearance) {
@@ -31,15 +37,14 @@ namespace chosuta {
         const auto first=selectionAt(0);if(!first.missing)imageFor(first.id);
         if(appearance.plan())diagnostics.append(appearance.plan()->diagnostics);
         prepareSubtitles();
-        for(const auto &missing:missingAppearanceAssets())diagnostics.append(Message::format("Missing advanced asset: %1",{missing}));
     }
     QImage Scene::imageFor(const QString &id)const {
         if(!available.contains(id))return {};
-        const auto path=project.assets.value(id);const auto canonical=QFileInfo(path).canonicalFilePath();
+        const auto path=project.assets.value(id);
         auto target=imageSizes.value(id);
         target.scale(imageCacheFit,Qt::KeepAspectRatio);
         if(target.width()>imageSizes.value(id).width())target=imageSizes.value(id);
-        const QString key=canonical+QString("/%1x%2").arg(target.width()).arg(target.height());
+        const QString key=path+QString("/%1x%2").arg(target.width()).arg(target.height());
         if(auto *image=images.object(key))return *image;
         QImageReader reader(path);reader.setScaledSize(target);auto image=reader.read();++decodeCount;
         if(image.isNull()){
@@ -52,18 +57,6 @@ namespace chosuta {
         images.insert(key,new QImage(image),int(cost));return image;
     }
     AssetSelection Scene::selectionAt(double seconds)const{return appearance.at(project,events,seconds,true,&available);}
-    QStringList Scene::missingAppearanceAssets()const {
-        QStringList missing;
-        auto check=[&](const AssetSelection &selection){if(selection.missing&&!missing.contains(selection.id)&&missing.size()<64)missing.append(selection.id);};
-        const double duration=evaluation->duration,offset=project.output.syncOffset;
-        QVector<double> boundaries={0,duration};
-        for(const auto &event:events){boundaries<<event.start+offset<<event.end+offset;
-            const auto policy=project.rules.special.value("rest");if(policy.mode=="timed")boundaries<<event.end+offset+policy.holdSeconds;}
-        if(const auto plan=appearance.plan())for(const auto &slice:plan->slices())boundaries<<slice.start<<slice.end;
-        std::sort(boundaries.begin(),boundaries.end());
-        for(int i=0;i+1<boundaries.size();++i){double a=std::max(0.,boundaries[i]),b=std::min(duration,boundaries[i+1]);if(b>a){const double frame=std::ceil(a*project.output.fpsNum/project.output.fpsDen-1e-10)*project.output.fpsDen/project.output.fpsNum;if(frame<b&&frame<duration)check(selectionAt(frame));}}
-        return missing;
-    }
     QImage Scene::frame(double seconds,QSize size)const {
         if(size.isEmpty())size= {
             project.canvas.width,project.canvas.height
@@ -176,25 +169,6 @@ namespace chosuta {
         if(p.selected.isEmpty())throw Failure("Select a track and generate events first");
         if(!p.audioPath.isEmpty()&&!QFileInfo::exists(p.audioPath))throw Failure(Message::format("Missing audio: %1",{p.audioPath}));
     }
-    static QStringList availableEncoders(const MediaTools&tools,const std::atomic_bool &cancel) {
-        QProcess p;
-        p.start(tools.ffmpeg, {
-            "-hide_banner","-encoders"
-        });
-        if(!p.waitForStarted(5000))throw Failure(Message("Cannot start FFmpeg").withDetail(p.errorString()));
-        QElapsedTimer timer;timer.start();
-        while(!p.waitForFinished(50))if(cancel.load()||timer.elapsed()>10000){
-            p.kill();p.waitForFinished(3000);throw Failure(cancel.load()?"Cancelled":"FFmpeg capability query timed out");
-        }
-        if(p.exitCode()!=0)throw Failure(Message("FFmpeg capability query failed").withDetail(QString::fromUtf8(p.readAllStandardError())));
-        QStringList result;
-        auto lines=QString::fromUtf8(p.readAllStandardOutput()).split('\n');
-        for(const auto&line:lines) {
-            auto a=line.simplified().split(' ');
-            if(a.size()>1&&a[0].size()==6&&(a[0][0]=='V'||a[0][0]=='A'))result<<a[1];
-        }
-        return result;
-    }
     QStringList encoderArguments(const Project&p,const QString&temporary) {
         const auto&s=p.output;
         QString fps=QString("%1/%2").arg(s.fpsNum).arg(s.fpsDen),duration=QString::number(p.duration(),'f',9);
@@ -226,30 +200,15 @@ namespace chosuta {
         ExportResult r;
         Project p=inputProject;
         try {
-            validateProject(p);
-            if(!verifyTimingAudio(p,cancel)){r.cancelled=true;return r;}
-            r.audioContentHash=p.audioContentHash;
             const bool stale=p.timing.enabled&&!p.timing.sources.isEmpty()&&!timingCorrectionCurrent(p);
             validateExport(p);
             QFileInfo target(path);
             if(target.exists()&&!overwrite)throw Failure("Output exists; explicit overwrite required");
-            auto identity=[](const QString &path){QFileInfo file(path);return QPair<qint64,qint64>{file.size(),file.lastModified().toMSecsSinceEpoch()};};
-            QMap<QString,QPair<qint64,qint64>> resourceIdentity;
-            for(const auto &path:p.assets)resourceIdentity[path]=identity(path);
-            for(const auto &path:{p.audioPath,p.canvas.backgroundImage})if(!path.isEmpty())resourceIdentity[path]=identity(path);
-            QSet<QString> used;
-            for(const auto &path:{p.audioPath,p.canvas.backgroundImage})if(!path.isEmpty())used.insert(path);
-            auto encoders=availableEncoders(tools,cancel);
-            QString encoder=p.output.format=="mp4"?"libx264":p.output.format=="webm"?"libvpx-vp9":"qtrle";
-            if(!encoders.contains(encoder))throw Failure(Message::format("Unavailable video encoder: %1",{encoder}));
-            if(!p.audioPath.isEmpty()&&!encoders.contains(p.output.format=="webm"?"libopus":"aac"))throw Failure("Unavailable audio encoder");
             Scene scene(p);
             r.diagnostics=scene.diagnostics;
             if(stale)r.diagnostics<<"Waveform correction is stale; using score timing and manual edits.";
             if(!scene.hasBackground())throw Failure(Message::format("Background image is missing or invalid: %1",{p.canvas.backgroundImage}));
             if(p.assets.isEmpty())throw Failure("Import PNG assets or create demo assets first");
-            const auto missing=scene.missingAppearanceAssets();
-            if(!missing.isEmpty())throw Failure(Message::format("Missing assets; assign a matching, shared, or fallback image: %1",{missing.join(", ")}));
             QTemporaryDir temp(target.absoluteDir().filePath(".chosuta-export-XXXXXX"));
             if(!temp.isValid())throw Failure("Cannot create output staging directory");
             QString movie=temp.filePath("encoded."+p.output.format);
@@ -275,8 +234,8 @@ namespace chosuta {
                 }
                 const double frameTime=double(i)*p.output.fpsDen/p.output.fpsNum;
                 auto image=scene.frame(frameTime);
-                used.insert(p.assets.value(scene.selectionAt(frameTime).id));
-                if(scene.selectionAt(frameTime).missing){stop();throw Failure(Message::format("Missing or unreadable asset: %1",{scene.selectionAt(frameTime).id}));}
+                const auto selection=scene.selectionAt(frameTime);
+                if(selection.missing){stop();throw Failure(Message::format("Missing or unreadable asset: %1",{selection.id}));}
                 for(const auto &message:scene.diagnostics)if(!r.diagnostics.contains(message))r.diagnostics.append(message);
                 qint64 remaining=image.sizeInBytes(),offset=0;
                 QElapsedTimer stall;
@@ -329,41 +288,15 @@ namespace chosuta {
             }
             drain();
             if(proc.exitStatus()!=QProcess::NormalExit||proc.exitCode()!=0)throw Failure(Message::format("Encoding failed: %1",{QString::fromUtf8(log)}));
-            for(const auto &path:used)if(identity(path)!=resourceIdentity.value(path))throw Failure(Message::format("Resource changed during export: %1",{path}));
-            const auto verifiedHash=p.audioContentHash;
-            if(!verifiedHash.isEmpty()){
-                if(!verifyTimingAudio(p,cancel)){r.cancelled=true;return r;}
-                if(p.audioContentHash!=verifiedHash)throw Failure("Audio changed during export; retry with the current file");
-            }
-            QFile input(movie);
-            QSaveFile output(path);
-            if(!input.open(QIODevice::ReadOnly)||!output.open(QIODevice::WriteOnly))throw Failure(Message("Cannot commit encoded output").withDetail(!input.isOpen()?input.errorString():output.errorString()));
-            while(!input.atEnd()) {
-                if(cancel.load()) {
-                    output.cancelWriting();
-                    r.cancelled=true;
-                    return r;
-                }
-                auto chunk=input.read(1024*1024);
-                if(chunk.isEmpty()&&input.error()!=QFile::NoError) {
-                    output.cancelWriting();
-                    throw Failure(Message("File operation failed").withDetail(input.errorString()));
-                }
-                if(output.write(chunk)!=chunk.size()) {
-                    output.cancelWriting();
-                    throw Failure(Message("File operation failed").withDetail(output.errorString()));
-                }
-            }
-            if(cancel.load()) {
-                output.cancelWriting();
-                r.cancelled=true;
-                return r;
-            }
-            if(!overwrite&&QFileInfo::exists(path)) {
-                output.cancelWriting();
-                throw Failure("Output appeared during export; overwrite refused");
-            }
-            if(!output.commit())throw Failure(Message("File operation failed").withDetail(output.errorString()));
+            if(cancel.load()){r.cancelled=true;return r;}
+            if(!overwrite&&QFileInfo::exists(path))throw Failure("Output exists; explicit overwrite required");
+#ifdef Q_OS_WIN
+            if(!MoveFileExW(reinterpret_cast<LPCWSTR>(movie.utf16()),reinterpret_cast<LPCWSTR>(path.utf16()),MOVEFILE_REPLACE_EXISTING))
+                throw Failure(Message("Cannot commit encoded output").withDetail(QString::number(GetLastError())));
+#else
+            if(std::rename(QFile::encodeName(movie).constData(),QFile::encodeName(path).constData())!=0)
+                throw Failure(Message("Cannot commit encoded output").withDetail(QString::fromLocal8Bit(std::strerror(errno))));
+#endif
             r.success=true;
             if(progress)progress(100);
         }

@@ -1,25 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "performance.h"
 #include "intervals.h"
-#include "json.h"
 #include <cmath>
 namespace chosuta {
 namespace {
-void validateReasons(const QVector<Message> &reasons){
-    if(reasons.size()>96)throw Failure("Too many performance reasons");
-    for(const auto &r:reasons){
-        if(r.key.isEmpty()||r.key.size()>256||!r.detail.isEmpty()||r.arguments.size()>4)throw Failure("Invalid performance reason");
-        for(const auto &a:r.arguments)if(a.size()>256)throw Failure("Invalid performance reason argument");
-    }
-}
-QJsonArray reasonJson(const QVector<Message> &reasons){validateReasons(reasons);QJsonArray rows;for(const auto &r:reasons)rows.append(QJsonObject{{"key",r.key},{"arguments",QJsonArray::fromStringList(r.arguments)}});return rows;}
+QJsonArray reasonJson(const QVector<Message> &reasons){QJsonArray rows;for(const auto &r:reasons)rows.append(QJsonObject{{"key",r.key},{"arguments",QJsonArray::fromStringList(r.arguments)}});return rows;}
 QVector<Message> readReasons(const QJsonValue &value){
-    if(!value.isArray())throw Failure("Invalid performance reasons");
     QVector<Message> result;
     for(const auto &v:value.toArray()){
-        auto o=jsonFields(v,"performance.reasons",{"key"},{},{},{},{"arguments"});Message r;r.key=o["key"].toString();
-        for(const auto &a:o["arguments"].toArray()){jsonString(a,"performance.reasons.arguments");r.arguments.append(a.toString());}result.append(r);
-    }validateReasons(result);return result;
+        auto o=v.toObject();Message r;r.key=o["key"].toString();
+        for(const auto &a:o["arguments"].toArray()){r.arguments.append(a.toString());}result.append(r);
+    }return result;
 }
 }
 
@@ -47,7 +38,7 @@ void validateSettings(PerformanceSettings s){
 }
 }
 QJsonObject performanceSettingsJson(const PerformanceSettings &value){
-    validateSettings(value);auto s=value;QJsonObject o{{"timeBasis",s.timeBasis==PerformanceTimeBasis::Music?"music":"seconds"}};
+    auto s=value;QJsonObject o{{"timeBasis",s.timeBasis==PerformanceTimeBasis::Music?"music":"seconds"}};
     auto timingJson=[](PerformanceTiming t){QJsonObject v;auto fields=timingNumbers(t);for(auto it=fields.cbegin();it!=fields.cend();++it)v[it.key()]=*it.value();return v;};o["music"]=timingJson(s.music);o["seconds"]=timingJson(s.seconds);
     const auto ns=numbers(s);for(auto it=ns.cbegin();it!=ns.cend();++it)o[it.key()]=*it.value();
     const auto is=integers(s);for(auto it=is.cbegin();it!=is.cend();++it)o[it.key()]=*it.value();
@@ -76,7 +67,7 @@ void validatePerformance(const Project &p){
     auto target=[&](const QString &s){return v.roles.contains(s)||(s.startsWith("group:")&&groups.contains(s.mid(6)));};
     for(const auto &r:v.settings.rules)if(!target(r.target))throw Failure("Unknown rule target");
     QSet<QString> ids;
-    for(const auto *list:{&v.generated,&v.manual})for(const auto &s:*list){validateReasons(s.reasons);
+    for(const auto *list:{&v.generated,&v.manual})for(const auto &s:*list){
         if(s.id.isEmpty()||s.id.size()>1024||ids.contains(s.id))throw Failure("Duplicate or invalid performance segment ID");
         ids.insert(s.id);
         if(!QStringList{"beats","seconds"}.contains(s.anchor)||!QStringList{"hold","expand","contract","arch","custom"}.contains(s.mode))throw Failure("Invalid performance anchor/template");
@@ -89,7 +80,7 @@ void validatePerformance(const Project &p){
     qint64 end=-MusicLimit;for(const auto &k:v.tonalities){if(k.start<end||k.start < -MusicLimit||k.end>MusicLimit||k.end<=k.start||(!k.key.isEmpty()&&!parseTonality(k.key)))throw Failure("Invalid or overlapping tonal regions");end=k.end;}
 }
 QJsonObject performanceJson(const Project &p){
-    validatePerformance(p);const auto &v=p.performance;QJsonObject o{{"settings",performanceSettingsJson(v.settings)},{"basisHash",v.basisHash}};
+    const auto &v=p.performance;QJsonObject o{{"settings",performanceSettingsJson(v.settings)},{"basisHash",v.basisHash}};
     QJsonArray groups;for(const auto &g:v.groups)groups.append(QJsonObject{{"id",g.id},{"name",g.name}});o["groups"]=groups;o["analysis"]=analysisSettingsJson(p.performance.analysis);
     QJsonObject roles;for(auto it=v.roles.cbegin();it!=v.roles.cend();++it)roles[it.key()]=it.value();o["roles"]=roles;
     QJsonArray boundaries;for(const auto &b:v.boundaries)boundaries.append(QJsonObject{{"source",b.source},{"mode",b.mode}});o["boundaries"]=boundaries;

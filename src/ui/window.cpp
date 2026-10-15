@@ -11,7 +11,7 @@ namespace chosuta {
         Project before,after;
         bool timingOnly=false;
         public:
-        ProjectCommand(Window*w,Project a,Project b,ActionText label,bool onlyTiming=false):TranslatedCommand(label,w->uiLanguage),window(w),before(std::move(a)),after(std::move(b)),timingOnly(onlyTiming){before.audioContentHash.clear();after.audioContentHash.clear();}
+        ProjectCommand(Window*w,Project a,Project b,ActionText label,bool onlyTiming=false):TranslatedCommand(label,w->uiLanguage),window(w),before(std::move(a)),after(std::move(b)),timingOnly(onlyTiming){}
         void undo()override {
             window->assignProject(before,timingOnly);
         }
@@ -22,7 +22,6 @@ namespace chosuta {
     QString Window::trText(const char *key,const char *zh,const char *ja)const{return uiText(uiLanguage,key,zh,ja);}
     Window::Window() {
         preferences=loadPreferences();
-        if(!preferences.diagnostics.isEmpty())QTimer::singleShot(0,this,[this]{QStringList messages;for(const auto &issue:preferences.diagnostics)messages<<messageText(uiLanguage,Message::format("Saved setting %1 was ignored. Reset this setting to replace its original value.",{issue.setting}))+"\n"+messageText(uiLanguage,issue.message);statusBar()->showMessage(messages.join("; "));});
         project.rules.pronunciation=preferences.pronunciation;project.performance.settings=preferences.performanceSettings;
         uiLanguage=resolveUiLanguage(preferences.language,QLocale::system().uiLanguages());
         setWidgetLanguage(uiLanguage);
@@ -39,7 +38,7 @@ namespace chosuta {
         statusBar()->addPermanentWidget(progress);
         statusBar()->addPermanentWidget(cancelButton);
         connect(cancelButton,&QPushButton::clicked,this,[this] {
-            if(cancel)cancel->store(true);taskState=TaskState::Cancelling;
+            if(cancel)cancel->store(true);
         });
         connect(&history,&QUndoStack::cleanChanged,this,[this](bool clean) {
             setWindowModified(!clean);
@@ -67,7 +66,6 @@ namespace chosuta {
         connect(&exportWatcher,&QFutureWatcher<ExportResult>::finished,this,[this] {
             auto result=exportWatcher.result();
             if(!finishTask())return;
-            if(!result.audioContentHash.isEmpty()){verifiedAudioPath=project.audioPath;verifiedAudioHash=result.audioContentHash;project.audioContentHash=verifiedAudioHash;rebuildEvaluation();scene->setTiming(project,evaluation);timeline->setProject(project,evaluation);refreshPreview();}
             if(result.cancelled)statusBar()->showMessage(trText("Cancelled"));
             else if(!result.success)error(result.error);
             else statusBar()->showMessage(trText("Export complete")+": "+activePath+(result.diagnostics.isEmpty()?QString{}:" — "+messagesText(uiLanguage,result.diagnostics)));
@@ -85,20 +83,12 @@ namespace chosuta {
         });
         connect(&waveformWatcher,&QFutureWatcher<WaveformResult>::finished,this,[this]{
             auto r=waveformWatcher.result();const bool valid=finishTask();if(!valid&&!r.cancelled)return;waveform=r.wave;
-            if(waveform){verifiedAudioPath=project.audioPath;verifiedAudioHash=waveform->hash;project.audioContentHash=verifiedAudioHash;}
-            else {
+            if(!waveform) {
                 QFileInfo info(project.audioPath);
                 waveformKey=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+resolveExecutable(project.output.ffmpeg);
             }
             waveformMessage=r.cancelled?trText("Waveform preparation cancelled. Reload to retry."):r.error.isEmpty()?QString{}:trText("Waveform unavailable: %1").arg(messageText(uiLanguage,r.error));
-            rebuildEvaluation();
-            // Recheck saved timing against the decoded content, without reloading PNGs.
-            if(scene)scene->setTiming(project,evaluation);
-            timeline->setProject(project,evaluation);refreshWaveform();refreshSelection();refreshPreview();
-            auto stale=trText("Saved waveform correction is stale; score timing is used. Correct again if needed.");
-            auto text=diagnostics->toPlainText();text.remove(stale);
-            if(!project.timing.sources.isEmpty()&&!timingCorrectionCurrent(project))text+="\n\n"+stale;
-            diagnostics->setPlainText(text);
+            refreshWaveform();refreshSelection();refreshPreview();
             if(!waveformMessage.isEmpty())statusBar()->showMessage(waveformMessage);
         });
         connect(&correctionWatcher,&QFutureWatcher<WaveCorrectionResult>::finished,this,[this]{
@@ -282,7 +272,7 @@ namespace chosuta {
             QString id=assets->item(row,0)->data(Qt::UserRole).toString();
             auto path=QFileDialog::getOpenFileName(this,trText("Import PNGs"),{},"PNG (*.png)");
             if(!path.isEmpty())change(actionText("Assets"),[=](Project&p) {
-                auto scan=scanAssetFiles({path},{});if(scan.entries.size()!=1)throw Failure("Invalid PNG");scan.entries[0].id=id;applyAssetImport(p,scan.entries,{id});
+                auto scan=scanAssetFiles({path},{});if(scan.entries.size()!=1||scan.entries.front().status=="invalid")throw Failure("Invalid PNG");scan.entries[0].id=id;applyAssetImport(p,scan.entries);
             });
         });
         tabs->addTab(assetPage,trText("Assets"));
@@ -568,9 +558,7 @@ namespace chosuta {
         QTimer::singleShot(0,this,[this,paths]{if(busy)return;QFileInfo file(paths.front());auto suffix=file.suffix().toLower();if(file.isDir()||suffix=="png")showMouthSettings(paths);else if(suffix=="svp"||suffix=="chosuta"){if(confirmDiscard())openPath(paths.front());}else attachAudioPath(paths.front());});
     }
     void Window::assignProject(Project p,bool timingOnly) {
-        if(verifiedAudioPath==p.audioPath)p.audioContentHash=verifiedAudioHash;
-        else p.audioContentHash.clear();
-        project=std::move(p);++revision;
+        project=std::move(p);
         refresh(timingOnly);
     }
     void Window::refresh(bool timingOnly) {
@@ -709,8 +697,6 @@ namespace chosuta {
     void Window::setBusy(bool value) {
         if(value&&timeline)timeline->finishSubtitleEditing(false);
         busy=value;
-        if(value){taskState=TaskState::Running;jobRevision=revision;++job;}
-        else if(taskState!=TaskState::Review)taskState=TaskState::Idle;
         centralWidget()->setEnabled(!value);
         menuBar()->setEnabled(!value);
         progress->setVisible(value);
@@ -723,13 +709,11 @@ namespace chosuta {
         else statusBar()->showMessage(trText("Ready"));
     }
     void Window::rebuildEvaluation(){++evaluationBuilds;evaluation=std::make_shared<Evaluation>(project);}
-    Progress Window::taskProgress(){const auto id=job,version=jobRevision;return [this,id,version](int value){QMetaObject::invokeMethod(this,[this,id,version,value]{if(job==id&&revision==version&&taskState==TaskState::Running)progress->setValue(value);},Qt::QueuedConnection);};}
+    Progress Window::taskProgress(){return [this](int value){QMetaObject::invokeMethod(this,[this,value]{if(busy)progress->setValue(value);},Qt::QueuedConnection);};}
     bool Window::finishTask(){
-        const bool valid=jobRevision==revision&&!(cancel&&cancel->load());
         setBusy(false);
-        if(closePending){closePending=false;QTimer::singleShot(0,this,[this]{close();});return false;}
-        if(!valid)statusBar()->showMessage(trText("Cancelled"));
-        return valid;
+        if(cancel&&cancel->load()){statusBar()->showMessage(trText("Cancelled"));return false;}
+        return true;
     }
     void Window::error(const Message &message) {
         QMessageBox box(QMessageBox::Warning,trText("Error"),messageText(uiLanguage,message,false),QMessageBox::Ok,this);
@@ -740,8 +724,9 @@ namespace chosuta {
     }
     bool Window::confirmDiscard() {
         if(timeline)timeline->finishSubtitleEditing(false);
-        if(history.isClean())return true;
-        auto result=QMessageBox::question(this,trText("Unsaved changes"),trText("Save before closing?"),QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel);
+        if(history.isClean()&&!performanceCandidate)return true;
+        auto prompt=performanceCandidate?trText("Save the current project before closing? The unapplied performance draft will be discarded.","关闭前保存当前工程吗？尚未应用的演出草稿将被丢弃。","閉じる前に現在のプロジェクトを保存しますか？未適用の演出案は破棄されます。"):trText("Save before closing?");
+        auto result=QMessageBox::question(this,trText("Unsaved changes"),prompt,QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel);
         return result==QMessageBox::Discard||(result==QMessageBox::Save&&save());
     }
     bool Window::save(bool choosePath) {
@@ -862,7 +847,7 @@ namespace chosuta {
         if(!ok||id.trimmed().isEmpty())return;
         auto path=QFileDialog::getOpenFileName(this,trText("Import PNGs"),{},"PNG (*.png)");
         if(!path.isEmpty())change(actionText("Custom Shape"),[=](Project&p) {
-            auto scan=scanAssetFiles({path},{});if(scan.entries.size()!=1)throw Failure("Invalid PNG");scan.entries[0].id=id.trimmed();applyAssetImport(p,scan.entries);
+            auto scan=scanAssetFiles({path},{});if(scan.entries.size()!=1||scan.entries.front().status=="invalid")throw Failure("Invalid PNG");scan.entries[0].id=id.trimmed();applyAssetImport(p,scan.entries);
         });
     }
     void Window::attachAudio(){
@@ -1041,13 +1026,12 @@ namespace chosuta {
         });
     }
     void Window::closeEvent(QCloseEvent*e) {
-        if(taskState==TaskState::Review){
-            const auto answer=QMessageBox::question(this,trText("Unsaved changes"),trText("Discard unapplied performance draft and close?","放弃尚未应用的演出草稿并关闭？","未適用の演出案を破棄して閉じますか？"),QMessageBox::Discard|QMessageBox::Cancel);
-            if(answer!=QMessageBox::Discard||!confirmDiscard()){e->ignore();return;}
-            finishPerformanceDraft(false);taskState=TaskState::Closing;e->accept();return;
+        if(performanceCandidate){
+            if(!confirmDiscard()){e->ignore();return;}
+            finishPerformanceDraft(false);e->accept();return;
         }
-        if(busy){if(cancel)cancel->store(true);taskState=TaskState::Cancelling;closePending=true;statusBar()->showMessage(trText("Cancelling…","正在取消…","中止中…"));e->ignore();return;}
-        if(confirmDiscard()){taskState=TaskState::Closing;e->accept();}else e->ignore();
+        if(busy){if(cancel)cancel->store(true);statusBar()->showMessage(trText("Cancelling…","正在取消…","中止中…"));e->ignore();return;}
+        if(confirmDiscard())e->accept();else e->ignore();
     }
 
     void Window::showExportSettings() {
@@ -1107,21 +1091,16 @@ namespace chosuta {
         connect(overrideTool,&QCheckBox::toggled,projectToolRow,&QWidget::setEnabled);
         auto toolHint=new QLabel(trText("Choose ffmpeg; ffprobe and shared DLLs should stay beside it. The default is saved only on this computer when you press OK."));
         toolHint->setWordWrap(true);layout->addWidget(toolHint);
-        auto adopt=new QCheckBox(trText("Adopt project media tool on this computer"));adopt->setObjectName("adoptProjectMediaTool");
-        adopt->setChecked(mediaToolAdopted(s.ffmpeg));layout->addWidget(adopt);
         auto check=new QPushButton(trText("Check media tools"));check->setObjectName("checkMediaTools");layout->addWidget(check);
         auto report=new QPlainTextEdit;report->setObjectName("mediaToolsReport");report->setReadOnly(true);report->setMaximumHeight(160);report->hide();layout->addWidget(report);
         auto inspector=new QFutureWatcher<MediaToolsInfo>(&dialog);auto checkCancel=std::make_shared<std::atomic_bool>(false);
         connect(&dialog,&QDialog::finished,&dialog,[checkCancel]{checkCancel->store(true);});
         connect(check,&QPushButton::clicked,&dialog,[&]{
-            if(overrideTool->isChecked()&&!mediaToolAdopted(ffmpeg->text().trimmed())&&!adopt->isChecked()){
-                report->show();report->setPlainText(trText("Adopt project media tool on this computer"));return;
-            }
             auto selected=(overrideTool->isChecked()?ffmpeg->text():globalFfmpeg->text()).trimmed();
             // Resolve automatic discovery without the old saved global default while editing it.
             if(selected.isEmpty()||selected=="ffmpeg"||selected=="ffmpeg.exe")selected=automaticFfmpegExecutable();
             check->setEnabled(false);report->show();report->setPlainText(trText("Checking…"));checkCancel->store(false);
-            inspector->setFuture(QtConcurrent::run([selected,checkCancel]{return inspectMediaTools(selectMediaTools(selected,ToolSelection::Explicit),*checkCancel);}));
+            inspector->setFuture(QtConcurrent::run([selected,checkCancel]{return inspectMediaTools(selectMediaTools(selected),*checkCancel);}));
         });
         connect(inspector,&QFutureWatcher<MediaToolsInfo>::finished,&dialog,[&]{
             auto info=inspector->result();check->setEnabled(true);QStringList lines;
@@ -1160,10 +1139,6 @@ namespace chosuta {
                 s.audioOffset=offset->value();
                 s.ffmpeg=overrideTool->isChecked()?ffmpeg->text().trimmed():QString("ffmpeg");
                 if(s.ffmpeg.isEmpty())throw Failure("FFmpeg project path is empty");
-                Project next=project;
-                next.output=s;
-                if(!next.score.raw.isEmpty())validateExport(next);
-                if(overrideTool->isChecked()&&adopt->isChecked())adoptMediaTool(s.ffmpeg);
                 setDefaultFfmpegExecutable(globalFfmpeg->text());
                 waveformKey.clear();
                 change(actionText("Export Settings"),[=](Project&p) {
@@ -1254,7 +1229,7 @@ namespace chosuta {
             std::atomic_bool token=false;
             ExportResult result;
             result.success=true;
-            if(QFileInfo(p.output.ffmpeg).isFile()&&QFileInfo(p.output.ffmpeg).isExecutable())result=exportVideo(project,selectMediaTools(project.output.ffmpeg,ToolSelection::Explicit),QDir(directory).filePath("smoke.mp4"),token);
+            if(QFileInfo(p.output.ffmpeg).isFile()&&QFileInfo(p.output.ffmpeg).isExecutable())result=exportVideo(project,selectMediaTools(project.output.ffmpeg),QDir(directory).filePath("smoke.mp4"),token);
             if(!result.success) {
                 qWarning()<<result.error.text();
                 return false;

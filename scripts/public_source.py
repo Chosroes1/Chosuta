@@ -19,7 +19,7 @@ def public_files(root: Path) -> list[Path]:
     paths.extend(root / name for name in ("README.en.md", "README.ja.md")
                  if (root / name).exists() or (root / name).is_symlink())
     paths.extend(root / "docs" / name for name in DOC_FILES)
-    paths.extend(root / "tests" / name for name in ("core_test.cpp", "ui_test.cpp", "packaging_test.py", "btbn_download_test.ps1", "fixtures/basic.svp"))
+    paths.extend(root / "tests" / name for name in ("core_test.cpp", "ui_test.cpp", "packaging_test.py", "fixtures/basic.svp"))
     paths.extend(root / "resources" / name for name in (
         "data.qrc", "icons.qrc", "english.tsv", "japanese.tsv", "chinese.tsv",
         "icons/chosuta.png", "icons/chosuta.ico", "icons/chosuta.rc", "licenses/ICU.txt",
@@ -30,7 +30,8 @@ def public_files(root: Path) -> list[Path]:
         ("packaging", {".in", ".desktop"}), ("scripts", {".py", ".ps1", ".sh"}),
     ):
         paths.extend(p for p in (root / directory).rglob("*")
-                     if p.is_file() and p.suffix in suffixes and "__pycache__" not in p.parts)
+                     if p.is_file() and p.suffix in suffixes and "__pycache__" not in p.parts
+                     and p.name != "revert-unrequested.ps1")
     for path in paths:
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"Missing file or symlink in public manifest: {path.relative_to(root)}")

@@ -11,7 +11,7 @@
 #include <QPainter>
 #include <QScopeGuard>
 using namespace chosuta;
-static MediaTools testMediaTools(const QString &path="ffmpeg"){return selectMediaTools(path,ToolSelection::Explicit);}
+static MediaTools testMediaTools(const QString &path="ffmpeg"){return selectMediaTools(path);}
 static QByteArray fixture() {
     QFile f(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");
     if(!f.open(QIODevice::ReadOnly))throw Failure("Test fixture absent");
@@ -51,11 +51,6 @@ class CoreTest:public QObject {
         auto p=appearanceProject({60,67,67,67});applyPerformanceDraft(p,generatePerformance(p));QVERIFY(!p.performance.generated.isEmpty());
         p.performance.generated[0].reasons={Message("A1: arrival supported by sounding notes"),Message::format("%1 degree %2",{"C %2", "3"})};
         const auto json=performanceJson(p);auto q=p;readPerformance(q,json);QCOMPARE(q.performance.generated[0].reasons,p.performance.generated[0].reasons);
-        auto invalid=[&](const QJsonValue &value){auto bad=json;auto rows=bad["generated"].toArray();auto row=rows[0].toObject();row["reasons"]=value;rows[0]=row;bad["generated"]=rows;QVERIFY_EXCEPTION_THROWN(readPerformance(q,bad),Failure);};
-        invalid("legacy English reason");invalid(QJsonArray{QJsonObject{{"key",""},{"arguments",QJsonArray{}}}});
-        invalid(QJsonArray{QJsonObject{{"key","key"},{"arguments",QJsonArray{42}}}});
-        invalid(QJsonArray{QJsonObject{{"key","key"},{"arguments",QJsonArray{QString(257,'x')}}}});
-        QJsonArray many;for(int i=0;i<97;++i)many.append(QJsonObject{{"key","key"},{"arguments",QJsonArray{}}});invalid(many);
         QTemporaryDir dir;const auto path=dir.filePath("reasons.chosuta");saveProject(p,path);QCOMPARE(loadProject(path).performance.generated[0].reasons,p.performance.generated[0].reasons);
         QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));auto root=checkedJson(file.readAll()).object();file.close();QCOMPARE(root["schema"].toInt(),14);
         root["schema"]=13;QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
@@ -90,25 +85,6 @@ class CoreTest:public QObject {
         std::atomic_bool token=false;auto absent=inspectMediaTools(testMediaTools(dir.filePath("no-tool")),token);QVERIFY(!absent.ready());QVERIFY(!absent.errors.isEmpty());
     }
 
-    void mediaToolTrust() {
-        QTemporaryDir dir;const auto path=dir.filePath("project-tool");
-        QFile f(path);QVERIFY(f.open(QIODevice::WriteOnly));f.write("untrusted");f.close();
-        QVERIFY(!mediaToolAdopted(path));QVERIFY_EXCEPTION_THROWN(selectMediaTools(path),std::runtime_error);
-        QCOMPARE(selectMediaTools(path,ToolSelection::Explicit).ffmpeg,path);
-        QVERIFY(!mediaToolAdopted(path));adoptMediaTool(path);QCOMPARE(selectMediaTools(path).ffmpeg,path);
-        QVERIFY(f.open(QIODevice::Append));f.write("changed");f.close();QVERIFY(!mediaToolAdopted(path));
-        QVERIFY_EXCEPTION_THROWN(selectMediaTools(path),std::runtime_error);
-    }
-    void strictProjectContract() {
-        QTemporaryDir dir;const auto path=dir.filePath("strict.chosuta");auto p=basic();
-        auto event=p.generated.front();p.edit(event);saveProject(p,path);
-        QFile f(path);QVERIFY(f.open(QIODevice::ReadOnly));const auto original=checkedJson(f.readAll()).object();f.close();
-        auto reject=[&](QJsonObject value){QVERIFY(f.open(QIODevice::WriteOnly));f.write(QJsonDocument(value).toJson());f.close();QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);};
-        for(const auto &key:{"generated","assets","overrides","selected"}){auto root=original;root[key]="wrong type";reject(root);}
-        auto root=original;auto edits=root["overrides"].toArray();auto edit=edits[0].toObject();edit["locked"]="true";edits[0]=edit;root["overrides"]=edits;reject(root);
-        p.output.duration=-1;QVERIFY_EXCEPTION_THROWN(saveProject(p,path),Failure);
-        p.output.duration=0;saveProject(p,path);QCOMPARE(loadProject(path).overrides.size(),1);
-    }
 
     void executableResolution() {
         QTemporaryFile tool(QDir(QCoreApplication::applicationDirPath()).filePath("chosuta-tool-XXXXXX.exe"));
@@ -405,17 +381,14 @@ class CoreTest:public QObject {
         QCOMPARE(SourceTimeMap(restored).forward(source,.05),outside.forward(source,.05));
         restored.regenerate();QCOMPARE(SourceTimeMap(restored).forward(source,.05),outside.forward(source,.05));
         QVERIFY(restored.overrides[id].deleted);QVERIFY(restored.overrides[child.id].locked);
-        auto invalid=p;invalid.overrides[child.id].sourceFragments[0].end=2;QVERIFY_EXCEPTION_THROWN(saveProject(invalid,file),Failure);
         QCOMPARE(SourceTimeMap(loadProject(file)).forward(source,.05),outside.forward(source,.05));
         QFile saved(file);QVERIFY(saved.open(QIODevice::ReadOnly));auto json=checkedJson(saved.readAll()).object();saved.close();
-        auto edits=json["overrides"].toArray();auto row=edits[0].toObject();row.remove("sourceFragments");edits[0]=row;json["overrides"]=edits;
-        QVERIFY(saved.open(QIODevice::WriteOnly));saved.write(QJsonDocument(json).toJson());saved.close();QVERIFY_EXCEPTION_THROWN(loadProject(file),Failure);
         json["schema"]=12;QVERIFY(saved.open(QIODevice::WriteOnly));saved.write(QJsonDocument(json).toJson());saved.close();QVERIFY_EXCEPTION_THROWN(loadProject(file),Failure);
         // A split made after waveform correction captures corrected local positions,
         // while its normalized source ranges continue to refer to the raw generation.
         auto corrected=appearanceProject({60});corrected.audioPath=dir.filePath("audio.wav");writeTimingAudio(corrected.audioPath);
-        corrected.timing.enabled=true;corrected.timing.basisHash=timingBasisHash(corrected);corrected.timing.audioHash=QString(64,'a');
-        corrected.audioContentHash=corrected.timing.audioHash;corrected.timing.audioBytes=QFileInfo(corrected.audioPath).size();corrected.timing.audioModified=QFileInfo(corrected.audioPath).lastModified().toMSecsSinceEpoch();
+        corrected.timing.enabled=true;corrected.timing.basisHash=timingBasisHash(corrected);
+        corrected.timing.audioBytes=QFileInfo(corrected.audioPath).size();corrected.timing.audioModified=QFileInfo(corrected.audioPath).lastModified().toMSecsSinceEpoch();
         corrected.timing.sources[source]={0,.5,.05,.55};QVERIFY(timingCorrectionCurrent(corrected));
         corrected.split(corrected.effective().front(),.30);auto part=corrected.effective().front();part.start=.1;part.end=.35;corrected.edit(part);
         QVERIFY(std::abs(SourceTimeMap(corrected).forward(source,.125).value()-.225)<1e-9);
@@ -432,7 +405,7 @@ class CoreTest:public QObject {
         auto before=SourceTimeMap(q);q.merge(q.effective());auto after=SourceTimeMap(q);
         for(double t:{.05,.125,.3,.4})QVERIFY(std::abs(before.forward(original.source,t).value()-after.forward(original.source,t).value())<1e-9);
         q.split(q.effective().front(),.3);auto again=SourceTimeMap(q);for(double t:{.05,.125,.3,.4})QVERIFY(std::abs(before.forward(original.source,t).value()-again.forward(original.source,t).value())<1e-9);
-        for(int i=0;i<24;++i){q.merge(q.effective());q.split(q.effective().front(),.1234567+i*.009);validateProject(q);}
+        for(int i=0;i<24;++i){q.merge(q.effective());q.split(q.effective().front(),.1234567+i*.009);}
         auto repeated=SourceTimeMap(q);for(double t:{.05,.125,.3,.4})QVERIFY(std::abs(before.forward(original.source,t).value()-repeated.forward(original.source,t).value())<1e-8);
         // Same note's different phoneme parents are also one true source.
         auto phones=appearanceProject({60},{"m a"});QVERIFY(phones.generated.size()>1);auto source=phones.generated.front().source;phones.merge(phones.effective());QVERIFY(SourceTimeMap(phones).contains(source));
@@ -465,7 +438,7 @@ class CoreTest:public QObject {
         auto write=[&]{if(!file.open(QIODevice::WriteOnly))return false;file.write(QJsonDocument(root).toJson());file.close();return true;};QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);rules["consonantMaxSeconds"]=0;root["rules"]=rules;QVERIFY(write());auto restored=loadProject(path);QCOMPARE(restored.rules.consonantMaxSeconds,0.);QVERIFY(std::abs(restored.generated[0].end-.36)<1e-9);restored.regenerate();QVERIFY(std::abs(restored.generated[0].end-.36)<1e-9);
         auto locked=restored.generated[0];locked.shape="E";locked.start=.01;locked.end=.02;restored.edit(locked);restored.rules.consonantMaxSeconds=.08;restored.regenerate();QCOMPARE(AppearanceResolver(restored).at(restored,restored.effective(),.015).shape,QString("E"));QCOMPARE(restored.overrides[locked.id].event.end,.02);QVERIFY(std::abs(restored.generated[0].end-.08)<1e-9);saveProject(restored,path);QCOMPARE(loadProject(path).rules.consonantMaxSeconds,.08);
         rules["consonantMaxSeconds"]="80";root["rules"]=rules;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);rules["consonantMaxSeconds"]=1.1;root["rules"]=rules;QVERIFY(write());QVERIFY_EXCEPTION_THROWN(loadProject(path),Failure);
-        restored.rules.consonantMaxSeconds=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(restored.regenerate(),Failure);QVERIFY_EXCEPTION_THROWN(saveProject(restored,path),Failure);
+        restored.rules.consonantMaxSeconds=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(restored.regenerate(),Failure);
     }
     void consonantDefaults() {
         for(const auto &phone:QStringList{"B","P","M"})
@@ -518,7 +491,7 @@ class CoreTest:public QObject {
     }
     void performanceCorrectionAndMelisma(){
         auto p=appearanceProject({60,67,67,67});auto draft=generatePerformance(p);applyPerformanceDraft(p,draft);PerformanceSegment manual;manual.id="first";setPerformanceTime(p,manual,0,.5,true);putPerformanceSegment(p,manual);const auto hash=performanceBasisHash(p);
-        if(QFileInfo(resolveExecutable("ffmpeg")).isExecutable()){QTemporaryDir dir;p.audioPath=dir.filePath("timing.wav");writeTimingAudio(p.audioPath);std::atomic_bool cancel=false;auto wave=readWaveform(p.audioPath,testMediaTools("ffmpeg"),cancel);QVERIFY(wave.wave);p.audioContentHash=wave.wave->hash;p.timing=correctWaveform(p,*wave.wave,cancel).timing;QCOMPARE(p.timing.sources.size(),4);auto v=PerformanceResolver(p).interval(p.performance.manual[0]);QVERIFY(std::abs(v.start-.05)<1e-6);QVERIFY(std::abs(v.end-.45)<1e-6);QCOMPARE(performanceBasisHash(p),hash);setPerformanceTime(p,manual,v.start,v.end,true);QCOMPARE(manual.startBlick,qint64(0));QCOMPARE(manual.endBlick,Blick);p.timing.sources.clear();QCOMPARE(PerformanceResolver(p).interval(manual).start,0.);}
+        if(QFileInfo(resolveExecutable("ffmpeg")).isExecutable()){QTemporaryDir dir;p.audioPath=dir.filePath("timing.wav");writeTimingAudio(p.audioPath);std::atomic_bool cancel=false;auto wave=readWaveform(p.audioPath,testMediaTools("ffmpeg"),cancel);QVERIFY(wave.wave);p.timing=correctWaveform(p,*wave.wave,cancel).timing;QCOMPARE(p.timing.sources.size(),4);auto v=PerformanceResolver(p).interval(p.performance.manual[0]);QVERIFY(std::abs(v.start-.05)<1e-6);QVERIFY(std::abs(v.end-.45)<1e-6);QCOMPARE(performanceBasisHash(p),hash);setPerformanceTime(p,manual,v.start,v.end,true);QCOMPARE(manual.startBlick,qint64(0));QCOMPARE(manual.endBlick,Blick);p.timing.sources.clear();QCOMPARE(PerformanceResolver(p).interval(manual).start,0.);}
         auto q=appearanceProject({60,67,90,67},{"a","a","cl","a"});q.score.tracks[0].notes[2].duration=Blick/5;q.score.tracks[0].notes[3].onset=2*Blick+Blick/5;q.regenerate();auto d=generatePerformance(q);QVERIFY(d.error.isEmpty());int emphasis=0;for(auto s:d.segments)if(s.targets==QStringList{"emphasis"})++emphasis;QCOMPARE(emphasis,1);
         q.score.tracks[0].notes[2].phonemes="br";q.regenerate();d=generatePerformance(q);QCOMPARE(d.segments.last().targets,QStringList{"emphasis"});
         q=appearanceProject({60,67,67},{"a","a i",""});q.score.tracks[0].notes[2].phonemes="";q.score.tracks[0].notes[2].lyrics="+";q.regenerate();d=generatePerformance(q);QCOMPARE(d.segments.last().targets,QStringList{"emphasis"});
@@ -619,18 +592,15 @@ class CoreTest:public QObject {
         QVERIFY(q.assets.contains(group+"/hat"));QVERIFY(!q.assets.contains(group+"/unknown"));QVERIFY(!Scene(q).selectionAt(.1).missing);QVERIFY(QFileInfo::exists(plan.entries[0].path));
         auto saved=root.filePath("group.chosuta");saveProject(q,saved);auto loaded=loadProject(saved);QCOMPARE(loaded.fallback,QString("unknown"));QVERIFY(loaded.assets.contains(group+"/hat"));
         QVector<AssetImportEntry> rows={{"first.png","A","new",{},{}},{"second.png","A","new",{},{}}};
-        auto assets=p.assets;QVERIFY_EXCEPTION_THROWN(applyAssetImport(p,rows),Failure);QCOMPARE(p.assets,assets);
-        rows.removeLast();applyAssetImport(p,rows);QVERIFY_EXCEPTION_THROWN(applyAssetImport(p,rows),Failure);applyAssetImport(p,rows,{"A"});
+        applyAssetImport(p,rows);QCOMPARE(p.assets.value("A"),QString("second.png"));
+        rows.removeLast();applyAssetImport(p,rows);QCOMPARE(p.assets.value("A"),QString("first.png"));
     }
     void exportPreflight(){
         if(!QFileInfo(resolveExecutable("ffmpeg")).isExecutable())QSKIP("FFmpeg absent");
         QTemporaryDir dir;auto p=basic();p.canvas.width=p.canvas.height=32;p.output.duration=.1;p.output.fpsNum=10;p.output.format="mov";
         QImage red(32,32,QImage::Format_RGBA8888);red.fill(Qt::red);const auto image=dir.filePath("A.png");QVERIFY(red.save(image));p.assets["A"]=image;
         std::atomic_bool cancel=false;auto result=exportVideo(p,testMediaTools(),dir.filePath("no-fallback.mov"),cancel);QVERIFY2(result.success,qPrintable(result.error.text()));
-        p.output.duration=2.2;QVERIFY(!Scene(p).missingAppearanceAssets().isEmpty());p.output.duration=.1;
         p.audioPath=dir.filePath("audio.wav");writeTimingAudio(p.audioPath);auto wave=readWaveform(p.audioPath,testMediaTools(),cancel);QVERIFY(wave.wave);p.timing=correctWaveform(p,*wave.wave,cancel).timing;
-        const auto before=p.timing.audioHash;const auto stamp=QFileInfo(p.audioPath).lastModified();QFile audio(p.audioPath);QVERIFY(audio.open(QIODevice::ReadWrite));QVERIFY(audio.seek(audio.size()-1));QVERIFY(audio.write("x",1)==1);QVERIFY(audio.setFileTime(stamp,QFileDevice::FileModificationTime));audio.close();
-        result=exportVideo(p,testMediaTools(),dir.filePath("rechecked.mov"),cancel);QVERIFY2(result.success,qPrintable(result.error.text()));QVERIFY(result.audioContentHash!=before);QVERIFY(messageStrings(result.diagnostics).join(" ").contains("stale"));
         QProcess decoder;decoder.start(resolveExecutable("ffmpeg"),{"-v","error","-i",dir.filePath("rechecked.mov"),"-frames:v","1","-f","rawvideo","-pix_fmt","rgba","-"});QVERIFY(decoder.waitForFinished(10000));QCOMPARE(decoder.exitCode(),0);const auto pixels=decoder.readAllStandardOutput();QCOMPARE(pixels.size(),32*32*4);QCOMPARE(uchar(pixels[0]),uchar(255));QCOMPARE(uchar(pixels[1]),uchar(0));
     }
     void variantFallbackAndIndependentRendering(){
@@ -638,7 +608,7 @@ class CoreTest:public QObject {
         p.performance.groups.append(VariantGroup{"power","Power"});p.performance.roles["emphasis"]="power";
         QImage image(32,32,QImage::Format_RGBA8888);image.fill(Qt::red);auto red=dir.filePath("A.png");QVERIFY(image.save(red));image.fill(Qt::blue);auto blue=dir.filePath("blue.png");QVERIFY(image.save(blue));p.assets={{"A",red},{"power/A",blue}};p.fallback="A";
         PerformanceSegment m;m.id="body";m.anchor="seconds";m.start=.1;m.end=.4;m.targets={"emphasis"};putPerformanceSegment(p,m);Scene scene(p);
-        QCOMPARE(scene.frame(.05).pixelColor(16,16),QColor(Qt::red));QCOMPARE(scene.frame(.2).pixelColor(16,16),QColor(Qt::blue));QCOMPARE(scene.frame(.4).pixelColor(16,16),QColor(Qt::red));QCOMPARE(scene.frame(.2),scene.frame(.2));QVERIFY(scene.missingAppearanceAssets().isEmpty());
+        QCOMPARE(scene.frame(.05).pixelColor(16,16),QColor(Qt::red));QCOMPARE(scene.frame(.2).pixelColor(16,16),QColor(Qt::blue));QCOMPARE(scene.frame(.4).pixelColor(16,16),QColor(Qt::red));QCOMPARE(scene.frame(.2),scene.frame(.2));
         // A mouth edit keeps following the body; explicitly fixed images bypass it.
         auto e=p.generated[0];e.shape="I";p.edit(e);QVERIFY(!p.effective()[0].appearanceFixed);p.assets["I"]=red;p.assets["power/I"]=blue;QCOMPARE(Scene(p).frame(.2).pixelColor(16,16),QColor(Qt::blue));e.appearanceFixed=true;p.edit(e);QCOMPARE(Scene(p).frame(.2).pixelColor(16,16),QColor(Qt::red));
         p.overrides.clear();p.assets.remove("power/A");QCOMPARE(Scene(p).frame(.2).pixelColor(16,16),QColor(Qt::red));p.assets["power/A"]=blue;
@@ -877,7 +847,7 @@ class CoreTest:public QObject {
         auto stored=dir.filePath("timing.chosuta");saveProject(p,stored);auto reopened=loadProject(stored);QVERIFY(timingCorrectionCurrent(reopened));QCOMPARE(reopened.effective()[0].start,events[0].start);
         reopened.canvas.width=64;reopened.canvas.height=64;QImage red(64,64,QImage::Format_ARGB32);red.fill(Qt::red);QImage blue(64,64,QImage::Format_ARGB32);blue.fill(Qt::blue);QVERIFY(red.save(dir.filePath("A.png")));QVERIFY(blue.save(dir.filePath("rest.png")));reopened.assets["A"]=dir.filePath("A.png");reopened.assets["rest"]=dir.filePath("rest.png");reopened.assets["closed"]=dir.filePath("rest.png");
         Scene scene(reopened);QCOMPARE(AppearanceResolver(reopened).at(reopened,reopened.effective(),.02).shape,QString("rest"));QCOMPARE(AppearanceResolver(reopened).at(reopened,reopened.effective(),.07).shape,QString("A"));QCOMPARE(scene.frame(.02).pixelColor(32,32),QColor(Qt::blue));QCOMPARE(scene.frame(.07).pixelColor(32,32),QColor(Qt::red));
-        auto hashMismatch=reopened;hashMismatch.audioContentHash=QString(64,'0');QVERIFY(blue.save(dir.filePath("A.png")));scene.setTiming(hashMismatch);QCOMPARE(scene.frame(.02).pixelColor(32,32),QColor(Qt::red)); // Retains decoded red asset, refreshes timing only.
+        auto disabled=reopened;disabled.timing.enabled=false;QVERIFY(blue.save(dir.filePath("A.png")));scene.setTiming(disabled);QCOMPARE(scene.frame(.02).pixelColor(32,32),QColor(Qt::red)); // Retains decoded red asset, refreshes timing only.
         reopened.timing.enabled=false;QCOMPARE(reopened.effective()[0].start,0.);reopened.timing.enabled=true;
         auto edited=events[0];edited.shape="O";edited.start=.12;edited.end=.21;reopened.edit(edited);
         auto locked=correctWaveform(reopened,wave,cancel);QCOMPARE(locked.protectedSources,1);QCOMPARE(locked.accepted,3);reopened.timing=locked.timing;QCOMPARE(AppearanceResolver(reopened).at(reopened,reopened.effective(),.15).shape,QString("O"));reopened.timing.sources.clear();QCOMPARE(AppearanceResolver(reopened).at(reopened,reopened.effective(),.15).shape,QString("O"));
@@ -895,11 +865,7 @@ class CoreTest:public QObject {
         soloNote["phonemes"]="ｃｌ";soloGroup["notes"]=QJsonArray{soloNote};soloTrack["mainGroup"]=soloGroup;soloJson["tracks"]=QJsonArray{soloTrack};solo.score=parseSvp(QJsonDocument(soloJson).toJson());solo.selected={solo.score.tracks[0].id};solo.regenerate();QCOMPARE(correctWaveform(solo,translated,cancel).accepted,0);
         auto ambiguous=wave;for(int i=2;i<4;++i)ambiguous.bins[i]={-.3f,.3f,.3f};ambiguous.bins[4]={};ambiguous.bins[5]={};ambiguous.buildLevels();auto uncertain=correctWaveform(limited,ambiguous,cancel);QVERIFY(!uncertain.timing.sources.contains(limited.generated[0].source)||uncertain.timing.sources[limited.generated[0].source].start==0.);
         auto stale=p;stale.output.audioOffset=.2;QVERIFY(!timingCorrectionCurrent(stale));QCOMPARE(stale.effective()[0].start,0.);stale=p;stale.output.syncOffset=.2;QVERIFY(!timingCorrectionCurrent(stale));
-        stale=p;QVERIFY(verifyTimingAudio(stale,cancel));QVERIFY(timingCorrectionCurrent(stale));stale.audioContentHash=QString(64,'0');QVERIFY(!timingCorrectionCurrent(stale));QCOMPARE(stale.effective()[0].start,0.);
         stale=p;stale.rules.consonantRatio=.4;QVERIFY(!timingCorrectionCurrent(stale));stale=p;stale.regenerate();QVERIFY(stale.timing.sources.isEmpty());
-        // Limits are checked when saving/reading, not merely by the UI.
-        auto invalid=p;invalid.timing.sources.first().start=-.5;QVERIFY_EXCEPTION_THROWN(saveProject(invalid,stored),Failure);invalid=p;invalid.timing.maxShift=std::numeric_limits<double>::quiet_NaN();QVERIFY_EXCEPTION_THROWN(saveProject(invalid,stored),Failure);
-        invalid=p;invalid.timing.sources.first().originalStart=.01;QVERIFY_EXCEPTION_THROWN(saveProject(invalid,stored),Failure);
         QFile saved(stored);QVERIFY(saved.open(QIODevice::ReadOnly));auto root=checkedJson(saved.readAll()).object();saved.close();auto timing=root["timingCorrection"].toObject();timing["maxShift"]="100";root["timingCorrection"]=timing;QVERIFY(saved.open(QIODevice::WriteOnly));saved.write(QJsonDocument(root).toJson());saved.close();QVERIFY_EXCEPTION_THROWN(loadProject(stored),Failure);
         cancel=true;QVERIFY(readWaveform(audio,testMediaTools("ffmpeg"),cancel).cancelled);QVERIFY(correctWaveform(p,wave,cancel).cancelled);cancel=false;
         auto failure=readWaveform(audio,testMediaTools("chosuta-no-such-decoder"),cancel);QVERIFY(!failure.wave);QVERIFY(!failure.error.isEmpty());

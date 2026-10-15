@@ -37,7 +37,7 @@ class PackageTest(unittest.TestCase):
             self.assertEqual((output / "runtime-dependencies.txt").read_text(), "fixture dependencies\n")
             with zipfile.ZipFile(output / "Chosuta-test-source.zip") as source:
                 self.assertTrue(any(name.endswith("src/core/model.h") for name in source.namelist()))
-                for helper in ("scripts/btbn-ffmpeg.ps1", "tests/btbn_download_test.ps1"):
+                for helper in ("scripts/btbn-ffmpeg.ps1",):
                     self.assertTrue(any(name.endswith("/" + helper) for name in source.namelist()), helper)
                 for asset in ("icons.qrc", "icons/chosuta.png", "icons/chosuta.ico", "icons/chosuta.rc"):
                     matches = [name for name in source.namelist() if name.endswith("/resources/" + asset)]

@@ -9,7 +9,6 @@ namespace chosuta {
             const char*ja;
         };
         static const Entry entries[]= {
-            {"Adopt project media tool on this computer","在本机采用工程指定的媒体程序","このPCでプロジェクトのメディアツールを採用"},
             {"Default FFmpeg (this computer)","默认 FFmpeg（本机）","既定の FFmpeg（このPC）"},
             {"Override for this project","为本工程单独指定","このプロジェクトで個別指定"},
             {"Browse…","浏览…","参照…"},
@@ -98,7 +97,6 @@ namespace chosuta {
             {"Estimate Japanese kanji readings (optional)","估计日文汉字读音（可选）","日本語の漢字の読みを推定（任意）"},
             {"Also save as defaults for new SVP imports","同时保存为新导入 SVP 的默认设置","新しい SVP の既定設定としても保存"},
             {"Dictionary data: %1 / 3,000,000 bytes","词典数据：%1 / 3,000,000 字节","辞書データ：%1 / 3,000,000 バイト"},
-            {"Dictionary exceeds 20000 entries","词典超过 20,000 个词条","辞書が 20,000 語を超えています"},
             {"Custom readings override built-in readings. Note corrections and explicit SVP phonemes keep priority. Regenerate to apply.","自定义读音优先于内置读音。逐音符人工修正和 SVP 显式音素保持优先。保存后重新生成口形即可应用。","独自の読みは内蔵の読みより優先されます。ノートの修正と SVP の明示音素は最優先です。保存後に再生成してください。"},
             {"Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off.","日文默认以假名为准。小型词表不能保证汉字读音准确；未知词仍需修正。关闭此选项也可以使用您明确添加的自定义读音。","日本語は仮名を基本とします。小さな語彙表では漢字の読みの正確さを保証できません。未知の語は修正が必要です。無効でも登録した独自の読みを使えます。"},
             {"Settings","设置","設定"},

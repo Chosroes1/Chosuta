@@ -7,7 +7,7 @@
 | Qt Core / Gui / Widgets / Concurrent / Multimedia；传递 Qt Network | 本机 Qt 6.11.2；构建最低 Qt 6.4；[Qt 源码](https://code.qt.io/cgit/qt/) | 本项目按 LGPL-3.0-only 选项动态链接；JSON、Unicode、图像、GUI、任务及可选播放。[官方许可说明](https://doc.qt.io/qt-6.11/licensing.html) | 未修改 Qt。当前本地应用包不包含 Qt 库或平台/媒体插件；对应 Qt 包由系统提供。完整 GPL/LGPL 文本已保留于 resources/licenses。 |
 | Qt Test、moc、rcc | 同上；仅开发/测试 | Qt Test 属于 Qt Base；工具的 GPL-3.0 与 Qt GPL exception 选项见 [工具许可](https://doc.qt.io/qt-6.11/licensing.html)。测试/元对象/资源编译 | 不包含在应用运行包；生成的元对象/资源代码由应用构建产生。 |
 | ICU4C / ICU 数据 | 本机 78.3；最低 67；[上游](https://github.com/unicode-org/icu)、[变换文档](https://unicode-org.github.io/icu/userguide/transforms/general/) | Unicode-3.0 及 ICU LICENSE 所列附带条款（含历史 ICU、BSD、NAIST-2003 等）；直接链接 i18n/uc/data。Han-Latin 默认汉字读音与音调规范化 | 未修改、未复制字典数据。当前包不捆绑 ICU 动态库；本机完整 ICU LICENSE 原样保留为 resources/licenses/ICU.txt。默认读音不承诺上下文消歧。 |
-| FFmpeg / ffprobe | 本机 9.0.2；[上游源码](https://ffmpeg.org/download.html)、[许可与构建组合](https://ffmpeg.org/legal.html) | 独立外部进程。实际本机构建 `-L` 声明 GPL-3.0-or-later，配置含 enable-gpl、enable-version3、libx264/libvpx/libopus，不含 enable-nonfree。编码 / 可选音频元数据探测 / 波形 PCM 解码 / 测试探测 | 未修改、不捆绑。程序检查具体编码器而不根据扩展名宣称支持。Qt Multimedia 自身的 FFmpeg 后端属于实际 Qt 部署依赖，也需在以后捆绑时核查。 |
+| FFmpeg / ffprobe | 本机 9.0.2；[上游源码](https://ffmpeg.org/download.html)、[许可与构建组合](https://ffmpeg.org/legal.html) | 独立外部进程。实际本机构建 `-L` 声明 GPL-3.0-or-later，配置含 enable-gpl、enable-version3、libx264/libvpx/libopus，不含 enable-nonfree。编码 / 可选音频元数据探测 / 波形 PCM 解码 / 测试探测 | 未修改、不捆绑。编码结果由 FFmpeg 返回。Qt Multimedia 自身的 FFmpeg 后端属于实际 Qt 部署依赖，也需在以后捆绑时核查。 |
 | GCC 16.2.1 | 系统开发工具；[GCC](https://gcc.gnu.org/) | GPL-3.0-or-later，运行时按 GCC Runtime Library Exception 3.1 等实际条款；C++20 编译 | 不捆绑编译器；本机动态 libstdc++ 属于系统运行依赖。 |
 | CMake 4.4.4 | 系统开发工具；[CMake](https://cmake.org/) | BSD-3-Clause；构建/安装/CPack | 不捆绑，不下载组件。 |
 | Ninja 1.13.2 | 系统开发工具；[Ninja](https://github.com/ninja-build/ninja) | Apache-2.0；构建 | 不捆绑。 |
@@ -57,7 +57,7 @@ Windows 构建依赖的具体许可证、附带媒体库和源码义务以其实
 
 ### 0.8.2 外部工具隔离与 no-ffmpeg
 
-本次新增配置／检测／双版本部署为 Chosuta 原创代码，无新增库或模型，未下载或捆绑新的第三方二进制。Windows 脚本允许用户提供已有 BtbN GPL shared（或其他满足功能／许可要求的构建），不自行裁剪；两个工具和供应商 bin 中 DLL 放在 `bin/tools/ffmpeg/`，Qt 媒体 DLL 仍由 windeployqt 独立部署。两个工具都检查 nonfree 标记；构建信息、文件大小／哈希和当地可得许可随附带版记录。此检查和收集不是对供应商全部传递依赖及对应源码义务的自动审计。
+本次新增配置／检测／双版本部署为 Chosuta 原创代码，无新增库或模型，未下载或捆绑新的第三方二进制。Windows 脚本允许用户提供已有 BtbN GPL shared（或其他满足功能／许可要求的构建），不自行裁剪；两个工具和供应商 bin 中 DLL 放在 `bin/tools/ffmpeg/`，Qt 媒体 DLL 仍由 windeployqt 独立部署。两个工具都检查 nonfree 标记；构建信息、文件大小和当地可得许可随附带版记录。此检查和收集不是对供应商全部传递依赖及对应源码义务的自动审计。
 
 no-ffmpeg 版不复制该外部工具目录或其许可附件，但仍捆绑所选 Qt／ICU 及 Qt 媒体后端，需要履行这些实际组件的义务。BtbN 构建脚本的许可证不能替代其生成的 FFmpeg／编解码库许可证。当前未生成 Windows 分发包，具体第三方版本和来源以实际部署清单及发布时的对应源码材料为准。
 
@@ -69,6 +69,6 @@ no-ffmpeg 版不复制该外部工具目录或其许可附件，但仍捆绑所�
 
 ### 2026-10-14 显式 BtbN 下载与缓存
 
-新增 PowerShell 下载/校验代码和离线测试为 Chosuta 原创 GPL-3.0-or-later 代码，没有复制 BtbN 的构建脚本；仅通过其[官方发布](https://github.com/BtbN/FFmpeg-Builds/releases)取得用户选择的 FFmpeg 9.0 / win64 GPL shared 二进制。缓存记录日期标签、资产名、官方 URL、上游 SHA-256，并保留 ZIP 和原许可；部署复制上游 LICENSE.txt/可用许可证目录以及来源和校验清单。两个媒体工具的 nonfree 配置拒绝规则保持。
+PowerShell 下载代码为 Chosuta 原创 GPL-3.0-or-later 代码，没有复制 BtbN 的构建脚本；仅通过其[官方发布](https://github.com/BtbN/FFmpeg-Builds/releases)取得用户选择的 win64 GPL shared 二进制。缓存记录发布标签、资产名、官方 URL、上游 SHA-256 和原许可；新下载 ZIP 解包后删除；部署复制上游 LICENSE.txt/可用许可证目录以及来源和校验清单。两个媒体工具的 nonfree 配置拒绝规则保持。
 
 FFmpeg 及捆绑库的实际许可和对应源码义务仍需按所选构建核查；BtbN 构建仓库的许可、GitHub 自动生成的该仓库源码 ZIP、SHA-256 或单份 LICENSE 都不能代替完整的 FFmpeg/传递依赖对应源码。缓存和第三方二进制不进入 Chosuta 公开源码。本次环境没有 PowerShell/Windows，未下载该二进制、验证其运行或生成分发包；此处说明取得和记录机制，不宣称已完成具体 Windows 包的许可审核。

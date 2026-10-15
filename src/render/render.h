@@ -19,7 +19,6 @@ namespace chosuta {
         void setTiming(const Project &project,std::shared_ptr<const Evaluation> view={}); // Same assets/layout; no image decoding.
         mutable QVector<Message> diagnostics;
         AssetSelection selectionAt(double seconds)const;
-        QStringList missingAppearanceAssets()const;
         qint64 imageCacheBytes()const{return images.totalCost();}
         int imageDecodeCount()const{return decodeCount;}
         bool hasBackground()const{return project.canvas.backgroundImage.isEmpty()||!background.isNull();}
@@ -46,7 +45,7 @@ namespace chosuta {
     };
     struct ExportResult {
         bool success=false,cancelled=false;
-        Message error;QString audioContentHash;
+        Message error;
         QVector<Message> diagnostics;
         int frames=0;
     };
