@@ -108,7 +108,7 @@ namespace chosuta {
         auto layout=new QVBoxLayout(&dialog);
         auto pages=new QTabWidget;pages->setObjectName("advancedSettingsTabs");layout->addWidget(pages);
         auto dictionaryPage=new QWidget;auto dictionaryLayout=new QVBoxLayout(dictionaryPage);
-        auto hint=new QLabel(trText("Custom readings override built-in readings. Note corrections and explicit SVP phonemes keep priority. Regenerate to apply."));
+        auto hint=new QLabel(trText("Custom readings override built-in readings. Note corrections and explicit source phonemes keep priority. Regenerate to apply."));
         hint->setWordWrap(true);dictionaryLayout->addWidget(hint);
         auto table=new QTableWidget(0,4);table->setObjectName("dictionaryTable");
         table->setHorizontalHeaderLabels({trText("Language"),trText("Word / phrase"),trText("Notation"),trText("Reading / phonemes")});
@@ -145,7 +145,7 @@ namespace chosuta {
         kanji->setChecked(project.rules.pronunciation.japaneseKanji);japaneseLayout->addWidget(kanji);
         auto kanjiHint=new QLabel(trText("Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off."));
         kanjiHint->setWordWrap(true);japaneseLayout->addWidget(kanjiHint);japaneseLayout->addStretch();pages->addTab(japanesePage,trText("Japanese"));
-        auto defaults=new QCheckBox(trText("Also save as defaults for new SVP imports"));defaults->setObjectName("dictionaryDefaults");defaults->setChecked(false);layout->addWidget(defaults);
+        auto defaults=new QCheckBox(trText("Also save as defaults for new score imports"));defaults->setObjectName("dictionaryDefaults");defaults->setChecked(false);layout->addWidget(defaults);
         auto status=new QLabel;status->setObjectName("dictionaryStatus");status->setWordWrap(true);layout->addWidget(status);
         auto rawOptions=[&] {
             QJsonArray entries;

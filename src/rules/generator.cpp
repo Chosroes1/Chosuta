@@ -15,9 +15,9 @@ namespace chosuta {
         for(int ti=0;ti<p.score.tracks.size();++ti) {
             const auto&t=p.score.tracks[ti];
             if(!p.selected.contains(t.id)||t.muted)continue;
-            struct Context {QString previous="closed",vowel;Pronunciation word;int continuation=0;};
+            struct Context {QString previous="closed",vowel;Pronunciation word;int continuation=0;qint64 end=0;};
             QMap<QString,Context>contexts;
-            auto normalized=[](const Note&note) {return note.lyrics.normalized(QString::NormalizationForm_KC).trimmed();};
+            auto normalized=[](const Note&note) {return (note.lyricReading.isEmpty()?note.lyrics:note.lyricReading).normalized(QString::NormalizationForm_KC).trimmed();};
             // Count continuation notes in each reference instance in linear time.
             // Notes from another group must not consume this group's syllables.
             QVector<int>following(t.notes.size());
@@ -37,6 +37,8 @@ namespace chosuta {
                 const auto&n=t.notes[ni];
                 if(n.muted)continue;
                 auto &context=contexts[n.groupInstance];
+                if(p.score.sourceFormat=="vsqx"&&n.onset>context.end)context={};
+                context.end=n.onset+n.duration;
                 auto &previous=context.previous;
                 auto &word=context.word;
                 auto &continuation=context.continuation;
@@ -107,11 +109,12 @@ namespace chosuta {
                         else if(language=="zh"&&reading.split(' ').value(0).size()>1)phoneNotation=false;
                     }
                     result=pronounce(explicitPhone?phones:text,language,phoneNotation,p.rules.englishDictionary,reading.isEmpty()?n.phoneset:QString(),reading.isEmpty()?p.rules.pronunciation:PronunciationOptions{},p.rules.consonants);
+                    if(!explicitPhone&&!n.lyricReading.isEmpty())result.provenance="utau-alias/estimated";
                     {
                         word=result;
                         continuation=following[ni]>0?1:int(result.syllables.size());
                         if(following[ni]>0&&!result.syllables.isEmpty()){result.syllables={result.syllables.front()};result.roles={result.roles.front()};result.phones={result.phones.front()};}
-                        context.vowel.clear();
+                        if(n.phoneset!="vocaloid-xsampa"||!phones.split(QRegularExpression("\\s+"),Qt::SkipEmptyParts).contains("-"))context.vowel.clear();
                     }
                 }
                 if(result.unknown||result.syllables.isEmpty()) {
@@ -123,6 +126,7 @@ namespace chosuta {
                 int syllableCount=result.syllables.size();
                 for(int si=0;si<syllableCount;++si) {
                     auto shapes=result.syllables[si];
+                    for(auto &shape:shapes)if(shape=="extend")shape=context.vowel.isEmpty()?QString("unknown"):context.vowel;
                     double a=start+(end-start)*si/syllableCount,b=start+(end-start)*(si+1)/syllableCount;
                     int cons=0;
                     while(cons<shapes.size()&&(shapes[cons]=="closed"||shapes[cons]=="open"))++cons;

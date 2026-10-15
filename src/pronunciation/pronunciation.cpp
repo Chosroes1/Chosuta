@@ -133,7 +133,7 @@ namespace chosuta {
     static QString consonantShape(QString phone,const QString &language,const Rules::Consonants &rules) {
         return consonantMode(phoneKey(language,phone),rules);
     }
-    static Pronunciation phones(const QStringList&tokens,QString language,const Rules::Consonants &rules={}) {
+    static Pronunciation phones(const QStringList&tokens,QString language,const Rules::Consonants &rules={},bool vocaloidExtension=false) {
         Pronunciation r;
         r.provenance="explicit/estimated";
         QStringList pending,keys;
@@ -151,7 +151,8 @@ namespace chosuta {
             }
             if(language=="en")token.remove(QRegularExpression("[012]$"));
             QStringList shape;
-            if(token=="br"||token=="breath")shape= {
+            if(vocaloidExtension&&token=="-")shape={"extend"};
+            else if(token=="br"||token=="breath")shape= {
                 "breath"
             };
             else if(token=="cl")shape= {
@@ -181,7 +182,7 @@ namespace chosuta {
             r.syllables.append(pending+shape);
             r.phones.append(keys+QStringList(shape.size(),phoneKey(language,token)));
             QVector<SegmentRole> roles(pending.size(),SegmentRole::Consonant);
-            const bool vowel=language=="en"?vowels.contains(token.toUpper()):QStringList{"a","i","u","e","o"}.contains(token.toLower());
+            const bool vowel=(vocaloidExtension&&token=="-")||(language=="en"?vowels.contains(token.toUpper()):QStringList{"a","i","u","e","o"}.contains(token.toLower()));
             roles+=QVector<SegmentRole>(shape.size(),vowel?SegmentRole::Vowel:SegmentRole::Special);
             r.roles.append(roles);
             pending.clear();keys.clear();
@@ -540,6 +541,42 @@ namespace chosuta {
         }
         return r;
     }
+    static Pronunciation vocaloidPhones(const QString &text,const QString &language,const Rules::Consonants &consonants) {
+        // Translate the notation, not the source text. Existing consonant settings
+        // and estimated syllable timing apply to these normalized phone keys.
+        static const QMap<QString,QString> english{
+            {"@","AX"},{"V","AH"},{"{","AE"},{"a","AA"},{"A:","AA"},{"Q","AA"},
+            {"O","AO"},{"O:","AO"},{"I","IH"},{"i","IY"},{"i:","IY"},
+            {"U","UH"},{"u","UW"},{"u:","UW"},{"e","EH"},{"E","EH"},{"3:","ER"},
+            {"eI","EY"},{"aI","AY"},{"aU","AW"},{"OI","OY"},{"@U","OW"},{"oU","OW"},
+            {"I@","IH AX"},{"e@","EH AX"},{"U@","UH AX"},{"O@","AO AX"},
+            {"b","B"},{"bh","B"},{"p","P"},{"ph","P"},{"m","M"},{"f","F"},{"v","V"},
+            {"t","T"},{"th","T"},{"d","D"},{"dh","D"},{"k","K"},{"kh","K"},{"g","G"},{"gh","G"},
+            {"n","N"},{"N","NG"},{"l","L"},{"r","R"},{"w","W"},{"j","Y"},{"h","HH"},
+            {"s","S"},{"S","SH"},{"z","Z"},{"Z","ZH"},{"T","TH"},{"D","DH"},{"tS","CH"},{"dZ","JH"}
+        };
+        static const QMap<QString,QString> japanese{
+            {"a","a"},{"i","i"},{"M","u"},{"e","e"},{"o","o"},{"N","N"},{"N\\","N"},
+            {"b","b"},{"b'","by"},{"p","p"},{"p'","py"},{"m","m"},{"m'","my"},
+            {"k","k"},{"k'","ky"},{"g","g"},{"g'","gy"},
+            {"n","n"},{"J","ny"},{"n'","ny"},{"4","r"},{"4'","ry"},
+            {"t","t"},{"t'","ty"},{"d","d"},{"d'","dy"},{"ts","ts"},{"tS","ch"},{"dZ","j"},{"dz","z"},
+            {"s","s"},{"S","sh"},{"z","z"},{"Z","j"},{"h","h"},{"h\\","h"},{"C","hy"},{"p\\","f"},{"j","y"},{"w","w"}
+        };
+        Pronunciation result;
+        result.unknown=true;result.provenance="unsupported-vocaloid-phone/estimated";
+        if(language!="en"&&language!="ja")return result;
+        const auto &map=language=="en"?english:japanese;
+        QStringList normalized;
+        for(const auto &token:text.split(QRegularExpression("\\s+"),Qt::SkipEmptyParts)) {
+            if(QStringList{"-","br","cl","sil","pau"}.contains(token))normalized.append(token);
+            else if(map.contains(token))normalized+=map[token].split(' ',Qt::SkipEmptyParts);
+            else return result;
+        }
+        result=phones(normalized,language,consonants,true);
+        result.provenance="vocaloid-xsampa/estimated";
+        return result;
+    }
     Pronunciation pronounce(const QString&input,const QString&language,bool explicitPhones,const QString&dictionary,const QString&phoneset,const PronunciationOptions&options,const Rules::Consonants &consonants) {
         Pronunciation r;
         if(input.size()>4096) {
@@ -550,6 +587,7 @@ namespace chosuta {
         if(l=="japanese")l="ja";
         if(l=="mandarin"||l=="chinese")l="zh";
         if(l=="english")l="en";
+        if(explicitPhones&&phoneset=="vocaloid-xsampa")return vocaloidPhones(text,l,consonants);
         if(l=="auto") {
             if(text.contains(QRegularExpression("[\\x{3040}-\\x{30ff}]")))l="ja";
             else if(text.contains(QRegularExpression("[\\x{3400}-\\x{9fff}]")))l="zh";

@@ -16,7 +16,15 @@ cmake --build build --parallel 4
 
 ## 开发测试
 
-CMake 的 `BUILD_TESTING` 默认关闭。测试源码供开发者主动使用，普通构建和 Linux/Windows 打包均不运行测试，不要求 Qt Test 或 PowerShell 测试夹具。
+CMake 的 `BUILD_TESTING` 默认关闭。开发时按改动范围显式开启并执行相关测试，需要已有 Qt Test；普通构建和 Linux/Windows 打包不自动运行测试，不要求 PowerShell 测试夹具。
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build --parallel 4
+ctest --test-dir build --output-on-failure
+```
+
+测试结果与编译、打包结果分别记录；GUI 离屏检查不替代真实桌面交互。出现失败先核对行为和测试条件，不为通过测试擅改正常界面。
 
 ## Windows
 

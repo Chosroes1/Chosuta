@@ -5,6 +5,7 @@ namespace chosuta {
 // A view owns its immutable source and every index derived from it. Never stored in undo.
 struct Evaluation {
     const Project project;
+    const bool timingCurrent;
     const QVector<Event> events,resolved;
     const std::shared_ptr<const PerformanceResolver> performance;
     const AppearanceResolver appearance;

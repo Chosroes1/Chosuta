@@ -600,8 +600,48 @@ class CoreTest:public QObject {
         QTemporaryDir dir;auto p=basic();p.canvas.width=p.canvas.height=32;p.output.duration=.1;p.output.fpsNum=10;p.output.format="mov";
         QImage red(32,32,QImage::Format_RGBA8888);red.fill(Qt::red);const auto image=dir.filePath("A.png");QVERIFY(red.save(image));p.assets["A"]=image;
         std::atomic_bool cancel=false;auto result=exportVideo(p,testMediaTools(),dir.filePath("no-fallback.mov"),cancel);QVERIFY2(result.success,qPrintable(result.error.text()));
-        p.audioPath=dir.filePath("audio.wav");writeTimingAudio(p.audioPath);auto wave=readWaveform(p.audioPath,testMediaTools(),cancel);QVERIFY(wave.wave);p.timing=correctWaveform(p,*wave.wave,cancel).timing;
-        QProcess decoder;decoder.start(resolveExecutable("ffmpeg"),{"-v","error","-i",dir.filePath("rechecked.mov"),"-frames:v","1","-f","rawvideo","-pix_fmt","rgba","-"});QVERIFY(decoder.waitForFinished(10000));QCOMPARE(decoder.exitCode(),0);const auto pixels=decoder.readAllStandardOutput();QCOMPARE(pixels.size(),32*32*4);QCOMPARE(uchar(pixels[0]),uchar(255));QCOMPARE(uchar(pixels[1]),uchar(0));
+        QProcess decoder;decoder.start(resolveExecutable("ffmpeg"),{"-v","error","-i",dir.filePath("no-fallback.mov"),"-frames:v","1","-f","rawvideo","-pix_fmt","rgba","-"});QVERIFY(decoder.waitForFinished(10000));QCOMPARE(decoder.exitCode(),0);const auto pixels=decoder.readAllStandardOutput();QCOMPARE(pixels.size(),32*32*4);QCOMPARE(uchar(pixels[0]),uchar(255));QCOMPARE(uchar(pixels[1]),uchar(0));
+    }
+    void cliAssetReplacement(){
+        QTemporaryDir dir;QDir root(dir.path());QVERIFY(root.mkdir("assets"));
+        QImage image(16,16,QImage::Format_RGBA8888);image.fill(Qt::red);
+        const auto original=dir.filePath("original.png");QVERIFY(image.save(original));
+        const auto first=dir.filePath("assets/A.png"),second=dir.filePath("assets/a.png");
+        QVERIFY(image.save(first));image.fill(Qt::blue);QVERIFY(image.save(second));
+        const auto plan=scanAssetDirectory(dir.filePath("assets"),{});QVERIFY(!plan.entries.isEmpty());
+        auto p=basic();p.assets["A"]=original;const auto input=dir.filePath("input.chosuta");saveProject(p,input);
+        auto cli=QCoreApplication::applicationDirPath()+"/chosuta-cli";
+#ifdef Q_OS_WIN
+        cli+=".exe";
+#endif
+        for(bool force:{false,true}){
+            const auto output=dir.filePath(force?"forced.chosuta":"kept.chosuta");
+            QStringList args={"generate",input,output,"--assets",dir.filePath("assets")};if(force)args<<"--force";
+            QProcess process;process.start(cli,args);QVERIFY(process.waitForFinished(10000));
+            QVERIFY2(process.exitStatus()==QProcess::NormalExit&&process.exitCode()==0,process.readAllStandardError().constData());
+            QCOMPARE(loadProject(output).assets.value("A"),force?plan.entries.back().path:original);
+        }
+        // With no pre-existing mapping, valid duplicates still use the last entry.
+        p.assets.clear();saveProject(p,input);const auto output=dir.filePath("new.chosuta");
+        QProcess process;process.start(cli,{"generate",input,output,"--assets",dir.filePath("assets")});QVERIFY(process.waitForFinished(10000));
+        QVERIFY2(process.exitCode()==0,process.readAllStandardError().constData());QCOMPARE(loadProject(output).assets.value("A"),plan.entries.back().path);
+    }
+    void imageCachePathAliases(){
+        QTemporaryDir dir;QDir root(dir.path());QVERIFY(root.mkdir("images"));
+        QImage image(64,64,QImage::Format_RGBA8888);image.fill(Qt::red);const auto path=dir.filePath("images/A.png");QVERIFY(image.save(path));
+        auto p=appearanceProject({60,60});p.canvas.width=p.canvas.height=32;p.assets["A"]=path;p.fallback="A";
+        p.performance.groups.append(VariantGroup{"power","Power"});p.assets["power/A"]=dir.filePath("images/../images/A.png");
+        PerformanceSegment m;m.id="manual";m.anchor="seconds";m.start=.1;m.end=.4;m.targets={"group:power"};putPerformanceSegment(p,m);
+        Scene scene(p);QCOMPARE(scene.frame(.05),scene.frame(.2));QCOMPARE(scene.imageDecodeCount(),1);
+        scene.setTiming(p);scene.frame(.2);QCOMPARE(scene.imageDecodeCount(),1);
+    }
+    void sourceTrailingRestDuration(){
+        const QByteArray source="[#VERSION]\nUST Version1.2\n[#SETTING]\nTempo=120\n[#0000]\nLength=480\nLyric=R\n[#0001]\nLength=480\nLyric=a\nNoteNum=60\n[#0002]\nLength=480\nLyric=R\n[#TRACKEND]\n";
+        Project p;p.score=parseSource(source,"ust","song.ust");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.tracks[0].notes.size(),1);QCOMPARE(p.score.tracks[0].notes[0].sourceOnset,qint64(480));
+        QCOMPARE(p.duration(),1.5);QCOMPARE(Evaluation(p).duration,p.duration());
+        QTemporaryDir dir;const auto path=dir.filePath("rest.chosuta");saveProject(p,path);const auto restored=loadProject(path);
+        QCOMPARE(restored.score.raw,source);QCOMPARE(restored.score.sourceFormat,QString("ust"));QCOMPARE(Evaluation(restored).duration,1.5);
     }
     void variantFallbackAndIndependentRendering(){
         QTemporaryDir dir;auto p=appearanceProject({60,60});p.canvas.width=p.canvas.height=32;p.output.duration=1;p.output.fpsNum=10;p.output.format="mov";

@@ -42,6 +42,8 @@ namespace chosuta {
         int pitch=60;
         bool muted=false;
         QJsonObject original;
+        QString lyricReading; // Derived UTAU alias reading; lyrics retain the original alias.
+        qint64 sourceOnset=0, sourceDuration=0;
     };
     struct Track {
         QString id,name;
@@ -56,8 +58,12 @@ namespace chosuta {
         QString sourcePath, hash;
         int version=0;
         double sourceOrigin=0;
+        QString sourceFormat="svp", sourceVersion;
+        qint64 sourceResolution=Blick, sourceTickOrigin=0, endPosition=0;
     };
     using Progress=std::function<void(int)>;
+    Score importSource(const QString &path,const std::atomic_bool *cancel=nullptr,Progress progress={});
+    Score parseSource(QByteArray bytes,const QString &format,const QString &path={},const std::atomic_bool *cancel=nullptr,Progress progress={});
     Score importSvp(const QString &path, const std::atomic_bool *cancel=nullptr, Progress progress={});
     Score parseSvp(QByteArray bytes,const QString &path={},const std::atomic_bool *cancel=nullptr,Progress progress={});
     QJsonDocument checkedJson(QByteArray bytes,bool allowNul=false);

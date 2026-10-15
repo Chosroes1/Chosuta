@@ -9,6 +9,7 @@ namespace chosuta {
             const char*ja;
         };
         static const Entry entries[]= {
+            {"Scores / Chosuta (*.svp *.ust *.vsqx *.chosuta)","乐谱 / Chosuta (*.svp *.ust *.vsqx *.chosuta)","楽譜 / Chosuta (*.svp *.ust *.vsqx *.chosuta)"},
             {"Default FFmpeg (this computer)","默认 FFmpeg（本机）","既定の FFmpeg（このPC）"},
             {"Override for this project","为本工程单独指定","このプロジェクトで個別指定"},
             {"Browse…","浏览…","参照…"},
@@ -95,9 +96,9 @@ namespace chosuta {
             {"Pronunciation dictionary","读音词典","発音辞書"},
             {"Japanese","日文","日本語"},
             {"Estimate Japanese kanji readings (optional)","估计日文汉字读音（可选）","日本語の漢字の読みを推定（任意）"},
-            {"Also save as defaults for new SVP imports","同时保存为新导入 SVP 的默认设置","新しい SVP の既定設定としても保存"},
+            {"Also save as defaults for new score imports","同时保存为新导入乐谱的默认设置","新しい楽譜の既定設定としても保存"},
             {"Dictionary data: %1 / 3,000,000 bytes","词典数据：%1 / 3,000,000 字节","辞書データ：%1 / 3,000,000 バイト"},
-            {"Custom readings override built-in readings. Note corrections and explicit SVP phonemes keep priority. Regenerate to apply.","自定义读音优先于内置读音。逐音符人工修正和 SVP 显式音素保持优先。保存后重新生成口形即可应用。","独自の読みは内蔵の読みより優先されます。ノートの修正と SVP の明示音素は最優先です。保存後に再生成してください。"},
+            {"Custom readings override built-in readings. Note corrections and explicit source phonemes keep priority. Regenerate to apply.","自定义读音优先于内置读音。逐音符人工修正和来源显式音素保持优先。保存后重新生成口形即可应用。","独自の読みは内蔵の読みより優先されます。ノートの修正とソースの明示音素は最優先です。保存後に再生成してください。"},
             {"Japanese uses kana by default. This small word table cannot guarantee kanji readings; unknown words still need correction. Explicit custom readings work even with this option off.","日文默认以假名为准。小型词表不能保证汉字读音准确；未知词仍需修正。关闭此选项也可以使用您明确添加的自定义读音。","日本語は仮名を基本とします。小さな語彙表では漢字の読みの正確さを保証できません。未知の語は修正が必要です。無効でも登録した独自の読みを使えます。"},
             {"Settings","设置","設定"},
             {"Preferences","偏好设置","環境設定"},
@@ -134,7 +135,7 @@ namespace chosuta {
                 "Help","帮助","ヘルプ"
             },
             {
-                "Open SVP / Project","打开 SVP / 工程","SVP / プロジェクトを開く"
+                "Open score / Project","打开乐谱 / 工程","楽譜 / プロジェクトを開く"
             }, {
                 "Save","保存","保存"
             }, {
@@ -344,7 +345,7 @@ namespace chosuta {
             {
                 "Guide","操作说明","使い方"
             }, {
-                "Open an SVP, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings.","打开 SVP → 勾选轨道 → 生成口形 → 导入 PNG → 编辑时间轴 → 保存 → 导出。拖动边缘调整边界，拖动中部移动，Ctrl 点击多选，Ctrl 滚轮缩放。优先级数值较小者优先。自动结果均为时序估计，未知读音保持待处理标记。测试素材为原创几何图形。","SVP を開く → トラック選択 → 生成 → PNG 読み込み → タイムライン編集 → 保存 → 書き出し。端をドラッグして長さを変更、中央をドラッグして移動。Ctrl クリックで複数選択、Ctrl ホイールでズーム。小さい優先度の値を優先。自動結果は推定で、未知の読みは要確認として表示されます。テスト素材はオリジナルの図形です。"
+                "Open an SVP, UST or VSQX, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings.","打开 SVP／UST／VSQX → 勾选轨道 → 生成口形 → 导入 PNG → 编辑时间轴 → 保存 → 导出。拖动边缘调整边界，拖动中部移动，Ctrl 点击多选，Ctrl 滚轮缩放。优先级数值较小者优先。自动结果均为时序估计，未知读音保持待处理标记。测试素材为原创几何图形。","SVP／UST／VSQX を開く → トラック選択 → 生成 → PNG 読み込み → タイムライン編集 → 保存 → 書き出し。端をドラッグして長さを変更、中央をドラッグして移動。Ctrl クリックで複数選択、Ctrl ホイールでズーム。小さい優先度の値を優先。自動結果は推定で、未知の読みは要確認として表示されます。テスト素材はオリジナルの図形です。"
             }
         };
         for(const auto&e:entries)if(qstrcmp(e.en,key)==0)return QString::fromUtf8(uiLanguage=="zh"?e.zh:uiLanguage=="ja"?e.ja:e.en);

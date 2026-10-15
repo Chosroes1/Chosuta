@@ -29,6 +29,7 @@ namespace chosuta {
         AppearanceResolver appearance;
         mutable QCache<QString,QImage>images;
         QMap<QString,QSize>imageSizes;
+        QMap<QString,QString>imagePaths;
         QSize imageCacheFit;
         mutable QSet<QString>available;
         mutable int decodeCount=0;

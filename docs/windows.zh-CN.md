@@ -88,7 +88,7 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 .\out\windows\Chosuta-0.9.3-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
 ```
 
-如果手动从完整版复制出 no-ffmpeg 目录，删的是副本中的整个 `tools/ffmpeg/`，而不是只删两个 EXE，更不能删除部署根目录中的 Qt DLL。手动修改会令原来的清单和验证日志失效，正式交付建议直接使用双版本脚本。
+如果手动从完整版复制出 no-ffmpeg 目录，删的是副本中的整个 `tools/ffmpeg/`，而不是只删两个 EXE，更不能删除部署根目录中的 Qt DLL。手动修改会令原来的文件与体积清单过时，正式交付建议直接使用双版本脚本。
 
 实际体积以该次 `runtime-manifest.json` 的 `runtimeBytes`、`mediaToolsBytes` 和生成 ZIP 为准。目前没有 BtbN／Windows 实测大小，不承诺压到某个 MB；BtbN 共享版本身也不是最小功能裁剪版。
 
@@ -101,10 +101,10 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 | 可直接启动的 GUI | `out/windows/Chosuta/chosuta.exe` |
 | 无界面 CLI | `out/windows/Chosuta/chosuta-cli.exe` |
 | 原始构建 EXE（尚未单独部署） | `build-windows/chosuta.exe`、`build-windows/chosuta-cli.exe` |
-| 实际版本/依赖文件哈希/验证状态 | `out/windows/Chosuta/runtime-manifest.json` |
-| 构建及部署后验证日志 | `out/windows/Chosuta/validation/` |
+| 实际版本/文件大小/构建信息 | `out/windows/Chosuta/runtime-manifest.json` |
+| 构建信息及依赖版本记录（不是应用验收日志） | `out/windows/Chosuta/validation/` |
 
-脚本成功显示 `Ready: .../chosuta.exe` 后即可双击或执行：
+脚本成功显示 `Built: .../chosuta.exe` 后即可双击或执行：
 
 ```powershell
 .\out\windows\Chosuta\chosuta.exe

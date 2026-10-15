@@ -72,3 +72,12 @@ no-ffmpeg 版不复制该外部工具目录或其许可附件，但仍捆绑所�
 PowerShell 下载代码为 Chosuta 原创 GPL-3.0-or-later 代码，没有复制 BtbN 的构建脚本；仅通过其[官方发布](https://github.com/BtbN/FFmpeg-Builds/releases)取得用户选择的 win64 GPL shared 二进制。缓存记录发布标签、资产名、官方 URL、上游 SHA-256 和原许可；新下载 ZIP 解包后删除；部署复制上游 LICENSE.txt/可用许可证目录以及来源和校验清单。两个媒体工具的 nonfree 配置拒绝规则保持。
 
 FFmpeg 及捆绑库的实际许可和对应源码义务仍需按所选构建核查；BtbN 构建仓库的许可、GitHub 自动生成的该仓库源码 ZIP、SHA-256 或单份 LICENSE 都不能代替完整的 FFmpeg/传递依赖对应源码。缓存和第三方二进制不进入 Chosuta 公开源码。本次环境没有 PowerShell/Windows，未下载该二进制、验证其运行或生成分发包；此处说明取得和记录机制，不宣称已完成具体 Windows 包的许可审核。
+
+
+### 0.10.0 UST / VSQX 参考资料
+
+新增来源分派、文本/XML读取和音素符号映射为本项目实现；复用已有Qt Core的QStringDecoder/QXmlStreamReader与ICU的CP932转换，无新增运行依赖、词典或声库。原始工程仅本地只读参考，不随源码或应用分发。
+
+参考[UtaFormatix](https://github.com/sdercolin/utaformatix3)的UST/VSQX字段与时间表达，用户提供归档注释为f3c83354f57894492410bbc5ba03f7e97169c92c，内含Copyright 2020 sdercolin的Apache-2.0声明；也参考此前取得的[OpenUtau UST实现](https://github.com/openutau/OpenUtau/blob/master/OpenUtau.Core/Classic/Ust.cs)，MIT / Copyright 2014 StAkira。只参考格式和字段，不集成、运行或移植这些转换器代码。若后续实际移植，再按具体代码保留版权、许可和NOTICE。
+
+Yamaha教程VSQX/WAV、作者佐藤翼UST包及后续DS/VVPROJ资料是本地开发输入，其歌曲/歌词/音频权利不由参考实现的代码许可覆盖，不纳入公开源码、测试夹具或Release。新增格式尚未进行应用运行或原软件兼容验收。

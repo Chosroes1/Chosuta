@@ -37,7 +37,11 @@ void Window::ensureWaveform(){
     QFileInfo info(project.audioPath);
     QString key=project.audioPath+"\n"+QString::number(info.size())+"\n"+QString::number(info.lastModified().toMSecsSinceEpoch())+"\n"+resolveExecutable(project.output.ffmpeg);
     if(waveformKey==key)return;
-    waveformKey=key;waveform.reset();waveformMessage=trText("Preparing waveform…");timeline->setWaveform({},waveformMessage);
+    waveformKey=key;
+    // File metadata can change between explicit reloads. Refresh cached timing
+    // only when its validity changes; decoding the waveform does not change it.
+    if(evaluation&&evaluation->timingCurrent!=(project.timing.enabled&&timingCorrectionCurrent(project)))refresh(true);
+    waveform.reset();waveformMessage=trText("Preparing waveform…");timeline->setWaveform({},waveformMessage);
     std::optional<MediaTools> executable;
     try{executable.emplace(selectMediaTools(project.output.ffmpeg));}
     catch(const std::exception &e){waveformMessage=messageText(uiLanguage,exceptionMessage(e));timeline->setWaveform({},waveformMessage);return;}

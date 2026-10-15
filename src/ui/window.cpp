@@ -131,7 +131,7 @@ namespace chosuta {
             connect(a,&QAction::triggered,this,fn);
             return a;
         };
-        action(file,"Open SVP / Project",[this] {
+        action(file,"Open score / Project",[this] {
             openDialog();
         },QKeySequence::Open);
         action(file,"Save",[this] {
@@ -167,7 +167,7 @@ namespace chosuta {
         auto playAction=transport->addAction(trText("Play / Stop","播放／停止","再生／停止"));playAction->setObjectName("transportToggleAction");connect(playAction,&QAction::triggered,this,&Window::togglePlayback);
         auto returnAction=transport->addAction(trText("Return to playback start on Stop","停止时回到本次播放起点","停止時に再生開始位置へ戻る"));returnAction->setObjectName("returnOnStopAction");returnAction->setCheckable(true);returnAction->setChecked(preferences.returnOnStop);connect(returnAction,&QAction::toggled,this,[this](bool v){preferences.returnOnStop=v;saveViewPreferences();});
         action(help,"Guide",[this] {
-            QMessageBox::information(this,trText("Guide"),trText("Open an SVP, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings."));
+            QMessageBox::information(this,trText("Guide"),trText("Open an SVP, UST or VSQX, select tracks, generate, import PNGs, edit the timeline, save, and export. Drag event edges to resize; drag the middle to move. Ctrl-click selects multiple events. Ctrl-wheel zooms. Priority: lower number wins. Corrections are estimates; unknown words remain marked. Demo assets are original test drawings."));
         });
         auto central=new QWidget;
         auto root=new QVBoxLayout(central);
@@ -546,7 +546,7 @@ namespace chosuta {
             if(!url.isLocalFile())return false;QFileInfo file(url.toLocalFile());if(file.isSymLink()||!file.exists())return false;
             if(file.isDir())return mime->urls().size()==1;
             auto suffix=file.suffix().toLower();
-            if(!QStringList{"png","svp","chosuta","wav","flac","mp3","ogg","m4a","aac"}.contains(suffix))return false;
+            if(!QStringList{"png","svp","ust","vsqx","chosuta","wav","flac","mp3","ogg","m4a","aac"}.contains(suffix))return false;
             images=images&&suffix=="png";
         }
         return images||mime->urls().size()==1;
@@ -555,7 +555,7 @@ namespace chosuta {
     void Window::dropEvent(QDropEvent *event){
         if(busy||!supportedDrop(event->mimeData())){event->ignore();return;}
         QStringList paths;for(const auto &url:event->mimeData()->urls())paths.append(url.toLocalFile());event->acceptProposedAction();
-        QTimer::singleShot(0,this,[this,paths]{if(busy)return;QFileInfo file(paths.front());auto suffix=file.suffix().toLower();if(file.isDir()||suffix=="png")showMouthSettings(paths);else if(suffix=="svp"||suffix=="chosuta"){if(confirmDiscard())openPath(paths.front());}else attachAudioPath(paths.front());});
+        QTimer::singleShot(0,this,[this,paths]{if(busy)return;QFileInfo file(paths.front());auto suffix=file.suffix().toLower();if(file.isDir()||suffix=="png")showMouthSettings(paths);else if(suffix=="svp"||suffix=="ust"||suffix=="vsqx"||suffix=="chosuta"){if(confirmDiscard())openPath(paths.front());}else attachAudioPath(paths.front());});
     }
     void Window::assignProject(Project p,bool timingOnly) {
         project=std::move(p);
@@ -750,7 +750,7 @@ namespace chosuta {
     }
     void Window::openDialog() {
         if(!confirmDiscard())return;
-        auto path=QFileDialog::getOpenFileName(this,trText("Open SVP / Project"),{},"SVP / Chosuta (*.svp *.chosuta)");
+        auto path=QFileDialog::getOpenFileName(this,trText("Open score / Project"),{},trText("Scores / Chosuta (*.svp *.ust *.vsqx *.chosuta)"));
         if(!path.isEmpty())openPath(path);
     }
     void Window::openPath(const QString&path) {
@@ -767,7 +767,7 @@ namespace chosuta {
                 if(path.endsWith(".chosuta",Qt::CaseInsensitive))r.project=loadProject(path);
                 else {
                     r.project.rules.pronunciation=defaults;r.project.performance.settings=performanceDefaults;
-                    r.project.score=importSvp(path,token.get(),report);
+                    r.project.score=importSource(path,token.get(),report);
                     if(!r.project.score.tracks.isEmpty())r.project.selected= {
                         r.project.score.tracks[0].id
                     };

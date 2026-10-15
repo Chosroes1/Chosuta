@@ -5,6 +5,15 @@ namespace {
 QString translatedMessage(const QString &language,const QString &key){
     struct Entry{const char *key,*zh,*ja;};
     static const Entry entries[]={
+        {"Unsupported source format: %1","不支持的来源格式：%1","未対応のソース形式：%1"},
+        {"Cannot decode UST text","无法解码 UST 文本。","UST の文字コードを読み取れません。"},
+        {"Not a UST project: SETTING required","不是完整的 UST 工程：缺少 SETTING。","UST プロジェクトに SETTING がありません。"},
+        {"Not a VSQX project","不是 VSQX 工程。","VSQX プロジェクトではありません。"},
+        {"Unsupported VSQX version","不支持的 VSQX 版本。","未対応の VSQX バージョンです。"},
+        {"Cannot read VSQX XML","无法读取 VSQX XML。","VSQX XML を読み込めません。"},
+        {"Invalid source resolution","来源时间分辨率无效。","ソースの時間分解能が無効です。"},
+        {"UST timing uses the score; voicebank aliases and rendered timing may differ","UST 使用谱面时间；声库别名与实际发声时间可能不同。","UST は譜面時間を使用します。音源エイリアスや実際の発声時間とは異なる場合があります。"},
+        {"VSQX timing uses notes and explicit phonemes, not rendered phoneme boundaries","VSQX 根据音符及显式音素估计时间，不复原合成后的音素边界。","VSQX はノートと明示音素から時間を推定します。合成後の音素境界は再現しません。"},
         {"%1 degree %2","%1，第 %2 度","%1、第 %2 度"},
         {"%1: invalid MIDI pitch","%1：MIDI 音高无效。","%1：MIDI 音高が無効です。"},
         {"%1: music position overflow","%1：音乐位置超出范围。","%1：音楽位置が範囲を超えています。"},

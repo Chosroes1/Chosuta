@@ -73,6 +73,8 @@ namespace chosuta {
             }, {
                 "sourcePath",relative(base,p.score.sourcePath)
             }, {
+                "sourceFormat",p.score.sourceFormat
+            }, {
                 "sourceHash",p.score.hash
             }
         };
@@ -174,7 +176,7 @@ namespace chosuta {
         if(!decoded)throw Failure("Invalid embedded source");
         Project p;
         QDir base=QFileInfo(path).absoluteDir();
-        p.score=parseSvp(decoded.decoded,absolute(base,root["sourcePath"]));
+        p.score=parseSource(decoded.decoded,root["sourceFormat"].toString("svp"),absolute(base,root["sourcePath"]));
         if(p.score.hash!=root["sourceHash"].toString())throw Failure("Embedded source checksum mismatch");
         for(const auto&v:root["selected"].toArray()) {
             auto id=v.toString();

@@ -81,7 +81,7 @@ namespace chosuta {
     }
     double Project::duration()const {
         if(output.duration>0)return output.duration;
-        double d=0;
+        double d=std::max(0.,score.time.seconds(score.endPosition));
         for(const auto&t:score.tracks)for(const auto&n:t.notes)d=std::max(d,score.time.seconds(n.onset+n.duration));
         for(const auto&e:effective())d=std::max(d,e.end);
         d=std::max(.1,d+std::max(0.,output.syncOffset));

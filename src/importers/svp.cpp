@@ -38,6 +38,7 @@ namespace chosuta {
         auto root=checkedJson(bytes,true).object();
         if(!root["tracks"].isArray()||!root["time"].isObject())throw Failure("Not an SVP project: time/tracks required");
         s.version=int(integer(root,"version"));
+        s.sourceVersion=QString::number(s.version);
         if(s.version!=196)s.diagnostics.append( {
             "$.version","version","Unverified source version; parsed conservatively"
         });
@@ -122,6 +123,7 @@ namespace chosuta {
                     note.id=instance+"/"+n["uuid"].toString("note")+QString("@%1").arg(ni);
                     note.onset=onset+offset;
                     note.duration=duration;
+                    note.sourceOnset=note.onset;note.sourceDuration=note.duration;
                     if(pitch+pitchOffset<0||pitch+pitchOffset>127)throw Failure(Message::format("%1: invalid MIDI pitch",{p}));
                     note.pitch=int(pitch+pitchOffset);
                     note.lyrics=n["lyrics"].toString();

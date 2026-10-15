@@ -17,7 +17,7 @@ static void cancelSignal(int) {
 static Project readInput(const QString&file) {
     if(file.endsWith(".chosuta",Qt::CaseInsensitive))return loadProject(file);
     Project p;
-    p.score=importSvp(file);
+    p.score=importSource(file,&cancelled);
     if(!p.score.tracks.isEmpty())p.selected= {
         p.score.tracks.front().id
     };
@@ -29,11 +29,11 @@ int main(int argc,char**argv) {
     QCoreApplication::setApplicationName("chosuta-cli");
     QCoreApplication::setApplicationVersion(CHOSUTA_VERSION);
     QCommandLineParser parser;
-    parser.setApplicationDescription("Chosuta: inspect/generate/export SVP or .chosuta projects; create original demo assets.");
+    parser.setApplicationDescription("Chosuta: inspect/generate/export SVP, UST, VSQX or .chosuta projects; create original demo assets.");
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument("command","inspect | generate | export | correct | revert | demo");
-    parser.addPositionalArgument("input","SVP/project input; demo uses output directory");
+    parser.addPositionalArgument("input","SVP/UST/VSQX/project input; demo uses output directory");
     parser.addPositionalArgument("output","Project/video output for generate/export","[output]");
     auto option=[&](QString name,QString description,QString value,QString def={}) {
         parser.addOption(QCommandLineOption(name,description,value,def));
@@ -72,7 +72,7 @@ int main(int argc,char**argv) {
         "transparent","Transparent MOV/QTRLE output"
     });
     parser.addOption( {
-        "force","Explicitly permit replacing an existing output"
+        "force","Explicitly permit replacing an existing output or asset mapping"
     });
     parser.addOption({"check-media-tools","Check FFmpeg/ffprobe startup and current export capabilities; JSON output"});
     parser.process(app);
@@ -215,6 +215,16 @@ int main(int argc,char**argv) {
                     "sourceHash",p.score.hash
                 }, {
                     "sourceOrigin",p.score.sourceOrigin
+                }, {
+                    "sourceFormat",p.score.sourceFormat
+                }, {
+                    "sourceVersion",p.score.sourceVersion
+                }, {
+                    "sourceResolution",QString::number(p.score.sourceResolution)
+                }, {
+                    "sourceTickOrigin",QString::number(p.score.sourceTickOrigin)
+                }, {
+                    "endPosition",QString::number(p.score.endPosition)
                 }
             };
             QJsonArray tracks,tempos,meters,diagnostics;
@@ -270,7 +280,8 @@ int main(int argc,char**argv) {
             if(!plan.error.isEmpty())throw Failure(plan.error);
             QVector<AssetImportEntry> entries;
             for(const auto &entry:plan.entries){
-                if(entry.status=="new"||entry.status=="conflict"||(entry.status=="replace"&&parser.isSet("force")))entries.append(entry);
+                const bool usable=entry.status=="new"||entry.status=="conflict"||entry.status=="replace";
+                if(usable&&(!p.assets.contains(entry.id)||parser.isSet("force")))entries.append(entry);
                 else std::cerr<<(entry.status+": skipped "+entry.path).toStdString()<<"\n";
             }
             applyAssetImport(p,entries);

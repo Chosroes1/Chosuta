@@ -22,7 +22,12 @@ namespace chosuta {
             QImageReader reader(it.value());const auto size=reader.size();
             if(!reader.canRead()||!size.isValid()||qint64(size.width())*size.height()*4>256LL*1024*1024)
                 diagnostics.append(Message::format("Missing, invalid or oversized image: %1",{it.key()}));
-            else {imageSizes[it.key()]=size;available.insert(it.key());}
+            else {
+                imageSizes[it.key()]=size;available.insert(it.key());
+                // Resolve aliases once per scene, never on each rendered frame.
+                const QFileInfo file(it.value());const auto canonical=file.canonicalFilePath();
+                imagePaths[it.key()]=canonical.isEmpty()?file.absoluteFilePath():canonical;
+            }
         }
         qint64 bytes=0;
         if(!p.canvas.backgroundImage.isEmpty()){
@@ -40,7 +45,7 @@ namespace chosuta {
     }
     QImage Scene::imageFor(const QString &id)const {
         if(!available.contains(id))return {};
-        const auto path=project.assets.value(id);
+        const auto path=imagePaths.value(id);
         auto target=imageSizes.value(id);
         target.scale(imageCacheFit,Qt::KeepAspectRatio);
         if(target.width()>imageSizes.value(id).width())target=imageSizes.value(id);

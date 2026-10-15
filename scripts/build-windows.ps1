@@ -208,6 +208,12 @@ try {
                 bytes = $_.Length
             }
         })
+        $RuntimeBytes = [long]0
+        $MediaToolsBytes = [long]0
+        foreach ($File in $Files) {
+            $RuntimeBytes += $File['bytes']
+            if ($File['path'].StartsWith('tools/ffmpeg/')) { $MediaToolsBytes += $File['bytes'] }
+        }
         $Manifest = [ordered]@{
             version = $BuildInfo.chosutaVersion
             target = 'Windows x64'
@@ -219,8 +225,8 @@ try {
             ffmpegDownload = $(if ($BundleMedia -and $DownloadedFfmpeg) { $DownloadedFfmpeg.Source } else { $null })
             variant = $(if ($BundleMedia) { 'with-ffmpeg' } else { 'no-ffmpeg' })
             mediaToolsDirectory = $(if ($BundleMedia) { 'tools/ffmpeg' } else { $null })
-            runtimeBytes = ($Files | Measure-Object -Property bytes -Sum).Sum
-            mediaToolsBytes = $(if ($BundleMedia) { ($Files | Where-Object { $_.path.StartsWith('tools/ffmpeg/') } | Measure-Object -Property bytes -Sum).Sum } else { 0 })
+            runtimeBytes = $RuntimeBytes
+            mediaToolsBytes = $MediaToolsBytes
             mediaCapabilities = $(if ($BundleMedia) { 'not run by build script' } else { 'not bundled' })
             msvcRuntime = 'Official VC++ x64 Redistributable must already be installed for MSVC builds.'
             ctest = 'not run by build script'
