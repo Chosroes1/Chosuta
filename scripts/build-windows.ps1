@@ -80,12 +80,13 @@ Require-File $DeployTool
 Require-File (Join-Path $QtPrefix 'lib/cmake/Qt6/Qt6Config.cmake')
 Require-File (Join-Path $IcuPrefix 'include/unicode/uversion.h')
 foreach ($Tool in @('cmake', 'ninja')) { Get-Command $Tool -CommandType Application -ErrorAction Stop | Out-Null }
-if ($Toolchain -eq 'MSVC') { Get-Command 'cl.exe' -CommandType Application -ErrorAction Stop | Out-Null }
+if ($Toolchain -eq 'MSVC') { $CompilerPath = (Get-Command 'cl.exe' -CommandType Application -ErrorAction Stop).Source }
 else {
-    Get-Command 'g++.exe' -CommandType Application -ErrorAction Stop | Out-Null
-    $CompilerTarget = & 'g++.exe' -dumpmachine
+    $CompilerPath = (Get-Command 'g++.exe' -CommandType Application -ErrorAction Stop).Source
+    $CompilerTarget = & $CompilerPath -dumpmachine
     if ($LASTEXITCODE -ne 0 -or $CompilerTarget -notmatch '^x86_64-') { throw 'Use the matching x86_64 MinGW toolchain.' }
 }
+$CompilerDir = Split-Path -Parent $CompilerPath
 
 if (-not $IcuRuntimeDir) {
     foreach ($Candidate in @('bin64', 'bin')) {
@@ -131,13 +132,14 @@ $EnvironmentNames = @('PATH', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', '
 $SavedEnvironment = @{}
 foreach ($Name in $EnvironmentNames) { $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process') }
 try {
-    $env:PATH = "$QtBin;$IcuRuntimeDir;$FfmpegDir;$($SavedEnvironment['PATH'])"
+    # Keep the selected compiler and its companion tools ahead of runtime DLLs.
+    # FFmpeg is only needed during deployment, never compiler initialization.
+    $env:PATH = "$CompilerDir;$($SavedEnvironment['PATH']);$QtBin;$IcuRuntimeDir"
     $env:QT_PLUGIN_PATH = Join-Path $QtPrefix 'plugins'
     $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $QtPrefix 'plugins/platforms'
     $ConfigureArgs = @('-S', $ProjectDir, '-B', $BuildDir, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
         '-DBUILD_TESTING=OFF', "-DQt6_DIR=$QtPrefix/lib/cmake/Qt6", "-DCMAKE_PREFIX_PATH=$QtPrefix;$IcuPrefix", "-DICU_ROOT=$IcuPrefix")
-    if ($Toolchain -eq 'MSVC') { $ConfigureArgs += '-DCMAKE_CXX_COMPILER=cl.exe' }
-    else { $ConfigureArgs += '-DCMAKE_CXX_COMPILER=g++.exe' }
+    $ConfigureArgs += "-DCMAKE_CXX_COMPILER=$($CompilerPath.Replace('\', '/'))"
     Invoke-Native 'configure' 'cmake' $ConfigureArgs
     $BuildInfo = Get-Content -LiteralPath (Join-Path $BuildDir 'build-info.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($BuildInfo.systemName -ne 'Windows' -or $BuildInfo.pointerBytes -ne 8) { throw 'This deployment script requires a native Windows x64 target.' }
