@@ -7,5 +7,7 @@
   "compilerVersion": "@CMAKE_CXX_COMPILER_VERSION@",
   "qtVersion": "@Qt6_VERSION@",
   "icuVersion": "@ICU_VERSION@",
+  "zipProvider": "@CHOSUTA_ZIP_PROVIDER@",
+  "libyamlProvider": "@CHOSUTA_LIBYAML_PROVIDER@",
   "cmakeVersion": "@CMAKE_VERSION@"
 }

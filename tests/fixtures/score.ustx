@@ -1,0 +1,41 @@
+# Original Chosuta regression fixture; no voicebank or external audio required.
+%YAML 1.2
+---
+name: 試験曲
+ustx_version: '0.6'
+resolution: 480
+tempos:
+- {position: 0, bpm: 120}
+- {position: 720, bpm: 60}
+time_signatures:
+- {bar_position: 0, beat_per_bar: 4, beat_unit: 4}
+- {bar_position: 1, beat_per_bar: 3, beat_unit: 4}
+tracks:
+- {track_name: 主旋律, mute: false, solo: true, singer: private-bank, phonemizer: JapaneseCVVCPhonemizer}
+- {track_name: Harmony, mute: false, solo: false}
+voice_parts:
+- name: repeated
+  track_no: 0
+  position: 480
+  duration: 960
+  notes:
+  - position: 0
+    duration: 480
+    tone: 60
+    lyric: '- あ'
+    phoneme_overrides: [{index: 0, phoneme: k, offset: -80}]
+    pitch: {data: [{x: -5, y: 0, shape: io}]}
+  - {position: 480, duration: 240, tone: 62, lyric: 'い [i]'}
+- name: repeated
+  track_no: 0
+  position: 1920
+  duration: 480
+  notes:
+  - {position: 0, duration: 480, tone: 64, lyric: う}
+- track_no: 1
+  position: 480
+  duration: 480
+  notes:
+  - {position: 0, duration: 480, tone: 67, lyric: お}
+wave_parts:
+- {track_no: 1, position: 0, relative_path: 'do not load.wav', file_duration_ms: 9000}

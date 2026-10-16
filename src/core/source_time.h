@@ -4,6 +4,8 @@
 namespace chosuta {
 struct SourceSlice {QString source,track;qint64 start=0,end=0;};
 QVector<SourceSlice> routeSources(const Project &,const std::atomic_bool *cancel=nullptr);
+struct TimedSourceSlice {QString source,track;double start=0,end=0;};
+QVector<TimedSourceSlice> routeTimedSources(const Project &,const std::atomic_bool *cancel=nullptr);
 QVector<SourceFragment> eventSourceFragments(const Project &,const Event &);
 class SourceTimeMap {
 public:

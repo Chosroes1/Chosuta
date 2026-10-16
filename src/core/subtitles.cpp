@@ -12,6 +12,7 @@ QSet<QString> subtitleSources(const Project &p) {
 }
 SubtitleInterval subtitleInterval(const Project &p,const SubtitleCue &c,const QSet<QString> *known) {
     if(c.anchor!="beats")return {c.start,c.end,false};
+    if(!p.score.hasMusic)return {c.start,c.end,true};
     QSet<QString> local;
     if(!known&&!c.sourceNotes.isEmpty()){local=subtitleSources(p);known=&local;}
     for(const auto&id:c.sourceNotes)if(!known->contains(sourceKey(c.sourceTrack,id)))return {c.start,c.end,true};
@@ -41,6 +42,7 @@ QVector<LyricSpan> lyricSpans(const Project &p,const QString &id) {
 void setSubtitleTime(const Project &p,SubtitleCue &c,double a,double b,bool beats) {
     if(!std::isfinite(a)||!std::isfinite(b)||(!beats&&a<0)||std::abs(a)>21600||b<=a||std::abs(b)>21600)throw Failure("Subtitle interval must be within 0..21600 seconds (music anchors may start before video zero)");
     c.start=a;c.end=b;c.anchor=beats?"beats":"seconds";c.sourceNotes.clear();c.sourceTrack.clear();
+    if(!p.score.hasMusic){c.anchor="seconds";return;}
     if(beats){c.startBlick=p.score.time.blicks(a-p.output.syncOffset);c.endBlick=p.score.time.blicks(b-p.output.syncOffset);}
 }
 void alignSubtitle(const Project &p,SubtitleCue &c,const QString &track,const LyricSpan &first,const LyricSpan &last) {

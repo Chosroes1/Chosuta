@@ -51,6 +51,18 @@ namespace chosuta {
                 return;
             }
             if(!result.error.isEmpty()) {
+                if(!loadIsRegenerate&&result.error.key=="VVPROJ contains both talk and song; choose a section to import"){
+                    QMessageBox choice(this);choice.setObjectName("vvprojSectionDialog");
+                    choice.setWindowTitle(trText("Import VOICEVOX content","导入 VOICEVOX 内容","VOICEVOX の内容を読み込む"));
+                    choice.setText(trText("This project contains songs and dialogue. Choose which to import.","此工程同时包含歌曲和对白，请选择要导入的内容。","このプロジェクトには歌とセリフがあります。読み込む内容を選択してください。"));
+                    auto song=choice.addButton(trText("Song","歌曲","ソング"),QMessageBox::AcceptRole);
+                    auto talk=choice.addButton(trText("Dialogue","对白","トーク"),QMessageBox::AcceptRole);
+                    song->setObjectName("vvprojSong");talk->setObjectName("vvprojTalk");
+                    choice.addButton(QMessageBox::Cancel);choice.exec();
+                    if(choice.clickedButton()==song)openPath(activePath,"song");
+                    else if(choice.clickedButton()==talk)openPath(activePath,"talk");
+                    return;
+                }
                 error(result.error);
                 return;
             }
@@ -421,7 +433,7 @@ namespace chosuta {
         shape->setEditable(true);
         shape->setObjectName("eventShape");
         labeled("Shape",shape);
-        anchor=new QComboBox;
+        anchor=new QComboBox;anchor->setObjectName("eventAnchor");
         anchor->addItem(trText("Fixed seconds"),"seconds");
         anchor->addItem(trText("Follow beats"),"beats");
         labeled("Anchor",anchor);
@@ -459,7 +471,7 @@ namespace chosuta {
         });
         auto timelineRow=new QHBoxLayout;
         auto timelinePanel=new QWidget;auto timelineLayout=new QVBoxLayout(timelinePanel);timelineLayout->setContentsMargins(0,0,0,0);timelineLayout->addLayout(timelineRow);timelineSplitter->addWidget(timelinePanel);timelineSplitter->setStretchFactor(0,1);timelineSplitter->setStretchFactor(1,0);
-        auto units=new QComboBox;
+        auto units=new QComboBox;units->setObjectName("timelineUnits");
         units->addItems( {
             trText("Seconds"),trText("Bars / Beats")
         });
@@ -546,7 +558,7 @@ namespace chosuta {
             if(!url.isLocalFile())return false;QFileInfo file(url.toLocalFile());if(file.isSymLink()||!file.exists())return false;
             if(file.isDir())return mime->urls().size()==1;
             auto suffix=file.suffix().toLower();
-            if(!QStringList{"png","svp","ust","vsqx","chosuta","wav","flac","mp3","ogg","m4a","aac"}.contains(suffix))return false;
+            if(!QStringList{"png","svp","ust","ustx","vsq","vsqx","musicxml","xml","mxl","ccs","vpr","lab","ds","vvproj","chosuta","wav","flac","mp3","ogg","m4a","aac"}.contains(suffix))return false;
             images=images&&suffix=="png";
         }
         return images||mime->urls().size()==1;
@@ -555,7 +567,7 @@ namespace chosuta {
     void Window::dropEvent(QDropEvent *event){
         if(busy||!supportedDrop(event->mimeData())){event->ignore();return;}
         QStringList paths;for(const auto &url:event->mimeData()->urls())paths.append(url.toLocalFile());event->acceptProposedAction();
-        QTimer::singleShot(0,this,[this,paths]{if(busy)return;QFileInfo file(paths.front());auto suffix=file.suffix().toLower();if(file.isDir()||suffix=="png")showMouthSettings(paths);else if(suffix=="svp"||suffix=="ust"||suffix=="vsqx"||suffix=="chosuta"){if(confirmDiscard())openPath(paths.front());}else attachAudioPath(paths.front());});
+        QTimer::singleShot(0,this,[this,paths]{if(busy)return;QFileInfo file(paths.front());auto suffix=file.suffix().toLower();if(file.isDir()||suffix=="png")showMouthSettings(paths);else if(suffix=="svp"||suffix=="ust"||suffix=="ustx"||suffix=="vsq"||suffix=="vsqx"||suffix=="musicxml"||suffix=="xml"||suffix=="mxl"||suffix=="ccs"||suffix=="vpr"||suffix=="lab"||suffix=="ds"||suffix=="vvproj"||suffix=="chosuta"){if(confirmDiscard())openPath(paths.front());}else attachAudioPath(paths.front());});
     }
     void Window::assignProject(Project p,bool timingOnly) {
         project=std::move(p);
@@ -577,9 +589,20 @@ namespace chosuta {
             if(t.muted)name->setForeground(Qt::gray);
             tracks->setItem(i,0,name);
             tracks->setItem(i,1,new QTableWidgetItem(QString::number(project.priorities.value(t.id,i))));
-            auto count=new QTableWidgetItem(QString::number(t.notes.size()));
+            auto count=new QTableWidgetItem(QString::number(project.score.hasMusic?t.notes.size():t.timedPhones.size()));
             count->setFlags(Qt::ItemIsEnabled);
             tracks->setItem(i,2,count);
+        }
+        tracks->horizontalHeaderItem(2)->setText(project.score.hasMusic?trText("Notes"):trText("Phonemes","音素","音素"));
+        for(auto combo:{anchor,findChild<QComboBox *>("timelineUnits")}){
+            if(auto model=qobject_cast<QStandardItemModel *>(combo->model()))model->item(1)->setEnabled(project.score.hasMusic);
+            if(!project.score.hasMusic)combo->setCurrentIndex(0);
+        }
+        if(auto snap=findChild<QComboBox *>("cursorSnap")){
+            if(auto model=qobject_cast<QStandardItemModel *>(snap->model()))model->item(snap->findData("beat"))->setEnabled(project.score.hasMusic);
+            QSignalBlocker block(snap);const auto mode=!project.score.hasMusic&&preferences.cursorSnap=="beat"?QString("off"):preferences.cursorSnap;
+            snap->setCurrentIndex(snap->findData(mode));timeline->setCursorSnap(mode);
+            snap->setItemText(snap->findData("syllable"),project.score.hasMusic?trText("Cursor: syllable","游标：吸附音节","カーソル：音節に吸着"):trText("Cursor: phoneme","游标：吸附音素","カーソル：音素に吸着"));
         }
         advancedMouth->setChecked(project.appearance.enabled);refreshPerformance();
         QStringList shapes= {
@@ -617,17 +640,19 @@ namespace chosuta {
         if(timingOnly&&scene)scene->setTiming(project,evaluation);
         else scene=std::make_unique<Scene>(project,evaluation);
         QStringList messages {
-            trText("Estimated timing")
+            project.score.hasMusic?trText("Estimated timing"):project.score.sourceFormat=="vvproj"?trText("Query timing and mouth shapes are estimates","query 时序与口形均为推导估计","query の時刻と口形は推定です"):trText("Supplied phoneme timing; mouth shapes estimated","来源音素时序；口形为规则估计","元の音素時刻・口形はルールによる推定")
         };
         for(const auto&d:project.score.diagnostics)messages<<d.path+"\n"+d.code+": "+messageText(uiLanguage,d.message);
         if(!scene->diagnostics.isEmpty())messages<<trText("Scene diagnostics")+": "+messagesText(uiLanguage,scene->diagnostics);
-        if(project.appearance.enabled){messages.append(messagesText(uiLanguage,evaluation->performance->diagnostics));if(!performanceCurrent(project))messages<<trText("Automatic performance needs regeneration.","自动演出待生成或更新。","自動演出の生成・更新が必要です。");}
+        if(project.appearance.enabled){messages.append(messagesText(uiLanguage,evaluation->performance->diagnostics));if(project.score.hasMusic&&!performanceCurrent(project))messages<<trText("Automatic performance needs regeneration.","自动演出待生成或更新。","自動演出の生成・更新が必要です。");}
         auto orphans=project.orphanOverrides();
         if(!orphans.isEmpty())messages<<trText("Orphan manual edits")+"\n"+orphans.join('\n');
         int unknown=0;
         for(const auto&e:evaluation->events)if(e.unknown) {
             ++unknown;
-            messages<<trText("Unknown pronunciations")+": "+e.text+"\n"+e.source;
+            messages<<(e.provenance=="ust-alias-unresolved/estimated"
+                ?messageText(uiLanguage,Message::format("Unmapped UST alias: %1. Add an alias preset or correct its reading.",{e.text}))
+                :trText("Unknown pronunciations")+": "+e.text)+"\n"+e.source;
         }
         messages<<QString("%1: %2").arg(trText("Unknown pronunciations")).arg(unknown);
         if(!project.audioPath.isEmpty())messages<<trText("Audio")+": "+project.audioPath;
@@ -657,7 +682,7 @@ namespace chosuta {
         position->setValue(playTime);
         if(playing)followCursor();
         refreshing=old;
-        timeLabel->setText(QString("%1 s | %2").arg(playTime,0,'f',3).arg(project.score.time.beatLabel(project.score.time.blicks(playTime-project.output.syncOffset))));
+        timeLabel->setText(project.score.hasMusic?QString("%1 s | %2").arg(playTime,0,'f',3).arg(project.score.time.beatLabel(project.score.time.blicks(playTime-project.output.syncOffset))):QString("%1 s").arg(playTime,0,'f',3));
     }
     void Window::refreshSelection() {
         auto ids=timeline->selectedIds();
@@ -750,10 +775,10 @@ namespace chosuta {
     }
     void Window::openDialog() {
         if(!confirmDiscard())return;
-        auto path=QFileDialog::getOpenFileName(this,trText("Open score / Project"),{},trText("Scores / Chosuta (*.svp *.ust *.vsqx *.chosuta)"));
+        auto path=QFileDialog::getOpenFileName(this,trText("Open score / Project"),{},trText("Sources / Chosuta (*.svp *.ust *.ustx *.vsq *.vsqx *.musicxml *.xml *.mxl *.ccs *.vpr *.lab *.ds *.vvproj *.chosuta)"));
         if(!path.isEmpty())openPath(path);
     }
-    void Window::openPath(const QString&path) {
+    void Window::openPath(const QString&path,const QString&vvprojSection) {
         if(busy)return;
         activePath=path;
         loadIsRegenerate=false;
@@ -761,13 +786,13 @@ namespace chosuta {
         auto token=cancel;
         setBusy(true);
         auto report=taskProgress();
-        loadWatcher.setFuture(QtConcurrent::run([path,token,report,defaults=preferences.pronunciation,performanceDefaults=preferences.performanceSettings] {
+        loadWatcher.setFuture(QtConcurrent::run([path,token,report,vvprojSection,defaults=preferences.pronunciation,performanceDefaults=preferences.performanceSettings] {
             LoadResult r;
             try {
                 if(path.endsWith(".chosuta",Qt::CaseInsensitive))r.project=loadProject(path);
                 else {
                     r.project.rules.pronunciation=defaults;r.project.performance.settings=performanceDefaults;
-                    r.project.score=importSource(path,token.get(),report);
+                    r.project.score=importSource(path,token.get(),report,vvprojSection);
                     if(!r.project.score.tracks.isEmpty())r.project.selected= {
                         r.project.score.tracks[0].id
                     };
@@ -937,7 +962,7 @@ namespace chosuta {
             break;
         }
         bool ok=false;
-        auto reading=QInputDialog::getText(this,trText("Correct pronunciation"),trText("Explicit pronunciation for source note"),QLineEdit::Normal,project.rules.readings.value(source),&ok);
+        auto reading=QInputDialog::getText(this,trText("Correct pronunciation"),(project.score.hasMusic?trText("Explicit pronunciation for source note"):trText("Replacement phoneme (optional language prefix, e.g. ja/a)","替换音素（可带语言前缀，例如 ja/a）","置き換える音素（言語接頭辞も可：ja/a）")),QLineEdit::Normal,project.rules.readings.value(source),&ok);
         if(!ok)return;
         change(actionText("Correct pronunciation"),[=](Project&p) {
             if(reading.trimmed().isEmpty())p.rules.readings.remove(source);

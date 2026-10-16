@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original Chosuta regression score; no third-party song or media. -->
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="4.0" xml:lang="ja">
+  <part-list>
+    <score-part id="P1"><part-name>主旋律</part-name></score-part>
+    <score-part id="P2"><part-name>Harmony</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="0" implicit="yes">
+      <attributes><divisions>7</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      <direction><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>120</per-minute></metronome></direction-type><sound tempo="120"/></direction>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>7</duration><tie type="start"/><voice>1</voice>
+        <lyric number="1"><text>あ</text><extend type="start"/></lyric>
+        <lyric number="2"><text>い</text><extend type="start"/></lyric>
+      </note>
+    </measure>
+    <measure number="1">
+      <attributes><divisions>11</divisions></attributes>
+      <direction><direction-type><words>slower</words></direction-type><offset>5.5</offset><sound tempo="60"/></direction>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>22</duration><tie type="stop"/><voice>1</voice>
+        <lyric number="1"><extend type="stop"/></lyric><lyric number="2"><extend type="stop"/></lyric>
+      </note>
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>11</duration><voice>1</voice>
+        <lyric number="1"><syllabic>single</syllabic><text>え</text></lyric><lyric number="2"><text>お</text></lyric>
+      </note>
+      <note><chord/><pitch><step>F</step><octave>4</octave></pitch><duration>11</duration><voice>1</voice></note>
+      <forward><duration>11</duration></forward>
+      <backup><duration>44</duration></backup>
+      <note><pitch><step>G</step><octave>3</octave></pitch><duration>44</duration><voice>2</voice><lyric><text>う</text></lyric></note>
+    </measure>
+    <measure number="2">
+      <attributes><divisions>2.5</divisions><time><beats>3+2</beats><beat-type>8</beat-type></time></attributes>
+      <note><rest/><duration>1.25</duration><voice>1</voice></note>
+      <note><grace/><pitch><step>F</step><octave>4</octave></pitch><voice>1</voice></note>
+      <note><pitch><step>E</step><octave>4</octave></pitch><duration>2.5</duration><voice>1</voice><lyric><text>い</text><elision> </elision><text>え</text></lyric></note>
+      <barline location="right"><ending number="1" type="stop"/><repeat direction="backward"/></barline>
+    </measure>
+  </part>
+  <part id="P2">
+    <measure number="0" implicit="yes">
+      <attributes><divisions>3</divisions></attributes><note><rest/><duration>3</duration></note>
+    </measure>
+    <measure number="1"><note><pitch><step>A</step><octave>3</octave></pitch><duration>12</duration><lyric><text>お</text></lyric></note></measure>
+    <measure number="2"><note><pitch><step>G</step><octave>3</octave></pitch><duration>7.5</duration><lyric><text>あ</text></lyric></note></measure>
+  </part>
+</score-partwise>

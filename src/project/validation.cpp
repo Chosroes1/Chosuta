@@ -11,6 +11,6 @@ void validateOutputSettings(const ExportSettings &s) {
 }
 void validateSavedEvent(const Event &e) {
     if(e.id.isEmpty()||e.shape.isEmpty()||!std::isfinite(e.start)||!std::isfinite(e.end)||e.end<=e.start||std::abs(e.start)>864000||std::abs(e.end)>864000)throw Failure(Message::format("Invalid saved event: %1",{e.id}));
-    if(e.phone.size()>128||!QStringList{"","consonant","vowel","cl","br","rest","nasal","extend","empty","unknown"}.contains(e.articulation))throw Failure(Message::format("Invalid event articulation: %1",{e.id}));
+    if(e.phone.size()>128||!QStringList{"","consonant","vowel","devoiced-vowel","cl","br","rest","nasal","extend","empty","unknown"}.contains(e.articulation))throw Failure(Message::format("Invalid event articulation: %1",{e.id}));
 }
 }

@@ -7,7 +7,7 @@ namespace chosuta {
 namespace {
 struct Stats {double median=0,high=0,sounding=0,coverage=0,ioi=0;int count=0;bool valid=false;};
 bool strongBeat(const Project &p,qint64 tick){
-    qint64 base=0;auto meter=p.score.time.meters.front();for(int i=1;i<p.score.time.meters.size();++i){auto next=p.score.time.meters[i];qint64 at=base+qint64(next.bar-meter.bar)*meter.numerator*(Blick*4/meter.denominator);if(tick<at)break;base=at;meter=next;}
+    qint64 base=-p.score.time.pickupOffset;auto meter=p.score.time.meters.front();for(int i=1;i<p.score.time.meters.size();++i){auto next=p.score.time.meters[i];qint64 at=p.score.time.measureStarts.isEmpty()?base+qint64(next.bar-meter.bar)*meter.numerator*(Blick*4/meter.denominator):p.score.time.measureStarts[next.bar];if(tick<at)break;base=at;meter=next;}
     qint64 unit=Blick*4/meter.denominator;auto within=((tick-base)%(unit*meter.numerator)+unit*meter.numerator)%(unit*meter.numerator);if(within%unit)return false;int b=int(within/unit)+1;
     QString key=QString("%1/%2").arg(meter.numerator).arg(meter.denominator);if(p.performance.analysis.strongBeats.contains(key))return p.performance.analysis.strongBeats[key].contains(b);
     return meter.numerator>3&&meter.numerator%3==0?(b-1)%3==0:meter.numerator==4?(b==1||b==3):b==1;
@@ -16,7 +16,7 @@ bool strongBeat(const Project &p,qint64 tick){
 PerformanceDraft generatePerformance(const Project &p,const std::atomic_bool *cancel,Progress report){
     PerformanceDraft result;
     try{
-        validateAnalysisSettings(p.performance.analysis);validatePerformance(p);auto check=[&]{if(cancel&&cancel->load())throw Failure("Cancelled");};check();result.basisHash=performanceBasisHash(p,cancel);
+        validateAnalysisSettings(p.performance.analysis);validatePerformance(p);auto check=[&]{if(cancel&&cancel->load())throw Failure("Cancelled");};check();if(!p.score.hasMusic)throw Failure("Song performance analysis requires a musical score");result.basisHash=performanceBasisHash(p,cancel);
         auto analysis=analyzePerformance(p,cancel,report);auto &v=analysis.notes;result.suggestions=analysis.suggestions;
         const auto &s=p.performance.settings;const auto &t=s.timing();const bool music=s.timeBasis==PerformanceTimeBasis::Music,diatonic=p.performance.analysis.intervalUnit=="diatonic";
         const double leap=diatonic?s.leapDegrees-1:s.leapSemitones,progression=diatonic?s.progressionDegrees-1:s.progressionSemitones,near=diatonic?s.nearDegrees-1:s.nearSemitones,contrast=diatonic?s.contrastDegrees-1:s.contrastSemitones;

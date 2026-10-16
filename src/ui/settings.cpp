@@ -138,7 +138,10 @@ namespace chosuta {
         auto add=new QPushButton(trText("Add word"));add->setObjectName("dictionaryAdd");
         auto remove=new QPushButton(trText("Remove selected"));remove->setObjectName("dictionaryRemove");
         auto import=new QPushButton(trText("Import dictionary"));auto exportButton=new QPushButton(trText("Export dictionary"));
-        for(auto button:{add,remove,import,exportButton})rowButtons->addWidget(button);
+        auto ustPreset=new QPushButton(trText("Add UST alias preset"));ustPreset->setObjectName("dictionaryUstPreset");
+        ustPreset->setEnabled(project.score.sourceFormat=="ust");
+        ustPreset->setToolTip(trText("Add editable aliases to this UST project, keeping existing entries. Save and regenerate to apply."));
+        for(auto button:{add,remove,ustPreset,import,exportButton})rowButtons->addWidget(button);
         dictionaryLayout->addLayout(rowButtons);pages->addTab(dictionaryPage,trText("Pronunciation dictionary"));
         auto japanesePage=new QWidget;auto japaneseLayout=new QVBoxLayout(japanesePage);
         auto kanji=new QCheckBox(trText("Estimate Japanese kanji readings (optional)"));kanji->setObjectName("japaneseKanji");
@@ -170,6 +173,14 @@ namespace chosuta {
             QSet<int>selected;for(const auto&index:table->selectionModel()->selectedRows())selected.insert(index.row());
             for(int row=table->rowCount()-1;row>=0;--row)if(selected.contains(row))table->removeRow(row);
             updateSize();
+        });
+        connect(ustPreset,&QPushButton::clicked,&dialog,[&] {
+            try {
+                const auto merged=addUstAliasPreset(pronunciationOptionsRead(rawOptions()));
+                if(!project.rules.englishDictionary.isEmpty()&&QFileInfo(project.rules.englishDictionary).size()+pronunciationDictionaryBytes(merged)>DictionaryByteLimit)
+                    throw Failure("Pronunciation dictionaries exceed 3 MB");
+                QSignalBlocker block(table);fill(merged);updateSize();
+            }catch(const Failure&e){status->setText(messageText(uiLanguage,exceptionMessage(e)));}
         });
         connect(import,&QPushButton::clicked,&dialog,[&] {
             const auto path=QFileDialog::getOpenFileName(&dialog,trText("Import dictionary"),{},"JSON (*.json)");if(path.isEmpty())return;

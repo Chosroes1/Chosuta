@@ -11,6 +11,7 @@ namespace chosuta {
         if(!std::isfinite(p.rules.consonantRatio)||p.rules.consonantRatio<0||p.rules.consonantRatio>.8||!std::isfinite(p.rules.consonantMaxSeconds)||p.rules.consonantMaxSeconds<0||p.rules.consonantMaxSeconds>1)throw Failure("Invalid consonant timing settings");
         if(!p.rules.englishDictionary.isEmpty()&&QFileInfo(p.rules.englishDictionary).size()+pronunciationDictionaryBytes(p.rules.pronunciation)>DictionaryByteLimit)
             throw Failure("Pronunciation dictionaries exceed 3 MB");
+        if(!p.score.hasMusic)return generateTimedPhones(p,cancel,progress);
         QVector<Event> candidates;
         for(int ti=0;ti<p.score.tracks.size();++ti) {
             const auto&t=p.score.tracks[ti];
@@ -37,7 +38,7 @@ namespace chosuta {
                 const auto&n=t.notes[ni];
                 if(n.muted)continue;
                 auto &context=contexts[n.groupInstance];
-                if(p.score.sourceFormat=="vsqx"&&n.onset>context.end)context={};
+                if((p.score.sourceFormat=="vsq"||p.score.sourceFormat=="vsqx"||p.score.sourceFormat=="musicxml"||p.score.sourceFormat=="mxl"||p.score.sourceFormat=="ccs"||p.score.sourceFormat=="vvproj-song"||p.score.sourceFormat=="vpr")&&n.onset>context.end)context={};
                 context.end=n.onset+n.duration;
                 auto &previous=context.previous;
                 auto &word=context.word;
@@ -118,6 +119,7 @@ namespace chosuta {
                     }
                 }
                 if(result.unknown||result.syllables.isEmpty()) {
+                    if(p.score.sourceFormat=="ust"&&!explicitPhone&&text!="+")result.provenance="ust-alias-unresolved/estimated";
                     emittedArticulation="unknown";
                     emitPart("unknown",start,end,0,result.provenance,true);
                     continue;

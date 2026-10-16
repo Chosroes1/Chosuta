@@ -15,10 +15,22 @@ namespace chosuta {
                     {"reading",word->text},{"notation",word->phonemes?"phonemes":"reading"}});
         return {{"version",1},{"japaneseKanji",o.japaneseKanji},{"entries",entries}};
     }
+    PronunciationOptions addUstAliasPreset(const PronunciationOptions &options) {
+        initDictionaryResources();
+        QFile file(":/chosuta/presets/ust-aliases.json");
+        if(!file.open(QIODevice::ReadOnly))throw Failure(Message::format("Missing pronunciation resource: %1",{"presets/ust-aliases.json"}));
+        const auto preset=pronunciationOptionsRead(checkedJson(file.readAll()).object());
+        auto merged=options;
+        for(auto language=preset.words.cbegin();language!=preset.words.cend();++language)
+            for(auto word=language->cbegin();word!=language->cend();++word)
+                if(!merged.words[language.key()].contains(word.key()))merged.words[language.key()][word.key()]=word.value();
+        validatePronunciationOptions(merged);
+        return merged;
+    }
     qint64 builtinDictionaryBytes() {
         static const qint64 bytes=[] {
             initDictionaryResources();qint64 total=0;
-            for(const auto &name:QStringList{"english.tsv","japanese.tsv","chinese.tsv"}) {
+            for(const auto &name:QStringList{"english.tsv","japanese.tsv","chinese.tsv","presets/ust-aliases.json"}) {
                 QFile file(":/chosuta/"+name);
                 if(!file.open(QIODevice::ReadOnly))throw Failure(Message::format("Missing pronunciation resource: %1",{name}));
                 total+=file.size();

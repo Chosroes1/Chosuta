@@ -37,7 +37,7 @@ class PackageTest(unittest.TestCase):
             self.assertEqual((output / "runtime-dependencies.txt").read_text(), "fixture dependencies\n")
             with zipfile.ZipFile(output / "Chosuta-test-source.zip") as source:
                 self.assertTrue(any(name.endswith("src/core/model.h") for name in source.namelist()))
-                for helper in ("scripts/btbn-ffmpeg.ps1",):
+                for helper in ("scripts/build-macos.sh", "docs/macos.zh-CN.md", "scripts/btbn-ffmpeg.ps1", "cmake/LibYaml.cmake", "src/importers/ustx.cpp", "resources/presets/ust-aliases.json", "resources/licenses/LibYAML.txt", "tests/fixtures/score.ustx", "src/importers/musicxml.cpp", "tests/fixtures/score.musicxml", "src/importers/ccs.cpp", "tests/fixtures/score.ccs", "src/importers/vvproj_song.cpp", "tests/fixtures/score.vvproj", "cmake/Zip.cmake", "src/importers/zip.cpp", "src/importers/vpr.cpp", "tests/fixtures/score.vpr", "src/importers/mxl.cpp", "tests/fixtures/score.mxl", "src/importers/vsq.cpp", "tests/fixtures/score.vsq", "resources/licenses/zlib.txt", "resources/licenses/MiniZip.txt"):
                     self.assertTrue(any(name.endswith("/" + helper) for name in source.namelist()), helper)
                 for asset in ("icons.qrc", "icons/chosuta.png", "icons/chosuta.ico", "icons/chosuta.rc"):
                     matches = [name for name in source.namelist() if name.endswith("/resources/" + asset)]

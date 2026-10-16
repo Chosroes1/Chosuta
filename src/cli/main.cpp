@@ -14,10 +14,10 @@ static std::atomic_bool cancelled=false;
 static void cancelSignal(int) {
     cancelled.store(true);
 }
-static Project readInput(const QString&file) {
+static Project readInput(const QString&file,const QString &vvprojSection) {
     if(file.endsWith(".chosuta",Qt::CaseInsensitive))return loadProject(file);
     Project p;
-    p.score=importSource(file,&cancelled);
+    p.score=importSource(file,&cancelled,{},vvprojSection);
     if(!p.score.tracks.isEmpty())p.selected= {
         p.score.tracks.front().id
     };
@@ -29,15 +29,16 @@ int main(int argc,char**argv) {
     QCoreApplication::setApplicationName("chosuta-cli");
     QCoreApplication::setApplicationVersion(CHOSUTA_VERSION);
     QCommandLineParser parser;
-    parser.setApplicationDescription("Chosuta: inspect/generate/export SVP, UST, VSQX or .chosuta projects; create original demo assets.");
+    parser.setApplicationDescription("Chosuta: inspect/generate/export SVP, UST, USTX, VSQ/VSQX, MusicXML/MXL, CCS song, VPR, LAB, timed DS, VVPROJ talk/song or .chosuta projects; create original demo assets.");
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument("command","inspect | generate | export | correct | revert | demo");
-    parser.addPositionalArgument("input","SVP/UST/VSQX/project input; demo uses output directory");
+    parser.addPositionalArgument("input","SVP/UST/USTX/VSQ/VSQX/MusicXML/MXL/CCS song/VPR/LAB/DS/VVPROJ talk/song/project input; demo uses output directory");
     parser.addPositionalArgument("output","Project/video output for generate/export","[output]");
     auto option=[&](QString name,QString description,QString value,QString def={}) {
         parser.addOption(QCommandLineOption(name,description,value,def));
     };
+    option("vvproj-section","VVPROJ content: auto | talk | song; required when both contain content","section","auto");
     option("tracks","Comma-separated zero-based track indexes; default first track","indexes");
     option("language","auto | ja | zh | en","language");
     option("dictionary","External CMU-format English dictionary (total dictionary data <= 3 MB)","path");
@@ -173,7 +174,7 @@ int main(int argc,char**argv) {
             std::cout<<file.toStdString()<<'\n';
             return 0;
         }
-        Project p=readInput(input);
+        Project p=readInput(input,parser.value("vvproj-section"));
         if(parser.isSet("tracks")) {
             p.selected.clear();
             for(const auto&s:parser.value("tracks").split(',')) {
@@ -216,6 +217,10 @@ int main(int argc,char**argv) {
                 }, {
                     "sourceOrigin",p.score.sourceOrigin
                 }, {
+                    "hasMusic",p.score.hasMusic
+                }, {
+                    "endSeconds",p.score.sourceDuration()
+                }, {
                     "sourceFormat",p.score.sourceFormat
                 }, {
                     "sourceVersion",p.score.sourceVersion
@@ -233,6 +238,8 @@ int main(int argc,char**argv) {
                     "id",t.id
                 }, {
                     "name",t.name
+                }, {
+                    "timedPhones",t.timedPhones.size()
                 }, {
                     "notes",t.notes.size()
                 }, {
@@ -267,6 +274,10 @@ int main(int argc,char**argv) {
             summary["tracks"]=tracks;
             summary["tempo"]=tempos;
             summary["meter"]=meters;
+            if(!p.score.time.measureStarts.isEmpty()){
+                QJsonArray starts;for(const auto at:p.score.time.measureStarts)starts.append(QString::number(at));summary["measureStarts"]=starts;
+                summary["pickupOffset"]=QString::number(p.score.time.pickupOffset);
+            }
             summary["diagnostics"]=diagnostics;
             summary["appearance"]=QJsonObject{{"enabled",p.appearance.enabled}};summary["analysis"]=analysisSettingsJson(p.performance.analysis);summary["consonants"]=consonantsJson(p.rules.consonants);
             summary["timingCorrection"]=QJsonObject{{"enabled",p.timing.enabled},{"current",timingCorrectionCurrent(p)},{"sources",p.timing.sources.size()},{"maxShift",p.timing.maxShift},{"maxDurationChange",p.timing.maxDurationChange}};

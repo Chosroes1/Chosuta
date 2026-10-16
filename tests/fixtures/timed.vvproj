@@ -1,0 +1,130 @@
+{
+  "appVersion": "0.25.1",
+  "talk": {
+    "audioKeys": [
+      "utterance-b",
+      "utterance-a"
+    ],
+    "audioItems": {
+      "unreferenced": {
+        "text": "Ignored, no query"
+      },
+      "utterance-a": {
+        "text": "Original question",
+        "voice": {
+          "engineId": "074fc39e-678b-4c13-8916-ffca8d505d1d",
+          "speakerId": "original-fixture",
+          "styleId": 0
+        },
+        "query": {
+          "accentPhrases": [
+            {
+              "moras": [
+                {
+                  "text": "ウ",
+                  "consonant": "w",
+                  "consonantLength": 0,
+                  "vowel": "u",
+                  "vowelLength": 0.032,
+                  "pitch": 5
+                }
+              ],
+              "accent": 1,
+              "isInterrogative": true
+            }
+          ],
+          "speedScale": 1,
+          "pitchScale": 0,
+          "intonationScale": 1,
+          "volumeScale": 1,
+          "pauseLengthScale": 1,
+          "prePhonemeLength": 0,
+          "postPhonemeLength": 0.016,
+          "outputSamplingRate": 24000,
+          "outputStereo": false
+        }
+      },
+      "utterance-b": {
+        "text": "Original timing fixture",
+        "voice": {
+          "engineId": "074fc39e-678b-4c13-8916-ffca8d505d1d",
+          "speakerId": "original-fixture",
+          "styleId": 0
+        },
+        "query": {
+          "accentPhrases": [
+            {
+              "moras": [
+                {
+                  "text": "カ",
+                  "consonant": "k",
+                  "consonantLength": 0.064,
+                  "vowel": "a",
+                  "vowelLength": 0.128,
+                  "pitch": 5
+                },
+                {
+                  "text": "ン",
+                  "vowel": "N",
+                  "vowelLength": 0.064,
+                  "pitch": 5
+                },
+                {
+                  "text": "ッ",
+                  "vowel": "cl",
+                  "vowelLength": 0.032,
+                  "pitch": 0
+                },
+                {
+                  "text": "イ",
+                  "vowel": "I",
+                  "vowelLength": 0.032,
+                  "pitch": 0
+                },
+                {
+                  "text": "?",
+                  "vowel": "mystery",
+                  "vowelLength": 0.064,
+                  "pitch": 0
+                }
+              ],
+              "accent": 1,
+              "isInterrogative": false,
+              "pauseMora": {
+                "text": "、",
+                "vowel": "pau",
+                "vowelLength": 0.16,
+                "pitch": 0
+              }
+            }
+          ],
+          "speedScale": 2,
+          "pitchScale": 0,
+          "intonationScale": 1,
+          "volumeScale": 1,
+          "pauseLengthScale": 0.5,
+          "prePhonemeLength": 0.096,
+          "postPhonemeLength": 0.032,
+          "outputSamplingRate": 24000,
+          "outputStereo": false,
+          "pauseLength": 0.128
+        }
+      }
+    }
+  },
+  "song": {
+    "tracks": {
+      "original-track": {
+        "notes": [
+          {
+            "id": "unused-note",
+            "position": 0,
+            "duration": 480,
+            "noteNumber": 60,
+            "lyric": "あ"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -6,7 +6,9 @@
 
 README.md 主体为中文，链接到 README.ja.md 和 README.en.md。作者填写项目的一句话简介及 1、2、5、9、10；系统要求、下载/源码安装、实现原理、结构、组件和 GPLv3 已按当前实现填写。英文/日文使用相同章节分工。作者补写中文后，应同步另两种语言或明确其更新状态。
 
-当前根源码为0.10.0/schema14，2026-10-15按用户要求同步本地GitHub源码目录并生成Linux交付0.10.0-2，位于out/release/0.10.0/。保留目标目录README作者章节和英文/日文占位页，仅更新中文技术章节。根目录build保留已验证的开发构建，发行包从公开源码归档独立编译。操作仅整理本地文件；Windows原生部署、DEB/RPM运行及AUR公开发布未完成。
+当前根源码为1.0.0/schema14。2026-10-16按用户要求更新系统要求、构建和依赖说明，同步本地GitHub公开源码目录，并生成新的Linux交付目录out/release/1.0.0/。本次只替换目标中文README的3/4/8章节，作者区、其他原文、英文/日文短占位页和.git保持；根目录三语README对应技术章节同步维护。发行包以该公开目录的白名单源码归档为依据独立编译，实际文件与验证结果以交付目录RUN.txt及SHA256SUMS为准。
+
+操作仅限本地，不提交或上传GitHub、不安装系统包、不覆盖旧Release。Windows1.0.0、macOS、DEB/RPM、AUR公开发布与真实桌面验收仍未完成。
 
 ## 整理源码
 
@@ -38,14 +40,14 @@ python3 scripts/audit-public-source.py out/github/Chosuta --report out/github/so
 python3 scripts/package-arch.py out/release/arch-new
 ```
 
-这是另行构建新 Release 的示例，本次源码目录整理没有执行它。脚本按实际代码版本产生 Arch 安装包、`Chosuta-<代码版本>-source.zip`、带实际 SHA-256 的 PKGBUILD 和 `.SRCINFO`。把前两个文件一起作为 Release 附件，可保留二进制的确切对应源码。脚本不安装工具或应用，输出目录存在即拒绝。
+这是构建新Release的入口示例，输出使用新的独立目录。脚本按实际代码版本产生 Arch 安装包、`Chosuta-<代码版本>-source.zip`、带实际 SHA-256 的 PKGBUILD 和 `.SRCINFO`。把前两个文件一起作为 Release 附件，可保留二进制的确切对应源码。脚本不安装工具或应用，输出目录存在即拒绝。
 
 makepkg 默认的 `.BUILDINFO` 会记录开发者构建路径和本机全部已安装包。公开 Release 使用另存副本，移除这份本机信息并同步更新 `.MTREE`，保留应用及 `.PKGINFO` 不变；原始构建信息留在本地。不要把原始构建目录整体作为 Release 上传。
 
-以下是历史 0.2.2-2 交付的命令；新构建使用实际输出文件名及新目录，不覆盖旧附件：
+从本次新构建的原始包创建新的公开副本：
 
 ```sh
-python3 scripts/sanitize-arch-package.py out/release/arch/chosuta-0.2.2-2-x86_64.pkg.tar.zst out/release/assets/chosuta-0.2.2-2-x86_64.pkg.tar.zst
+python3 scripts/sanitize-arch-package.py out/arch/1.0.0-new/chosuta-1.0.0-2-x86_64.pkg.tar.zst out/release/1.0.0-new/chosuta-1.0.0-2-x86_64.pkg.tar.zst
 ```
 
 这个副本不提供本机完整环境的 `.BUILDINFO` 复现记录；对应源码、配方和实际 CMake 组件版本另行保留，不伪造构建环境。它是标准 pacman 应用安装包，不是已签名或已经上传的 AUR 条目。
@@ -54,4 +56,4 @@ python3 scripts/sanitize-arch-package.py out/release/arch/chosuta-0.2.2-2-x86_64
 
 仓库源码通过 `.gitignore` 排除 build/out/stage 和安装包。公开源码独立验证时请把构建目录放在源码目录之外，以保留上传目录的整洁。GPLv3 及依赖核查见 [许可证说明](license-review.zh-CN.md)。
 
-当前公开白名单明确包含应用PNG/ICO、RC及Qt资源索引；本地原始`icon/`不复制。审计只允许两个已审阅图标的固定SHA-256，新增/变更二进制资源必须重新审阅并更新对应记录，不能把所有PNG/ICO普遍豁免。2026-10-13 已按用户授权同步这些资源到本地 GitHub 源码快照；原始 icon/、本地交接、旧核验报告和 Release 不随源码同步。
+当前公开白名单明确包含应用PNG/ICO、RC及Qt资源索引；本地原始`icon/`不复制。审计只允许两个已审阅图标的固定SHA-256，新增/变更二进制资源必须重新审阅并更新对应记录，不能把所有PNG/ICO普遍豁免。原始icon/和本地交接不进入公开清单；历史交付按其对应源码保留。

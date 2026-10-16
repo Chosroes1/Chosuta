@@ -15,6 +15,7 @@ AnalysisSettings tonalAt(const Project &p,qint64 tick){auto a=p.performance.anal
 PerformanceAnalysis analyzePerformance(const Project &p,const std::atomic_bool *cancel,Progress report){
     auto check=[&]{if(cancel&&cancel->load())throw Failure("Cancelled");};
     PerformanceAnalysis out;const auto &s=p.performance.settings;const auto &t=s.timing();bool music=s.timeBasis==PerformanceTimeBasis::Music,diatonic=p.performance.analysis.intervalUnit=="diatonic";
+    check();if(!p.score.hasMusic)return out;
     QHash<QString,const Note *> notes;for(const auto &track:p.score.tracks)for(const auto &n:track.notes)notes[n.id]=&n;
     bool breath=false;
     for(const auto &source:routeSources(p,cancel)){check();const auto &n=*notes[source.source];const qint64 at=source.start;
@@ -68,7 +69,7 @@ PerformanceAnalysis analyzePerformance(const Project &p,const std::atomic_bool *
 QJsonObject performanceAnalysisJson(const Project &p,const std::atomic_bool *cancel){
     validatePerformance(p);auto a=analyzePerformance(p,cancel,{});QJsonArray notes;
     for(int i=0;i<a.notes.size();++i){const auto &n=a.notes[i];notes.append(QJsonObject{{"source",n.note->id},{"track",n.track},{"startBlick",QString::number(n.a)},{"endBlick",QString::number(n.b)},{"position",p.score.time.beatLabel(n.a)},{"midi",n.note->pitch},{"coordinate",n.named?QJsonValue(n.pitch):QJsonValue()},{"tonality",n.tone},{"degree",n.degree},{"phrase",n.phrase},{"section",n.hard},{"ending",n.ending},{"motifEndIndex",a.motifEnd[i]}});}
-    return {{"algorithm","performance-v2.0"},{"basisHash",performanceBasisHash(p,cancel)},{"timeBasis",p.performance.settings.timeBasis==PerformanceTimeBasis::Music?"music":"seconds"},{"distanceBasis",p.performance.analysis.intervalUnit},{"boundedMotifSearch",a.degraded},{"pitchCoverageSufficient",a.pitched},{"q10",a.q10},{"q50",a.q50},{"q75",a.q75},{"q90",a.q90},{"notes",notes}};
+    return {{"available",p.score.hasMusic},{"algorithm","performance-v2.0"},{"basisHash",performanceBasisHash(p,cancel)},{"timeBasis",p.performance.settings.timeBasis==PerformanceTimeBasis::Music?"music":"seconds"},{"distanceBasis",p.performance.analysis.intervalUnit},{"boundedMotifSearch",a.degraded},{"pitchCoverageSufficient",a.pitched},{"q10",a.q10},{"q50",a.q50},{"q75",a.q75},{"q90",a.q90},{"notes",notes}};
 }
 
 }

@@ -7,6 +7,7 @@
 #include "render/render.h"
 #include "render/audio.h"
 #include "render/waveform.h"
+#include "importers/zip.h"
 #include <cmath>
 #include <QPainter>
 #include <QScopeGuard>
@@ -16,6 +17,19 @@ static QByteArray fixture() {
     QFile f(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");
     if(!f.open(QIODevice::ReadOnly))throw Failure("Test fixture absent");
     return f.readAll();
+}
+// Independent stored-ZIP test writer. Production only reads archives through
+// MiniZip; this test helper does not require any compression/writer API.
+static QByteArray storedArchive(const QList<QPair<QByteArray,QByteArray>> &entries){
+    QByteArray data,central;QDataStream local(&data,QIODevice::WriteOnly),directory(&central,QIODevice::WriteOnly);local.setByteOrder(QDataStream::LittleEndian);directory.setByteOrder(QDataStream::LittleEndian);
+    for(const auto &[name,body]:entries){
+        quint32 crc=0xffffffff;for(uchar c:body){crc^=c;for(int i=0;i<8;++i)crc=(crc>>1)^(0xedb88320u&quint32(-qint32(crc&1)));}crc^=0xffffffff;
+        const quint32 pos=data.size(),size=body.size();
+        local<<quint32(0x04034b50)<<quint16(20)<<quint16(0)<<quint16(0)<<quint16(0)<<quint16(0)<<crc<<size<<size<<quint16(name.size())<<quint16(0);local.writeRawData(name.constData(),name.size());local.writeRawData(body.constData(),body.size());
+        directory<<quint32(0x02014b50)<<quint16(20)<<quint16(20)<<quint16(0)<<quint16(0)<<quint16(0)<<quint16(0)<<crc<<size<<size<<quint16(name.size())<<quint16(0)<<quint16(0)<<quint16(0)<<quint16(0)<<quint32(0)<<pos;directory.writeRawData(name.constData(),name.size());
+    }
+    const quint32 offset=data.size(),length=central.size();local.writeRawData(central.constData(),central.size());
+    local<<quint32(0x06054b50)<<quint16(0)<<quint16(0)<<quint16(entries.size())<<quint16(entries.size())<<length<<offset<<quint16(0);return data;
 }
 static Project basic() {
     Project p;
@@ -127,6 +141,283 @@ class CoreTest:public QObject {
         QCOMPARE(t.blicks(t.seconds(99789479)),qint64(99789479));
         t.tempos[0].bpm=0;
         QVERIFY_EXCEPTION_THROWN(t.validate(),Failure);
+    }
+    void vsqSource(){
+        QFile file(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vsq");QVERIFY(file.open(QIODevice::ReadOnly));const auto bytes=file.readAll();Project p;p.score=parseSource(bytes,"vsq","声.vsq");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.sourceFormat,QString("vsq"));QCOMPARE(p.score.version,0);QCOMPARE(p.score.sourceVersion,QString("DSB301"));QCOMPARE(p.score.sourceResolution,qint64(960));QCOMPARE(p.score.sourceTickOrigin,qint64(6720));QCOMPARE(p.score.tracks.size(),2);QVERIFY(p.score.tracks[1].muted);QVERIFY(!p.score.tracks[0].muted);
+        const auto &notes=p.score.tracks[0].notes;QCOMPARE(notes.size(),4);QCOMPARE(notes[0].sourceOnset,qint64(6721));QCOMPARE(notes[0].sourceDuration,qint64(479));QCOMPARE(notes[0].onset,Blick/960);QCOMPARE(notes[0].duration,Blick/2-Blick/960);QCOMPARE(notes[0].lyrics,QString("お"));QCOMPARE(notes[0].phonemes,QString("a"));QCOMPARE(notes[0].language,QString("ja"));QCOMPARE(notes[1].language,QString("en"));QCOMPARE(notes[3].lyrics,QString("声, \"試\""));QCOMPARE(p.score.tracks[0].name,QString("声, \"試\""));
+        QCOMPARE(p.score.time.meters[0].numerator,3);QCOMPARE(p.score.time.tempos.size(),2);QVERIFY(std::abs(p.score.time.tempos[0].bpm-60000000./666667)<1e-10);QCOMPARE(p.score.time.tempos[1].position,Blick/2);QCOMPARE(p.score.endPosition,3*Blick);QVERIFY(std::abs(p.duration()-(.3333335+2.5))<1e-8);
+        for(const auto &e:p.generated)QVERIFY(!e.unknown);QCOMPARE(p.generated.first().shape,QString("A"));QVERIFY(std::any_of(p.generated.cbegin(),p.generated.cend(),[&](const Event &e){return e.source==notes[2].id&&e.shape=="closed";}));
+        auto first=p.generated.first();first.shape="O";p.edit(first,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("O"));QTemporaryDir dir;const auto saved=dir.filePath("旧谱.chosuta");saveProject(p,saved);auto restored=loadProject(saved);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("vsq"));QCOMPARE(restored.score.tracks[0].notes[0].id,notes[0].id);QCOMPARE(restored.overrides[first.id].event.shape,QString("O"));
+        auto split=restored.generated.last();restored.split(split,(split.start+split.end)/2);saveProject(restored,saved);QCOMPARE(loadProject(saved).overrides.size(),restored.overrides.size());
+        // Minimal independent SMF writer, including one text block and conductor.
+        auto smf=[](QByteArray text,QByteArray conductor=QByteArray::fromHex("00ff510307a12000ff580404021808"),QByteArray prefix="DM:0000:"){
+            auto variable=[](quint32 n){QByteArray out(1,char(n&127));while(n>>=7)out.prepend(char((n&127)|128));return out;};
+            QByteArray data=QByteArray::fromHex("4d546864000000060001000201e0");auto append=[&](QByteArray payload){data+="MTrk";quint32 n=payload.size();for(int i=3;i>=0;--i)data+=char((n>>(8*i))&255);data+=payload;};append(conductor+QByteArray::fromHex("00ff2f00"));auto payload=prefix+text;append(QByteArray::fromHex("00ff01")+variable(payload.size())+payload+QByteArray::fromHex("00ff2f00"));return data;
+        };
+        const QByteArray text="[Common]\nVersion=DSB301\nName=test\n[Master]\nPreMeasure=0\n[EventList]\n0=ID#1\n480=EOS\n[ID#1]\nType=Anote\nLength=240\nNote#=60\nLyricHandle=h#1\n[h#1]\nL0=\"x\",\"a\",0,64,1\n";
+        QCOMPARE(parseSource(smf(text),"vsq").tracks[0].notes.size(),1);
+        auto simultaneous=text;simultaneous.replace("0=ID#1","0=ID#1\n0=ID#1");QCOMPARE(parseSource(smf(simultaneous),"vsq").tracks[0].notes.size(),2);QVERIFY(parseSource(smf(simultaneous),"vsq").tracks[0].notes[0].id!=parseSource(smf(simultaneous),"vsq").tracks[0].notes[1].id);
+        auto clipped=text;clipped.replace("PreMeasure=0","PreMeasure=1");clipped.replace("Length=240","Length=2160");auto clipScore=parseSource(smf(clipped),"vsq");QCOMPARE(clipScore.sourceTickOrigin,qint64(1920));QCOMPARE(clipScore.tracks[0].notes[0].sourceOnset,qint64(0));QCOMPARE(clipScore.tracks[0].notes[0].sourceDuration,qint64(2160));QCOMPARE(clipScore.tracks[0].notes[0].onset,qint64(0));QCOMPARE(clipScore.tracks[0].notes[0].duration,Blick/2);
+        auto empty=text;empty.replace("PreMeasure=0","PreMeasure=1");QVERIFY(parseSource(smf(empty),"vsq").tracks[0].notes.isEmpty());
+        QCOMPARE(parseSource(smf(text,{}),"vsq").time.tempos[0].bpm,120.);
+        auto noHandle=text;noHandle.replace("LyricHandle=h#1\n","");QCOMPARE(parseSource(smf(noHandle),"vsq").tracks[0].notes[0].phonemes,QString());
+        QVector<QByteArray> bad={"",bytes.chopped(1),smf(text,{},"DM:0001:"),smf(text,{},"ordinary:"),smf(text,{},"DM:bad:")};
+        for(auto pair:QList<QPair<QByteArray,QByteArray>>{{"DSB301","DSB999"},{"Length=240","Length=-1"},{"Note#=60","Note#=128"},{"LyricHandle=h#1","LyricHandle=missing"},{"0=ID#1","0=missing"},{"L0=\"x\",\"a\"","L0=\"x,\"a\""}}){auto b=text;b.replace(pair.first,pair.second);bad.append(smf(b));}
+        auto type0=bytes;type0[9]=0;bad.append(type0);auto smpte=bytes;smpte[12]=char(0xe8);bad.append(smpte);auto wrongCount=bytes;wrongCount[11]=4;bad.append(wrongCount);auto cp932=text;cp932.replace("Name=test",QByteArray("Name=")+char(0x81));bad.append(smf(cp932));
+        bad.append(smf(text,QByteArray::fromHex("00ff5103000000")));bad.append(smf(text,QByteArray::fromHex("01ff580403021808")));bad.append(bytes+"trailing");
+        for(int i=0;i<bad.size();++i){try{parseSource(bad[i],"vsq");QFAIL(qPrintable(QString("bad VSQ accepted: %1").arg(i)));}catch(const Failure &) {}}
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vsq",{},&token),Failure);for(int stage:{5,55,70}){token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vsq",{},&token,[&](int v){if(v>=stage)token=true;}),Failure);}
+        int previous=-1;parseSource(bytes,"vsq",{},nullptr,[&](int v){QVERIFY(v>=previous);previous=v;});QCOMPARE(previous,100);
+    }
+    void mxlSource(){
+        QFile file(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.mxl"),plain(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.musicxml");QVERIFY(file.open(QIODevice::ReadOnly));QVERIFY(plain.open(QIODevice::ReadOnly));const auto bytes=file.readAll(),xml=plain.readAll();
+        Project p;p.score=parseSource(bytes,"mxl","歌.mxl");p.selected={p.score.tracks[0].id};p.regenerate();const auto score=parseSource(xml,"musicxml");
+        QCOMPARE(p.score.sourceFormat,QString("mxl"));QCOMPARE(p.score.raw,bytes);QCOMPARE(p.score.sourceResolution,score.sourceResolution);QCOMPARE(p.score.sourceVersion,score.sourceVersion);QCOMPARE(p.score.time.measureStarts,score.time.measureStarts);QCOMPARE(p.score.time.pickupOffset,score.time.pickupOffset);QCOMPARE(p.duration(),6.75);
+        QCOMPARE(p.score.tracks.size(),score.tracks.size());
+        for(int ti=0;ti<score.tracks.size();++ti){const auto &a=p.score.tracks[ti],&b=score.tracks[ti];QCOMPARE(a.id,b.id);QCOMPARE(a.notes.size(),b.notes.size());for(int ni=0;ni<a.notes.size();++ni){QCOMPARE(a.notes[ni].id,b.notes[ni].id);QCOMPARE(a.notes[ni].onset,b.notes[ni].onset);QCOMPARE(a.notes[ni].duration,b.notes[ni].duration);QCOMPARE(a.notes[ni].original,b.notes[ni].original);}}
+        QCOMPARE(p.generated[0].shape,QString("A"));QCOMPARE(p.generated[1].shape,QString("A"));QCOMPARE(p.generated[2].shape,QString("E"));for(const auto &e:p.generated)QVERIFY(!e.unknown);
+        auto first=p.generated[0];first.shape="O";p.edit(first,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("O"));
+        QTemporaryDir dir;const auto path=dir.filePath("压缩谱面.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("mxl"));QCOMPARE(restored.overrides[first.id].event.shape,QString("O"));QCOMPARE(restored.score.time.measureStarts,p.score.time.measureStarts);
+        p.overrides.clear();p.split(p.generated[1],1.25);saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.effective().size(),p.effective().size());
+        auto container=[](QByteArray name="score.xml",QByteArray extra=""){return "<container><rootfiles><rootfile full-path=\""+name+"\"/>"+extra+"</rootfiles></container>";};
+        auto archive=[&](QByteArray manifest,QByteArray scoreXml=QByteArray()){return storedArchive({{"META-INF/container.xml",manifest},{"score.xml",scoreXml.isEmpty()?xml:scoreXml}});};
+        // No mimetype is valid for older containers. Root file need not end .xml.
+        QCOMPARE(parseSource(archive(container()),"mxl").tracks.size(),4);
+        QCOMPARE(parseSource(archive(container("./score.xml")),"mxl").time.pickupOffset,3*Blick);
+        QCOMPARE(parseSource(storedArchive({{"META-INF/container.xml",container("score")},{"score",xml}}),"mxl").tracks.size(),4);
+        const QByteArray gap="<score-partwise><part id=\"P\"><measure number=\"1\"><attributes><divisions>1</divisions></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><lyric><text>あ</text></lyric></note><note><rest/><duration>1</duration></note><note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><lyric><text>ー</text></lyric></note></measure></part></score-partwise>";
+        Project extended;extended.score=parseSource(archive(container(),gap),"mxl");extended.selected={extended.score.tracks[0].id};extended.regenerate();QCOMPARE(extended.generated.first().shape,QString("A"));QCOMPARE(extended.generated.last().shape,QString("closed"));
+        QVector<QByteArray> bad={"",bytes.chopped(12),storedArchive({{"score.xml",xml}}),archive("<container/>"),archive("<other/>"),archive(container("missing.xml")),archive(container("")),archive(container("../score.xml")),archive(container("/score.xml")),archive(container()+"<extra/>"),archive(container().chopped(8)),archive(container(),"<score-timewise/>"),archive(container(),"<opus/>"),archive(container("score.xml","<rootfile full-path=\"other.musicxml\"/>"),"<opus/>")};
+        bad.append(archive("<container><rootfiles><rootfile full-path=\"score.xml\" media-type=\"application/pdf\"/><rootfile full-path=\"score.xml\" media-type=\"application/vnd.recordare.musicxml+xml\"/></rootfiles></container>"));
+        bad.append(archive("<container><rootfiles><rootfile full-path=\"score.xml\"><nested/></rootfile></rootfiles></container>"));
+        bad.append(archive("<container><rootfiles><rootfile full-path=\"score.xml\"/></rootfiles><rootfiles><rootfile full-path=\"score.xml\"/></rootfiles></container>"));
+        for(const auto &b:bad)QVERIFY_EXCEPTION_THROWN(parseSource(b,"mxl"),Failure);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"mxl",{},&token),Failure);token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"mxl",{},&token,[&](int){token=true;}),Failure);
+        // Cancellation also reaches the reused MusicXML parser, after extraction.
+        token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"mxl",{},&token,[&](int v){if(v>=30)token=true;}),Failure);
+        int last=-1;parseSource(bytes,"mxl",{},nullptr,[&](int v){QVERIFY(v>=last);last=v;});QCOMPARE(last,100);
+    }
+    void vprSource(){
+        QFile file(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vpr");QVERIFY(file.open(QIODevice::ReadOnly));const auto bytes=file.readAll();ZipArchive zip(bytes);QVERIFY(zip.contains("Project/sequence.json"));QCOMPARE(zip.names().size(),2);const auto json=zip.read("Project/sequence.json",64*1024*1024);const auto root=checkedJson(json).object();
+        Project p;p.score=parseSource(bytes,"vpr","歌.vpr");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.sourceResolution,qint64(480));QCOMPARE(p.score.sourceTickOrigin,qint64(0));QCOMPARE(p.score.sourceVersion,QString("5.0.0"));QCOMPARE(p.score.tracks.size(),2);QVERIFY(p.score.tracks[1].muted);
+        const auto notes=p.score.tracks[0].notes;QCOMPARE(notes.size(),4);QCOMPARE(notes[0].sourceOnset,qint64(480));QCOMPARE(notes[0].sourceDuration,qint64(481));QCOMPARE(notes[0].duration,Blick+Blick/480);QCOMPARE(notes[2].sourceDuration,qint64(960));QCOMPARE(notes[2].duration,Blick);QVERIFY(notes[0].groupInstance!=notes[3].groupInstance);
+        QCOMPARE(p.score.endPosition,7*Blick);QCOMPARE(p.duration(),6.);QCOMPARE(p.score.time.beatLabel(4*Blick),QString("2:1:0.000"));
+        QCOMPARE(p.generated[0].shape,QString("A"));QCOMPARE(p.generated[0].start,.5);QCOMPARE(p.generated[1].shape,QString("A"));QCOMPARE(p.generated[2].shape,QString("E"));QCOMPARE(p.generated[3].shape,QString("closed"));for(const auto &e:p.generated)QVERIFY(!e.unknown);
+        auto first=p.generated[0];first.shape="O";p.edit(first,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("O"));
+        QTemporaryDir dir;const auto path=dir.filePath("歌.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("vpr"));QCOMPARE(restored.overrides[first.id].event.shape,QString("O"));
+        p.overrides.clear();p.split(p.generated[0],.75);saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.effective().size(),p.effective().size());
+        const auto stored=storedArchive({{"Project/sequence.json",json}});QCOMPARE(parseSource(stored,"vpr").tracks[0].notes.size(),4);QCOMPARE(parseSource(storedArchive({{"Project\\sequence.json",json}}),"vpr").tracks[0].notes[0].id,notes[0].id);
+        auto modify=[&](auto edit){auto r=root;edit(r);return storedArchive({{"Project/sequence.json",QJsonDocument(r).toJson()}});};
+        auto b=modify([](auto &r){auto t=r["tracks"].toArray();auto a=t[1].toObject();a["isMuted"]=false;a["isSoloMode"]=true;t[1]=a;r["tracks"]=t;});auto solo=parseSource(b,"vpr");QVERIFY(solo.tracks[0].muted);QVERIFY(!solo.tracks[1].muted);p.score=solo;p.selected={solo.tracks[1].id};p.overrides.clear();p.regenerate();QCOMPARE(p.generated[0].shape,QString("I"));
+        b=modify([](auto &r){auto m=r["masterTrack"].toObject();m.remove("tempo");m.remove("timeSig");r["masterTrack"]=m;});QCOMPARE(parseSource(b,"vpr").time.tempos[0].bpm,120.);
+        QVector<QByteArray> bad={"",bytes.chopped(12),storedArchive({{"else.json",json}}),storedArchive({{"Project/sequence.json",json},{"Project\\sequence.json",json}}),storedArchive({{"Project/sequence.json","not json"}})};
+        bad.append(modify([](auto &r){auto m=r["masterTrack"].toObject();auto t=m["tempo"].toObject();auto g=t["global"].toObject();g["isEnabled"]=true;t["global"]=g;m["tempo"]=t;r["masterTrack"]=m;}));
+        bad.append(modify([](auto &r){r["resolution"]=960;}));bad.append(modify([](auto &r){auto v=r["version"].toObject();v["major"]=4;r["version"]=v;}));
+        for(const auto &entry:QList<QPair<QString,double>>{{"pos",-1},{"duration",0},{"number",128}})bad.append(modify([&](auto &r){auto tracks=r["tracks"].toArray();auto t=tracks[0].toObject();auto parts=t["parts"].toArray();auto part=parts[0].toObject();auto notes=part["notes"].toArray();auto n=notes[0].toObject();n[entry.first]=entry.second;notes[0]=n;part["notes"]=notes;parts[0]=part;t["parts"]=parts;tracks[0]=t;r["tracks"]=tracks;}));
+        const auto central=stored.indexOf(QByteArray::fromHex("504b0102"));QVERIFY(central>0);b=stored;b[central+16]=char(b[central+16]^1);bad.append(b);b=stored;b[6]=1;b[central+8]=1;bad.append(b);b=stored;b[8]=99;b[central+10]=99;bad.append(b);
+        for(const auto &b:bad)QVERIFY_EXCEPTION_THROWN(parseSource(b,"vpr"),Failure);
+        QVERIFY_EXCEPTION_THROWN(zip.read("Project/sequence.json",1),Failure);QVERIFY_EXCEPTION_THROWN(zip.read("missing",100),Failure);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vpr",{},&token),Failure);token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vpr",{},&token,[&](int){token=true;}),Failure);
+        int last=-1;parseSource(bytes,"vpr",{},nullptr,[&](int v){QVERIFY(v>=last);last=v;});QCOMPARE(last,100);
+    }
+    void voicevoxSong(){
+        QFile file(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vvproj");QVERIFY(file.open(QIODevice::ReadOnly));const auto bytes=file.readAll();const auto root=checkedJson(bytes).object();
+        Project p;p.score=parseSource(bytes,"vvproj-song","歌.vvproj");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.sourceFormat,QString("vvproj-song"));QCOMPARE(p.score.sourceResolution,qint64(960));QCOMPARE(p.score.sourceVersion,QString("0.25.1"));QVERIFY(p.score.hasMusic);
+        QCOMPARE(p.score.tracks[0].name,QString("歌声"));QCOMPARE(p.score.tracks[1].name,QString("Muted"));QVERIFY(p.score.tracks[1].muted);
+        const auto notes=p.score.tracks[0].notes;QCOMPARE(notes.size(),4);QCOMPARE(notes[0].pitch,60);QCOMPARE(notes[0].sourceDuration,qint64(961));QCOMPARE(notes[0].duration,Blick+Blick/960);QCOMPARE(notes[1].sourceOnset,qint64(961));
+        QVERIFY(notes[0].id!=p.score.tracks[1].notes[0].id);QCOMPARE(p.score.time.seconds(Blick),.5);QCOMPARE(p.score.time.seconds(2*Blick),1.5);QCOMPARE(p.score.time.beatLabel(4*Blick),QString("2:1:0.000"));QCOMPARE(p.duration(),4.5);
+        QCOMPARE(p.generated[0].shape,QString("A"));QCOMPARE(p.generated[1].shape,QString("A"));QCOMPARE(p.generated[2].shape,QString("closed"));QCOMPARE(p.generated[3].shape,QString("E"));
+        for(const auto &e:p.generated)QVERIFY(!e.unknown);
+        auto first=p.generated[0];first.shape="O";p.edit(first,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("O"));
+        QTemporaryDir dir;const auto path=dir.filePath("歌.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("vvproj-song"));QCOMPARE(restored.overrides[first.id].event.shape,QString("O"));
+        p.overrides.clear();p.split(p.generated[0],.25);saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.effective().size(),p.effective().size());
+        auto modify=[&](auto edit){auto r=root;auto song=r["song"].toObject();edit(song);r["song"]=song;return QJsonDocument(r).toJson();};
+        auto b=modify([](auto &s){auto t=s["tracks"].toObject();auto a=t["a"].toObject();a["solo"]=true;t["a"]=a;s["tracks"]=t;});auto solo=parseSource(b,"vvproj-song");QVERIFY(solo.tracks[0].muted);QVERIFY(!solo.tracks[1].muted);
+        b=modify([](auto &s){auto t=s["tracks"].toObject();auto a=t["z"].toObject();auto n=a["notes"].toArray();auto first=n[0].toObject();first["lyric"]=QJsonValue::Null;n[0]=first;a["notes"]=n;t["z"]=a;s["tracks"]=t;});QVERIFY(parseSource(b,"vvproj-song").tracks[0].notes[0].lyrics.isEmpty());
+        b=modify([](auto &s){s["tpqn"]=480;});QCOMPARE(parseSource(b,"vvproj-song").tracks[0].notes[0].duration,2*Blick+Blick/480);
+        const auto source=dir.filePath("元.vvproj");QFile output(source);QVERIFY(output.open(QIODevice::WriteOnly));output.write(bytes);output.close();QCOMPARE(importSource(source).sourceFormat,QString("vvproj-song"));
+        QFile talkFile(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/timed.vvproj");QVERIFY(talkFile.open(QIODevice::ReadOnly));const QJsonValue talk=checkedJson(talkFile.readAll()).object()["talk"];
+        auto mixed=root;mixed["talk"]=talk;const auto mixedBytes=QJsonDocument(mixed).toJson();QVERIFY_EXCEPTION_THROWN(parseSource(mixedBytes,"vvproj-auto"),Failure);
+        QVERIFY(!parseSource(mixedBytes,"vvproj").hasMusic);QVERIFY(parseSource(mixedBytes,"vvproj-song").hasMusic);
+        QVERIFY(output.open(QIODevice::WriteOnly|QIODevice::Truncate));output.write(mixedBytes);output.close();QVERIFY_EXCEPTION_THROWN(importSource(source),Failure);QVERIFY(importSource(source,nullptr,{},"song").hasMusic);QVERIFY(!importSource(source,nullptr,{},"talk").hasMusic);
+        mixed["song"]=QJsonObject{};QCOMPARE(parseSource(QJsonDocument(mixed).toJson(),"vvproj").sourceResolution,qint64(0));
+        QVector<QByteArray> bad={"", "[]", bytes.chopped(2)};
+        for(const auto &field:QStringList{"tpqn","tempos","timeSignatures","tracks","trackOrder"})bad.append(modify([&](auto &s){s.remove(field);}));
+        bad.append(modify([](auto &s){s["tpqn"]=0;}));bad.append(modify([](auto &s){s["tpqn"]=1.5;}));bad.append(modify([](auto &s){s["trackOrder"]=QJsonArray{"z","z"};}));bad.append(modify([](auto &s){s["trackOrder"]=QJsonArray{"z"};}));
+        for(const auto &field:QStringList{"position","duration","noteNumber","id","lyric"})bad.append(modify([&](auto &s){auto t=s["tracks"].toObject();auto a=t["z"].toObject();auto n=a["notes"].toArray();auto v=n[0].toObject();v.remove(field);n[0]=v;a["notes"]=n;t["z"]=a;s["tracks"]=t;}));
+        for(const auto &entry:QList<QPair<QString,double>>{{"position",-1},{"position",.5},{"position",9007199254740992.},{"duration",0},{"noteNumber",128}})bad.append(modify([&](auto &s){auto t=s["tracks"].toObject();auto a=t["z"].toObject();auto n=a["notes"].toArray();auto v=n[0].toObject();v[entry.first]=entry.second;n[0]=v;a["notes"]=n;t["z"]=a;s["tracks"]=t;}));
+        bad.append(modify([](auto &s){auto a=s["tempos"].toArray();auto t=a[1].toObject();t["position"]=0;a[1]=t;s["tempos"]=a;}));
+        for(const auto &b:bad)QVERIFY_EXCEPTION_THROWN(parseSource(b,"vvproj-song"),Failure);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vvproj-song",{},&token),Failure);token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vvproj-song",{},&token,[&](int){token=true;}),Failure);
+        int last=-1;parseSource(bytes,"vvproj-song",{},nullptr,[&](int v){QVERIFY(v>=last);last=v;});QCOMPARE(last,100);
+    }
+    void ccsSource(){
+        QFile file(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.ccs");QVERIFY(file.open(QIODevice::ReadOnly));const auto bytes=file.readAll();
+        Project p;p.score=parseSource(bytes,"ccs","歌.ccs");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.sourceResolution,qint64(960));QCOMPARE(p.score.sourceTickOrigin,qint64(0));QCOMPARE(p.score.sourceVersion,QString("8.5.0.0"));
+        QCOMPARE(p.score.tracks.size(),2);QCOMPARE(p.score.tracks[0].name,QString("歌声"));QVERIFY(p.score.tracks[1].muted);
+        const auto notes=p.score.tracks[0].notes;QCOMPARE(notes.size(),5);QCOMPARE(notes[0].pitch,60);QCOMPARE(notes[0].sourceOnset,qint64(3840));QCOMPARE(notes[0].sourceDuration,qint64(961));QCOMPARE(notes[0].duration,Blick+Blick/960);
+        QCOMPARE(notes[0].lyrics,QString("い"));QCOMPARE(notes[0].phonemes,QString("a"));QCOMPARE(notes[0].original["Phonetic"].toString(),QString("a"));QVERIFY(notes[2].phonemes.isEmpty());
+        QVERIFY(notes[0].groupInstance!=notes[4].groupInstance);QCOMPARE(p.score.time.seconds(4*Blick),2.);QCOMPARE(p.duration(),7.5);
+        QCOMPARE(p.score.time.beatLabel(8*Blick),QString("3:1:0.000"));QCOMPARE(p.score.time.meters[1].numerator,3);
+        QCOMPARE(p.generated[0].shape,QString("A"));QCOMPARE(p.generated[0].start,2.);QCOMPARE(p.generated[1].shape,QString("A"));QCOMPARE(p.generated[2].shape,QString("E"));
+        for(const auto &e:p.generated)QVERIFY(!e.unknown);
+        auto first=p.generated[0];first.shape="O";p.edit(first,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("O"));
+        QTemporaryDir dir;const auto path=dir.filePath("歌.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("ccs"));QCOMPARE(restored.overrides[first.id].event.shape,QString("O"));
+        p.overrides.clear();p.split(p.generated[0],2.25);saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.effective().size(),p.effective().size());
+        auto phonetic=bytes;phonetic.replace("Phonetic=\"a\"","Phonetic=\"k,a\"");QCOMPARE(parseSource(phonetic,"ccs").tracks[0].notes[0].phonemes,QString("k a"));
+        auto gap=bytes;gap.replace("Lyric=\"え\" Phonetic=\"\"","Lyric=\"ー\" Phonetic=\"\"");Project rest;rest.score=parseSource(gap,"ccs");rest.selected={rest.score.tracks[0].id};rest.regenerate();QCOMPARE(rest.generated[2].shape,QString("closed"));
+        gap=bytes;gap.replace("Lyric=\"う\"","Lyric=\"ー\"");rest.score=parseSource(gap,"ccs");rest.regenerate();QCOMPARE(rest.generated.last().shape,QString("closed"));
+        auto b=bytes;b.replace("Name=\"Muted\" IsMuted=\"true\"","Name=\"Muted\" IsMuted=\"false\"");p.score=parseSource(b,"ccs");p.selected={p.score.tracks[1].id};p.overrides.clear();p.regenerate();QCOMPARE(p.generated[0].shape,QString("I"));QVERIFY(!p.generated[0].unknown);
+        b.replace("Name=\"Muted\" IsMuted=\"false\" IsSolo=\"false\"","Name=\"Muted\" IsMuted=\"false\" IsSolo=\"true\"");auto solo=parseSource(b,"ccs");QVERIFY(solo.tracks[0].muted);QVERIFY(!solo.tracks[1].muted);
+        b=bytes;b.replace("<Score><Note Clock=\"8640\"","<Tempo><Sound Clock=\"0\" Tempo=\"120\"/><Sound Clock=\"4800\" Tempo=\"60\"/></Tempo><Beat><Time Clock=\"0\" Beats=\"4\" BeatType=\"4\"/><Time Clock=\"7680\" Beats=\"3\" BeatType=\"4\"/></Beat><Score><Note Clock=\"8640\"");QCOMPARE(parseSource(b,"ccs").tracks.size(),2);
+        for(const auto &bad:QList<QByteArray>{"", "<Song/>", "<Scenario><Sequence><Scene><Units><Unit Category=\"TextVocal\"/></Units></Scene></Sequence></Scenario>",bytes.chopped(12),bytes+"<extra/>",QByteArray(bytes).replace("StartTime=\"00:00:00\"","StartTime=\"00:00:01\""),QByteArray(bytes).replace("Duration=\"961\"","Duration=\"0\""),QByteArray(bytes).replace("Clock=\"3840\"","Clock=\"-1\""),QByteArray(bytes).replace("PitchStep=\"0\"","PitchStep=\"12\""),QByteArray(bytes).replace("Tempo=\"60\"","Tempo=\"nan\""),QByteArray(bytes).replace("Beats=\"3\"","Beats=\"0\""),QByteArray(bytes).replace("BeatType=\"4\"","BeatType=\"3\""),QByteArray(bytes).replace("Clock=\"7680\" Beats","Clock=\"7681\" Beats"),QByteArray(bytes).replace("Version=\"1.08\"","Version=\"2.0\""),QByteArray(bytes).replace("</Scene>","</Scene><Scene/>"),QByteArray(b).replace(b.indexOf("Tempo=\"60\""),10,"Tempo=\"61\"")})QVERIFY_EXCEPTION_THROWN(parseSource(bad,"ccs"),Failure);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"ccs",{},&token),Failure);token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"ccs",{},&token,[&](int){token=true;}),Failure);
+        int last=-1;parseSource(bytes,"ccs",{},nullptr,[&](int v){QVERIFY(v>=last);last=v;});QCOMPARE(last,100);
+    }
+    void musicXmlSource(){
+        QFile file(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.musicxml");QVERIFY(file.open(QIODevice::ReadOnly));const auto bytes=file.readAll();
+        Project p;p.score=parseSource(bytes,"musicxml","歌.musicxml");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.sourceFormat,QString("musicxml"));QCOMPARE(p.score.sourceVersion,QString("4.0"));QCOMPARE(p.score.sourceResolution,qint64(2310));
+        QCOMPARE(p.score.tracks.size(),4);QCOMPARE(p.score.tracks[0].notes.size(),4);QCOMPARE(p.score.tracks[1].notes.size(),4);QCOMPARE(p.score.tracks[2].notes.size(),1);QCOMPARE(p.score.tracks[3].notes.size(),2);
+        const auto notes=p.score.tracks[0].notes;QCOMPARE(notes[1].sourceOnset,qint64(2310));QCOMPARE(notes[1].sourceDuration,qint64(4620));QCOMPARE(notes[1].original["duration"].toString(),QString("22"));QCOMPARE(notes[1].original["divisions"].toString(),QString("11"));
+        QCOMPARE(notes[1].onset,Blick);QCOMPARE(notes[1].duration,2*Blick);QCOMPARE(notes[1].lyricReading,QString("ー"));QCOMPARE(notes.last().original["divisions"].toString(),QString("2.5"));QCOMPARE(notes[0].language,QString("ja"));
+        QCOMPARE(p.score.time.measureStarts,QVector<qint64>({0,Blick,5*Blick,15*Blick/2}));QCOMPARE(p.score.time.beatLabel(Blick),QString("2:1:0.000"));QCOMPARE(p.score.time.beatLabel(5*Blick),QString("3:1:0.000"));QCOMPARE(p.score.time.beatLabel(11*Blick/2),QString("3:2:0.000"));
+        QCOMPARE(p.score.time.pickupOffset,3*Blick);QCOMPARE(p.score.time.beatLabel(0),QString("1:4:0.000"));
+        QCOMPARE(p.score.time.seconds(Blick),.5);QCOMPARE(p.score.time.seconds(3*Blick),2.25);QCOMPARE(p.duration(),6.75);
+        QCOMPARE(p.generated[0].shape,QString("A"));QCOMPARE(p.generated[1].shape,QString("A"));QCOMPARE(p.generated[1].start,.5);QCOMPARE(p.generated[1].end,2.25);QCOMPARE(p.generated[2].shape,QString("E"));
+        for(const auto &e:p.generated)QVERIFY(!e.unknown);
+        QSet<QString> codes;for(const auto &d:p.score.diagnostics)codes.insert(d.code);QVERIFY(codes.contains("chord"));QVERIFY(codes.contains("grace"));QVERIFY(codes.contains("notated-order"));
+        auto first=p.generated[0];first.shape="O";p.edit(first,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("O"));
+        QTemporaryDir dir;const auto path=dir.filePath("譜面.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.time.measureStarts,p.score.time.measureStarts);QCOMPARE(restored.overrides[first.id].event.shape,QString("O"));
+        p.overrides.clear();p.split(p.generated[1],1.25);saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.effective().size(),p.effective().size());
+        QCOMPARE(parseSource(bytes,"xml").sourceFormat,QString("musicxml"));
+        p.overrides.clear();p.selected={p.score.tracks[1].id};p.regenerate();QCOMPARE(p.generated[0].shape,QString("I"));QCOMPARE(p.generated[1].shape,QString("I"));
+        p.selected={p.score.tracks[2].id};p.regenerate();QCOMPARE(p.generated.size(),1);QCOMPARE(p.generated[0].shape,QString("U"));QCOMPARE(p.generated[0].start,.5);
+        auto mini=[](QByteArray body,QByteArray div="7"){return "<score-partwise version=\"4.0\"><part id=\"P\"><measure number=\"0\" implicit=\"yes\"><attributes><divisions>"+div+"</divisions></attributes>"+body+"</measure></part></score-partwise>";};
+        auto note=[](QByteArray duration="1",QByteArray lyric="<lyric><text>あ</text></lyric>"){return "<note><pitch><step>C</step><octave>4</octave></pitch><duration>"+duration+"</duration>"+lyric+"</note>";};
+        QByteArray tuplets;for(int i=0;i<11;++i)tuplets+=note();auto score=parseSource(mini(tuplets,"11"),"musicxml");QCOMPARE(score.sourceResolution,qint64(11));QCOMPARE(score.endPosition,Blick);QCOMPARE(score.tracks[0].notes.last().onset+score.tracks[0].notes.last().duration,Blick);
+        score=parseSource(mini(note(".5"),"2.5"),"musicxml");QCOMPARE(score.sourceResolution,qint64(5));QCOMPARE(score.tracks[0].notes[0].duration,Blick/5);
+        score=parseSource(mini(note()+"<attributes><divisions>11</divisions></attributes>"+note()),"musicxml");QCOMPARE(score.sourceResolution,qint64(77));QCOMPARE(score.tracks[0].notes[1].sourceOnset,qint64(11));QCOMPARE(score.tracks[0].notes[1].sourceDuration,qint64(7));QCOMPARE(score.endPosition,qint64(std::llround(static_cast<long double>(Blick)*18/77)));
+        score=parseSource(mini("<direction><direction-type><metronome><beat-unit>eighth</beat-unit><beat-unit-dot/><per-minute>80</per-minute></metronome></direction-type></direction>"+note()),"musicxml");QCOMPARE(score.time.tempos[0].bpm,60.);
+        score=parseSource(mini("<direction><offset>7</offset><sound tempo=\"60\"><offset>3.5</offset></sound></direction>"+note("7")),"musicxml");QCOMPARE(score.time.tempos[1].position,Blick/2);QCOMPARE(score.time.tempos[1].bpm,60.);
+        score=parseSource(mini("<sound tempo=\"60\"><offset>3.5</offset></sound>"+note("7")),"musicxml");QCOMPARE(score.time.tempos[1].position,Blick/2);
+        score=parseSource(mini("<attributes><transpose><chromatic>-2</chromatic><octave-change>1</octave-change></transpose></attributes>"+note()),"musicxml");QCOMPARE(score.tracks[0].notes[0].pitch,70);
+        Project gap;gap.score=parseSource(mini(note("7","<lyric><text>あ</text><extend type=\"start\"/></lyric>")+"<note><rest/><duration>7</duration></note>"+note("7","<lyric><text>ー</text></lyric>")),"musicxml");gap.selected={gap.score.tracks[0].id};gap.regenerate();QCOMPARE(gap.generated.last().shape,QString("closed"));
+        for(const auto &bad:QList<QByteArray>{"", "<score-timewise/>",bytes.chopped(12),bytes+"<extra/>",QByteArray(bytes).replace("<divisions>7</divisions>","<divisions>0</divisions>"),mini("<backup><duration>7</duration></backup>"),mini(note("nan")),mini(note("-1")),mini(note("0")),mini(note(),"9223372036854775807.1"),mini("<direction><offset>-1</offset><sound tempo=\"60\"/></direction>"+note()),mini("<note><chord/><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration></note>"),QByteArray(bytes).replace("<step>C</step>","<step>C</step><alter>.5</alter>"),QByteArray(bytes).replace("implicit=\"yes\"","non-controlling=\"yes\"")})QVERIFY_EXCEPTION_THROWN(parseSource(bad,"musicxml"),Failure);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"musicxml",{},&token),Failure);
+        token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"musicxml",{},&token,[&](int){token=true;}),Failure);
+        int last=-1;parseSource(bytes,"musicxml",{},nullptr,[&](int v){QVERIFY(v>=last);last=v;});QCOMPARE(last,100);
+        TimeMap invalidMap;invalidMap.measureStarts={0,Blick,Blick};QVERIFY_EXCEPTION_THROWN(invalidMap.validate(),Failure);
+    }
+    void ustxSource() {
+        QFile f(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.ustx");QVERIFY(f.open(QIODevice::ReadOnly));const auto bytes=f.readAll();
+        Project p;p.score=parseSource(bytes,"ustx","試験.ustx");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.score.sourceVersion,QString("0.6"));QCOMPARE(p.score.sourceResolution,qint64(480));QVERIFY(p.score.hasMusic);
+        QCOMPARE(p.score.tracks.size(),2);QCOMPARE(p.score.tracks[0].name,QString("主旋律"));QVERIFY(!p.score.tracks[0].muted);QVERIFY(p.score.tracks[1].muted);
+        const auto notes=p.score.tracks[0].notes;QCOMPARE(notes.size(),3);QCOMPARE(notes[0].sourceOnset,qint64(480));QCOMPARE(notes[0].sourceDuration,qint64(480));
+        QCOMPARE(notes[0].onset,Blick);QCOMPARE(notes[0].duration,Blick);QCOMPARE(notes[0].lyrics,QString("- あ"));QCOMPARE(notes[0].lyricReading,QString("あ"));QVERIFY(notes[0].phonemes.isEmpty());
+        QCOMPARE(notes[1].lyricReading,QString("い"));QCOMPARE(notes[1].onset,2*Blick);QCOMPARE(notes[2].onset,4*Blick);QVERIFY(notes[0].groupInstance!=notes[2].groupInstance);
+        QCOMPARE(notes[0].original["phoneme_overrides"].toArray()[0].toObject()["offset"].toString(),QString("-80"));
+        QCOMPARE(p.score.time.seconds(2*Blick)-p.score.time.seconds(Blick),.75);QCOMPARE(p.score.time.meters[1].bar,1);QCOMPARE(p.score.time.meters[1].numerator,3);QCOMPARE(p.score.endPosition,5*Blick);
+        QCOMPARE(p.generated.size(),3);QCOMPARE(p.generated[0].shape,QString("A"));QCOMPARE(p.generated[1].shape,QString("I"));QCOMPARE(p.generated[2].shape,QString("U"));
+        const auto first=p.generated[0];auto edit=first;edit.shape="E";p.edit(edit,true,"beats");p.regenerate();QCOMPARE(p.overrides[first.id].event.shape,QString("E"));
+        QTemporaryDir dir;const auto path=dir.filePath("元.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("ustx"));QCOMPARE(restored.generated.size(),p.generated.size());QCOMPARE(restored.overrides[first.id].event.shape,QString("E"));
+        p.overrides.clear();p.split(first,(first.start+first.end)/2);saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.effective().size(),p.effective().size());
+        // Scalar spellings remain lyrics, never YAML 1.1 booleans/null values.
+        for(const auto &lyric:QList<QByteArray>{"'null'","true","'-, '","'a: b # c'","'😀'"}){
+            auto b=bytes;b.replace("'- あ'",lyric);auto s=parseSource(b,"ustx");QVERIFY(!s.tracks[0].notes[0].lyrics.isEmpty());
+            if(lyric=="'null'")QCOMPARE(s.tracks[0].notes[0].lyrics,QString("null"));
+            if(lyric=="true")QCOMPARE(s.tracks[0].notes[0].lyrics,QString("true"));
+        }
+        auto b=bytes;b.replace("'- あ'","&word あ");b.replace("'い [i]'","*word");QCOMPARE(parseSource(b,"ustx").tracks[0].notes[1].lyrics,QString("あ"));
+        b=bytes;b.replace("position: 480\n  duration: 960","position: 481\n  duration: 960");QCOMPARE(parseSource(b,"ustx").tracks[0].notes[0].onset,Blick+Blick/480);
+        b=bytes;b.replace("\n  duration: 960\n","\n");b.replace("\n  duration: 480\n","\n");QCOMPARE(parseSource(b,"ustx").endPosition,5*Blick);
+        for(const auto &lyric:QList<QByteArray>{"'+'","'+2'"}){b=bytes;b.replace("'い [i]'",lyric);Project extended;extended.score=parseSource(b,"ustx");extended.selected={extended.score.tracks[0].id};extended.regenerate();QCOMPARE(extended.generated[1].shape,QString("A"));QVERIFY(!extended.generated[1].unknown);}
+        for(const auto &bad:QList<QByteArray>{"", "[a, b]", "a: [", "a: &loop [*loop]", "a: 1\na: 2", bytes+"\n---\n{}", QByteArray(bytes).replace("ustx_version: '0.6'","ustx_version: '0.5'"), QByteArray(bytes).replace("resolution: 480","resolution: 960"), QByteArray(bytes).replace("track_no: 0","track_no: 9"), QByteArray(bytes).replace("tone: 60","tone: 128"), QByteArray(bytes).replace("duration: 480","duration: 0"), QByteArray(bytes).replace("position: 1920","position: 9223372036854775807"), QByteArray(bytes).replace("bpm: 60","bpm: .nan")})QVERIFY_EXCEPTION_THROWN(parseSource(bad,"ustx"),Failure);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"ustx",{},&token),Failure);
+        token=false;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"ustx",{},&token,[&](int){token=true;}),Failure);
+        int last=-1;parseSource(bytes,"ustx",{},nullptr,[&](int v){QVERIFY(v>=last);last=v;});QCOMPARE(last,100);
+    }
+    void absoluteSources() {
+        auto read=[](const QString &name){QFile f(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/"+name);if(!f.open(QIODevice::ReadOnly))throw Failure(f.errorString());return f.readAll();};
+        Project p;p.score=parseSource(read("timed.lab"),"lab","原始.lab");p.selected={p.score.tracks[0].id};p.regenerate();
+        QVERIFY(!p.score.hasMusic);QVERIFY(p.score.time.tempos.isEmpty());QVERIFY(p.score.time.meters.isEmpty());QVERIFY(p.score.tracks[0].notes.isEmpty());
+        QCOMPARE(p.score.sourceResolution,qint64(10000000));QCOMPARE(p.score.tracks[0].timedPhones.size(),10);QCOMPARE(p.generated.size(),9);
+        QCOMPARE(p.score.tracks[0].timedPhones[2].sourceStart,qint64(1300000));QCOMPARE(p.generated[1].start,.1);QCOMPARE(p.generated[1].end,.13);QCOMPARE(p.generated[1].shape,QString("A"));
+        QCOMPARE(p.generated[3].articulation,QString("devoiced-vowel"));QCOMPARE(p.generated[4].articulation,QString("nasal"));QVERIFY(p.generated[7].unknown);
+        QCOMPARE(p.duration(),1.2);QCOMPARE(Evaluation(p).duration,1.2);QVERIFY(!generatePerformance(p).error.isEmpty());
+        p.rules.consonantRatio=.8;p.rules.consonantMaxSeconds=1;p.regenerate();QCOMPARE(p.generated[1].end,.13);
+        p.rules.readings[p.generated[7].source]="o";p.regenerate();QCOMPARE(p.generated[7].shape,QString("O"));QVERIFY(!p.generated[7].unknown);
+        auto e=p.generated[2];e.start=.15;e.end=.45;e.shape="E";p.edit(e,true,"beats");QCOMPARE(p.overrides[e.id].anchor,QString("seconds"));p.split(e,.3);p.regenerate();
+        SourceTimeMap mapping(p);QVERIFY(mapping.forward(e.source,.13));QVERIFY(std::abs(*mapping.forward(e.source,.13)-.15)<1e-9);
+        QVector<Event> children;for(const auto &v:p.effective())if(v.source==e.source)children.append(v);QCOMPARE(children.size(),2);p.merge(children);
+        QVERIFY(std::abs(*SourceTimeMap(p).forward(e.source,.4,true)-.45)<1e-9);
+        p.appearance.enabled=true;p.performance.groups.append(VariantGroup{"power","Power"});p.performance.roles["emphasis"]="power";PerformanceSegment manual;manual.id="manual-absolute";manual.targets={"normal","emphasis","normal"};manual.cuts={.35,.7};manual.mode="arch";setPerformanceTime(p,manual,.1,1.1,true);QCOMPARE(manual.anchor,QString("seconds"));putPerformanceSegment(p,manual);
+        QCOMPARE(PerformanceResolver(p).slices().size(),3);SubtitleCue cue;setSubtitleTime(p,cue,.1,.4,true);QCOMPARE(cue.anchor,QString("seconds"));
+        QTemporaryDir dir;auto path=dir.filePath("绝对时间.chosuta");saveProject(p,path);auto restored=loadProject(path);
+        QCOMPARE(restored.score.raw,p.score.raw);QCOMPARE(restored.effective().size(),p.effective().size());QCOMPARE(restored.overrides.size(),p.overrides.size());QCOMPARE(restored.performance.manual,p.performance.manual);QCOMPARE(restored.score.endSeconds,1.2);
+        std::atomic_bool cancelled=true;QVERIFY_EXCEPTION_THROWN(parseSource(read("timed.lab"),"lab",{},&cancelled),Failure);QVERIFY_EXCEPTION_THROWN(p.regenerate(&cancelled),Failure);QCOMPARE(p.overrides.size(),restored.overrides.size());
+        for(const auto &bad:QList<QByteArray>{"0.0 1.0 a","0 100 a^b-c+d=e/A:0","10 5 a","0 10 a\n9 12 i","0 8640000000001 a",""})QVERIFY_EXCEPTION_THROWN(parseSource(bad,"lab"),Failure);
+        p={};p.score=parseSource(read("timed.ds"),"ds");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.generated.size(),10);QCOMPARE(p.score.tracks[0].timedPhones.size(),11);QCOMPARE(p.generated[0].start,.047);QVERIFY(std::abs(p.generated[2].start-.177)<1e-12);QVERIFY(std::abs(p.generated[2].end-.447)<1e-12);
+        QCOMPARE(p.generated[2].shape,QString("A"));QCOMPARE(p.generated[4].shape,QString("closed"));QCOMPARE(p.generated[6].shape,QString("U"));QCOMPARE(p.generated[7].shape,QString("A"));QVERIFY(p.generated[8].unknown);
+        QCOMPARE(p.duration(),1.75);QCOMPARE(Evaluation(p).duration,1.75);QVERIFY(p.score.tracks[0].notes.isEmpty());
+        saveProject(p,path);restored=loadProject(path);QCOMPARE(restored.score.sourceFormat,QString("ds"));QCOMPARE(restored.generated.size(),p.generated.size());QCOMPARE(restored.generated.last().id,p.generated.last().id);
+        for(const auto &bad:QList<QByteArray>{R"([{"ph_seq":"a"}])",R"([{"ph_seq":"a i","ph_dur":".1"}])",R"([{"ph_seq":"a","ph_dur":"nan"}])",R"([{"ph_seq":"a","ph_dur":"-.1"}])",R"([{"offset":-1,"ph_seq":"a","ph_dur":".1"}])",R"([])"})QVERIFY_EXCEPTION_THROWN(parseSource(bad,"ds"),Failure);
+        auto other=p.score.tracks.front();other.id="second";for(auto &phone:other.timedPhones){phone.id="second/"+phone.id;phone.phone="i";}p.score.tracks.append(other);p.selected.append(other.id);p.priorities[other.id]=-1;p.regenerate();QCOMPARE(p.generated.front().track,other.id);
+        p.selected.removeAll(other.id);p.regenerate();QVERIFY(p.generated.front().track!=other.id);
+    }
+    void voicevoxTalk(){
+        QFile f(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/timed.vvproj");QVERIFY(f.open(QIODevice::ReadOnly));const auto bytes=f.readAll();
+        Project p;p.score=parseSource(bytes,"vvproj","元.vvproj");p.selected={p.score.tracks[0].id};p.regenerate();
+        QVERIFY(!p.score.hasMusic);QVERIFY(p.score.time.tempos.isEmpty());QVERIFY(p.score.tracks[0].notes.isEmpty());QCOMPARE(p.score.sourceVersion,QString("0.25.1"));
+        const auto &phones=p.score.tracks[0].timedPhones;QCOMPARE(phones.size(),14);QCOMPARE(p.generated.size(),12);
+        // Independent, hand-counted decoder frame lengths: speed, pause replacement,
+        // both directions of ties-to-even, zero-length phones, and default upspeak.
+        const QVector<int> counts={4,3,6,3,2,2,3,3,2,0,0,3,14,2};int at=0;
+        for(int i=0;i<phones.size();++i){QCOMPARE(phones[i].start,at/93.75);at+=counts[i];QCOMPARE(phones[i].end,at/93.75);QCOMPARE(phones[i].original["frames"].toInt(),counts[i]);}
+        QCOMPARE(at,47);QCOMPARE(p.duration(),47/93.75);QCOMPARE(Evaluation(p).duration,p.duration());QCOMPARE(phones[0].original["itemKey"].toString(),QString("utterance-b"));QCOMPARE(phones.last().original["itemKey"].toString(),QString("utterance-a"));
+        QCOMPARE(phones[7].original["queryLength"].toDouble(),.16);QCOMPARE(phones[7].original["scaledLength"].toDouble(),.032);
+        QCOMPARE(p.generated[1].shape,QString("A"));QCOMPARE(p.generated[1].phone,QString("k"));QCOMPARE(p.generated[1].text,QString("カ"));QVERIFY(p.generated[1].provenance.contains("query-time-estimated"));
+        QCOMPARE(p.generated[3].articulation,QString("nasal"));QCOMPARE(p.generated[4].articulation,QString("cl"));QCOMPARE(p.generated[5].articulation,QString("devoiced-vowel"));QVERIFY(p.generated[6].unknown);
+        QVERIFY(std::any_of(p.score.diagnostics.cbegin(),p.score.diagnostics.cend(),[](const auto &d){return d.code=="other-section";}));
+        auto original=p.generated[2];auto edited=original;edited.shape="O";p.edit(edited);p.regenerate();QCOMPARE(eventAt(p.effective(),original.start)->shape,QString("O"));
+        p.split(edited,(edited.start+edited.end)/2);QVERIFY(SourceTimeMap(p).forward(edited.source,original.start));
+        QTemporaryDir dir;const auto path=dir.filePath("talk.chosuta");saveProject(p,path);const auto restored=loadProject(path);QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.score.sourceFormat,QString("vvproj"));QCOMPARE(restored.generated.size(),p.generated.size());QCOMPARE(restored.effective().size(),p.effective().size());QCOMPARE(restored.duration(),p.duration());
+        auto root=checkedJson(bytes).object();const auto talk=root["talk"].toObject();auto item=talk["audioItems"].toObject()["utterance-b"].toObject();const auto originalQuery=item["query"].toObject();
+        auto input=[&](QJsonObject query){auto v=root;auto t=talk;auto items=t["audioItems"].toObject();auto b=item;b["query"]=query;items["utterance-b"]=b;t["audioItems"]=items;v["talk"]=t;return QJsonDocument(v).toJson();};
+        for(const auto key:{"speedScale","prePhonemeLength","postPhonemeLength","accentPhrases"}){auto q=originalQuery;q.remove(key);QVERIFY_EXCEPTION_THROWN(parseSource(input(q),"vvproj"),Failure);}
+        auto q=originalQuery;q["speedScale"]=0;QVERIFY_EXCEPTION_THROWN(parseSource(input(q),"vvproj"),Failure);
+        q=originalQuery;q["pauseLengthScale"]=-1;QVERIFY_EXCEPTION_THROWN(parseSource(input(q),"vvproj"),Failure);
+        q=originalQuery;auto phrases=q["accentPhrases"].toArray();auto phrase=phrases[0].toObject();auto moras=phrase["moras"].toArray();auto mora=moras[0].toObject();mora.remove("consonantLength");moras[0]=mora;phrase["moras"]=moras;phrases[0]=phrase;q["accentPhrases"]=phrases;
+        try{parseSource(input(q),"vvproj");QFAIL("Missing consonant duration must fail");}catch(const Failure &e){QVERIFY(e.message.text().contains("utterance-b"));QVERIFY(e.message.text().contains("consonantLength"));}
+        auto bad=root;auto t=talk;t["audioKeys"]=QJsonArray{"utterance-b","utterance-b"};bad["talk"]=t;QVERIFY_EXCEPTION_THROWN(parseSource(QJsonDocument(bad).toJson(),"vvproj"),Failure);
+        t["audioKeys"]=QJsonArray{"missing"};bad["talk"]=t;QVERIFY_EXCEPTION_THROWN(parseSource(QJsonDocument(bad).toJson(),"vvproj"),Failure);
+        t["audioKeys"]=QJsonArray{"unreferenced"};bad["talk"]=t;QVERIFY_EXCEPTION_THROWN(parseSource(QJsonDocument(bad).toJson(),"vvproj"),Failure);
+        bad=root;bad.remove("talk");QVERIFY_EXCEPTION_THROWN(parseSource(QJsonDocument(bad).toJson(),"vvproj"),Failure);
+        // Optional pause overrides are applied only when supplied.
+        q=originalQuery;q.remove("pauseLength");q.remove("pauseLengthScale");const auto unscaled=parseSource(input(q),"vvproj");QCOMPARE(unscaled.tracks[0].timedPhones[7].original["frames"].toInt(),8);
+        std::atomic_bool token=true;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vvproj",{},&token),Failure);
+        token=false;int progress=0;QVERIFY_EXCEPTION_THROWN(parseSource(bytes,"vvproj",{},&token,[&](int v){progress=v;token=true;}),Failure);QCOMPARE(progress,0);
+    }
+    void absoluteRendering(){
+        if(!QFileInfo(resolveExecutable("ffmpeg")).isExecutable())QSKIP("FFmpeg absent");
+        QTemporaryDir dir;QImage image(32,32,QImage::Format_RGBA8888);image.fill(Qt::red);const auto red=dir.filePath("red.png");QVERIFY(image.save(red));image.fill(Qt::blue);const auto blue=dir.filePath("blue.png");QVERIFY(image.save(blue));
+        for(const auto &format:QStringList{"lab","ds","vvproj","ustx","musicxml","ccs","vvproj-song","vpr","mxl","vsq"}){
+            Project p;p.score=importSource(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/"+(format=="vvproj-song"?"score.vvproj":((format=="ustx"||format=="musicxml"||format=="ccs"||format=="vpr"||format=="mxl"||format=="vsq")?"score.":"timed.")+format),nullptr,{},format=="vvproj"?"talk":"auto");p.selected={p.score.tracks[0].id};p.regenerate();p.canvas.width=p.canvas.height=32;p.output.duration=.4;p.output.fpsNum=10;p.output.format="mov";p.output.syncOffset=format=="ccs"?-1.95:format=="vpr"?-.45:.05;
+            p.appearance.enabled=true;p.performance.groups.append(VariantGroup{"power","Power"});p.performance.roles["emphasis"]="power";
+            for(const auto &shape:mouthStates()){p.assets[shape]=red;p.assets["power/"+shape]=blue;}
+            PerformanceSegment m;m.id="manual";m.targets={"emphasis"};setPerformanceTime(p,m,.1,.3,false);putPerformanceSegment(p,m);
+            Scene preview(p);QCOMPARE(preview.frame(.1).pixelColor(16,16),QColor(Qt::blue));QCOMPARE(preview.frame(.3).pixelColor(16,16),QColor(Qt::red));
+            std::atomic_bool token=false;auto movie=dir.filePath(format+".mov");auto result=exportVideo(p,testMediaTools(),movie,token);QVERIFY2(result.success,qPrintable(result.error.text()));QCOMPARE(result.frames,4);
+            QProcess decoder;decoder.start(resolveExecutable("ffmpeg"),{"-v","error","-i",movie,"-f","rawvideo","-pix_fmt","rgba","-"});QVERIFY(decoder.waitForFinished(10000));QCOMPARE(decoder.exitCode(),0);const auto pixels=decoder.readAllStandardOutput();QCOMPARE(pixels.size(),32*32*4*4);
+            for(int frame=0;frame<4;++frame){QImage decoded(reinterpret_cast<const uchar *>(pixels.constData()+frame*32*32*4),32,32,QImage::Format_RGBA8888);QCOMPARE(decoded,preview.frame(frame/10.).convertToFormat(QImage::Format_RGBA8888));}
+            auto cancelledMovie=dir.filePath(format+"-cancelled.mov");token=true;result=exportVideo(p,testMediaTools(),cancelledMovie,token);QVERIFY(!result.success);QVERIFY(!QFileInfo::exists(cancelledMovie));
+        }
     }
     void parsing() {
         auto p=basic();
@@ -256,6 +547,72 @@ class CoreTest:public QObject {
         QCOMPARE(pronounce("nüè","zh").syllables[0],(QStringList{"open","U","E"}));
         QVERIFY(!pronounce("ＨＥＬＬＯ","en").unknown);
         QCOMPARE(pronounce("hello","auto").syllables,pronounce("hello","en").syllables);
+    }
+    void chineseRoundedVowels() {
+        for(const auto &phone:QStringList{"ü","v","u:","Ü","V","U:"}) {
+            const auto reading=pronounce(phone,"zh",true);
+            QVERIFY2(!reading.unknown,qPrintable(phone));
+            QCOMPARE(reading.syllables,(QVector<QStringList>{{"U"}}));
+            QCOMPARE(reading.roles[0][0],SegmentRole::Vowel);
+            QCOMPARE(reading.phones[0][0],"zh:xsampa:"+phone);
+        }
+        QCOMPARE(pronounce("v","ja",true).roles[0][0],SegmentRole::Consonant);
+        QCOMPARE(pronounce("V","en",true).roles[0][0],SegmentRole::Consonant);
+        QVERIFY(pronounce("ø","zh",true).unknown);
+        const auto mixed=pronounce("n ü t","zh",true);
+        QCOMPARE(mixed.syllables,(QVector<QStringList>{{"open","U","open"}}));
+        QCOMPARE(mixed.roles[0],(QVector<SegmentRole>{SegmentRole::Consonant,SegmentRole::Vowel,SegmentRole::Consonant}));
+        auto root=checkedJson(fixture()).object();auto track=root["tracks"].toArray()[0].toObject();
+        auto ref=track["mainRef"].toObject();ref["database"]=QJsonObject{{"language","mandarin"},{"phoneset","xsampa"}};track["mainRef"]=ref;
+        auto group=track["mainGroup"].toObject();auto notes=group["notes"].toArray();
+        for(int i=0;i<notes.size();++i){auto n=notes[i].toObject();n["phonemes"]=QStringList{"ü","v","u:","n ü t"}[i];notes[i]=n;}
+        group["notes"]=notes;track["mainGroup"]=group;root["tracks"]=QJsonArray{track};
+        Project p;p.score=parseSvp(QJsonDocument(root).toJson());p.selected={p.score.tracks[0].id};p.regenerate();
+        for(const auto &e:p.generated)QVERIFY(!e.unknown);
+        for(int i=0;i<3;++i)QCOMPARE(p.generated[i].shape,QString("U"));
+        auto edit=p.generated[0];edit.shape="O";p.edit(edit,true);p.regenerate();
+        QTemporaryDir dir;const auto path=dir.filePath("rounded.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();
+        QCOMPARE(restored.score.raw,p.score.raw);QCOMPARE(restored.overrides[edit.id].event.shape,QString("O"));
+        QCOMPARE(restored.score.tracks[0].notes[2].phonemes,QString("u:"));
+        const auto ds=QString(R"([{"offset":0.1,"language":"zh","ph_seq":"ü v u:","ph_dur":"0.2 0.3 0.4"}])").toUtf8();
+        p={};p.score=parseSource(ds,"ds");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.generated.size(),3);QVERIFY(!p.score.hasMusic);
+        for(int i=0;i<3;++i){const auto &e=p.generated[i];const auto &source=p.score.tracks[0].timedPhones[i];
+            QVERIFY(!e.unknown);QCOMPARE(e.shape,QString("U"));QCOMPARE(e.start,source.start);QCOMPARE(e.end,source.end);QCOMPARE(e.phone,source.phone);}
+        QCOMPARE(p.generated[0].start,.1);QCOMPARE(p.generated[0].end,.3);QCOMPARE(p.generated[1].end,.6);QCOMPARE(p.generated[2].end,1.);
+        saveProject(p,path);restored=loadProject(path);restored.regenerate();QCOMPARE(restored.score.raw,ds);QCOMPARE(restored.generated.size(),3);
+    }
+    void ustAliasPreset() {
+        const auto preset=addUstAliasPreset({});QCOMPARE(preset.words["ja"].size(),68);QVERIFY(!preset.japaneseKanji);
+        QCOMPARE(addUstAliasPreset(preset),preset);QVERIFY(pronunciationDictionaryBytes(preset)<DictionaryByteLimit);
+        qint64 shipped=0;for(const auto &name:QStringList{"english.tsv","japanese.tsv","chinese.tsv","presets/ust-aliases.json"}){QFile f(":/chosuta/"+name);QVERIFY(f.open(QIODevice::ReadOnly));shipped+=f.size();}QCOMPARE(builtinDictionaryBytes(),shipped);
+        PronunciationOptions custom;custom.japaneseKanji=true;custom.words["ja"]["a R"]={"cl",true};custom.words["en"]["hello"]={"UW",true};
+        auto merged=addUstAliasPreset(custom);QVERIFY(merged.japaneseKanji);QCOMPARE(merged.words["ja"]["a R"].text,QString("cl"));QCOMPARE(merged.words["en"],custom.words["en"]);
+        // Independent expectations for each alias category, including terminal consonants.
+        QCOMPARE(pronounce("a R","ja",false,{},{},preset).syllables,(QVector<QStringList>{{"rest"}}));
+        QCOMPARE(pronounce("- た弱","ja",false,{},{},preset).syllables,(QVector<QStringList>{{"open","A"}}));
+        QCOMPARE(pronounce("i オ癖F4","ja",false,{},{},preset).syllables,(QVector<QStringList>{{"O"}}));
+        QCOMPARE(pronounce("o 吸","ja",false,{},{},preset).syllables,(QVector<QStringList>{{"breath"}}));
+        QCOMPARE(pronounce("i sh","ja",false,{},{},preset).roles[0],(QVector<SegmentRole>{SegmentRole::Vowel,SegmentRole::Consonant}));
+        QVERIFY(pronounce("- た未登録","ja",false,{},{},preset).unknown);
+        QByteArray bytes="[#VERSION]\nUST Version1.2\n[#SETTING]\nTempo=120\n";int index=0;
+        const auto aliases=preset.words.value("ja");
+        for(auto word=aliases.cbegin();word!=aliases.cend();++word)
+            bytes+=QString("[#%1]\nLength=480\nNoteNum=60\nLyric=%2\n").arg(index++,4,10,QChar('0')).arg(word.key()).toUtf8();
+        bytes+="[#TRACKEND]\n";
+        Project p;p.score=parseSource(bytes,"ust");p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.generated.size(),68);for(const auto &e:p.generated){QVERIFY(e.unknown);QCOMPARE(e.provenance,QString("ust-alias-unresolved/estimated"));}
+        const auto original=p.score.tracks[0].notes;p.rules.pronunciation=preset;p.regenerate();
+        for(const auto &e:p.generated)QVERIFY2(!e.unknown,qPrintable(e.text));
+        const auto &after=p.score.tracks[0].notes;QCOMPARE(after.size(),original.size());
+        for(int i=0;i<after.size();++i){QCOMPARE(after[i].id,original[i].id);QCOMPARE(after[i].lyrics,original[i].lyrics);QCOMPARE(after[i].original,original[i].original);QCOMPARE(after[i].sourceOnset,original[i].sourceOnset);QCOMPARE(after[i].sourceDuration,original[i].sourceDuration);}
+        auto edit=p.generated[0];edit.shape="O";p.edit(edit,true);p.regenerate();QCOMPARE(p.overrides[edit.id].event.shape,QString("O"));
+        QTemporaryDir dir;const auto path=dir.filePath("aliases.chosuta");saveProject(p,path);auto restored=loadProject(path);restored.regenerate();
+        QCOMPARE(restored.score.raw,bytes);QCOMPARE(restored.rules.pronunciation,preset);QCOMPARE(restored.overrides[edit.id].event.shape,QString("O"));
+        const auto id=p.score.tracks[0].notes[1].id;p.rules.readings[id]="u";p.regenerate();
+        for(const auto &e:p.generated)if(e.source==id)QCOMPARE(e.shape,QString("U"));
+        p.rules.readings.clear();p.score.tracks[0].notes[1].phonemes="i";p.regenerate();
+        for(const auto &e:p.generated)if(e.source==id)QCOMPARE(e.shape,QString("I"));
     }
     void continuationInstances() {
         auto p=basic();auto &notes=p.score.tracks[0].notes;

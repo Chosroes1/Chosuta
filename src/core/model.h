@@ -28,6 +28,10 @@ namespace chosuta {
                 0,4,4
             }
         };
+        // Explicit source measure boundaries, including the final end. Empty for
+        // regular bar grids; MusicXML pickups/partial measures retain real time.
+        QVector<qint64> measureStarts;
+        qint64 pickupOffset=0; // Missing first-bar beats; does not add source time.
         void validate();
         double seconds(qint64 blick) const;
         qint64 blicks(double seconds) const;
@@ -45,10 +49,19 @@ namespace chosuta {
         QString lyricReading; // Derived UTAU alias reading; lyrics retain the original alias.
         qint64 sourceOnset=0, sourceDuration=0;
     };
+    // A supplied phoneme boundary is independent of notes, pitch and musical ticks.
+    struct TimedPhone {
+        QString id, groupInstance, phone, language, phoneset;
+        QString text; // Optional source mora label; phone always retains the original symbol.
+        double start=0,end=0;
+        qint64 sourceStart=0,sourceEnd=0; // LAB's original integer 100 ns positions.
+        QJsonObject original;
+    };
     struct Track {
         QString id,name;
         bool muted=false;
         QVector<Note> notes;
+        QVector<TimedPhone> timedPhones;
     };
     struct Score {
         TimeMap time;
@@ -60,9 +73,12 @@ namespace chosuta {
         double sourceOrigin=0;
         QString sourceFormat="svp", sourceVersion;
         qint64 sourceResolution=Blick, sourceTickOrigin=0, endPosition=0;
+        bool hasMusic=true;
+        double endSeconds=0;
+        double sourceDuration()const{return hasMusic?time.seconds(endPosition):endSeconds;}
     };
     using Progress=std::function<void(int)>;
-    Score importSource(const QString &path,const std::atomic_bool *cancel=nullptr,Progress progress={});
+    Score importSource(const QString &path,const std::atomic_bool *cancel=nullptr,Progress progress={},const QString &vvprojSection="auto");
     Score parseSource(QByteArray bytes,const QString &format,const QString &path={},const std::atomic_bool *cancel=nullptr,Progress progress={});
     Score importSvp(const QString &path, const std::atomic_bool *cancel=nullptr, Progress progress={});
     Score parseSvp(QByteArray bytes,const QString &path={},const std::atomic_bool *cancel=nullptr,Progress progress={});
@@ -88,6 +104,7 @@ namespace chosuta {
     qint64 builtinDictionaryBytes();
     qint64 pronunciationDictionaryBytes(const PronunciationOptions &);
     void validatePronunciationOptions(const PronunciationOptions &);
+    PronunciationOptions addUstAliasPreset(const PronunciationOptions &);
     struct Rules {
         struct Consonants {
             QMap<QString,QString> overrides; // language:phoneset:phone -> open / closed
@@ -313,6 +330,7 @@ namespace chosuta {
     QJsonObject subtitlesJson(const Project &);
     void readSubtitles(Project &,const QJsonValue &);
     QVector<Event> generate(const Project &project,const std::atomic_bool *cancel=nullptr,Progress progress={});
+    QVector<Event> generateTimedPhones(const Project &,const std::atomic_bool *,Progress);
     QVector<Event> resolveEvents(const QVector<Event> &events);
     const Event *eventAt(const QVector<Event> &events,double time,bool disjoint=false);
     enum class SegmentRole {Consonant,Vowel,Special};

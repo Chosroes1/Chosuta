@@ -59,7 +59,7 @@ void Window::showMouthSettings(const QStringList &droppedPaths){
         bool mismatch=false;for(const auto &slot:slotButtons.keys()){auto otherPath=draft.assets.value(variantAssetId(groupId,slot));if(otherPath.isEmpty())continue;QImageReader other(otherPath);if(other.size().isValid()&&other.size()!=size)mismatch=true;}
         auto entry=scan.entries.front();entry.id=variantAssetId(groupId,selected);applyAssetImport(draft,{entry});refreshSlots();imageStatus->setText(mismatch?t("Assigned; canvas sizes differ in this group.","已配图；本组画布尺寸不同，请预览人物定位。","設定済み。グループ内で画像サイズが異なります。"):t("Assigned","已配图","設定済み"));});
     connect(clear,&QPushButton::clicked,&dialog,[&]{draft.assets.remove(variantAssetId(groupId,selected));refreshSlots();});refreshGroups();
-    auto automatic=new QScrollArea;automatic->setWidgetResizable(true);auto autoContent=new QWidget;automatic->setWidget(autoContent);auto al=new QFormLayout(autoContent);pages->addTab(automatic,t("Automatic performance","自动演出","自動演出"));
+    auto automatic=new QScrollArea;automatic->setWidgetResizable(true);auto autoContent=new QWidget;automatic->setWidget(autoContent);auto al=new QFormLayout(autoContent);pages->addTab(automatic,t("Automatic performance","自动演出","自動演出"));pages->setTabEnabled(pages->indexOf(automatic),draft.score.hasMusic);
     auto settingsHint=new QLabel(t("Apply updates automatic performance immediately. Protected manual segments stay. Quarter note = 1. No audio analysis.","应用时自动更新工程演出，保留受保护人工段，可撤销；无需另点生成。四分音符=1，不分析音频。","適用時に自動演出を更新します。保護した手動区間は維持され、元に戻せます。四分音符=1。音声解析なし。"));settingsHint->setWordWrap(true);al->addRow(settingsHint);
     auto &ps=draft.performance.settings;
     auto key=new TonalitySelector(draft.performance.analysis,false,t);key->setObjectName("performanceKey");al->addRow(key);
@@ -282,7 +282,7 @@ void Window::showMouthSettings(const QStringList &droppedPaths){
     const int result=dialog.exec();scanCancel->store(true);if(watcher.isRunning())watcher.waitForFinished();mouthSettingsOpen=false;QTimer::singleShot(0,this,[this]{ensureWaveform();});if(result!=QDialog::Accepted)return;
     if(defaults->isChecked()){try{preferences.performanceSettings=draft.performance.settings;auto &rules=preferences.performanceSettings.rules;rules.erase(std::remove_if(rules.begin(),rules.end(),[](const auto &r){return r.target.startsWith("group:")||!r.track.isEmpty();}),rules.end());savePreferences(preferences);}catch(const std::exception &e){error(exceptionMessage(e));}}
     const bool mouthChanged=draft.rules.consonants!=project.rules.consonants;
-    const bool performanceChanged=draft.appearance.enabled&&!performanceCurrent(draft);
+    const bool performanceChanged=draft.score.hasMusic&&draft.appearance.enabled&&!performanceCurrent(draft);
     if(!mouthChanged&&!performanceChanged){change(actionText("Advanced variant settings"),[draft](Project &p){p=draft;});return;}
     Project next=draft;
     loadIsRegenerate=true;cancel=std::make_shared<std::atomic_bool>(false);auto token=cancel;setBusy(true);

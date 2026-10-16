@@ -31,6 +31,10 @@ namespace chosuta {
             auto m=meters[i];
             if(m.bar<0||m.bar>10000000||m.numerator<1||m.numerator>64||m.denominator<1||m.denominator>64||(m.denominator&(m.denominator-1))||(i&&m.bar==meters[i-1].bar))throw Failure("Invalid meter map");
         }
+        for(int i=0;i<measureStarts.size();++i)
+            if(measureStarts[i]<0||measureStarts[i]>MusicLimit||(!i&&measureStarts[i]!=0)||(i&&measureStarts[i]<=measureStarts[i-1]))throw Failure("Invalid source measure boundaries");
+        if(!measureStarts.isEmpty()&&meters.last().bar>=measureStarts.size())throw Failure("Invalid source measure boundaries");
+        if(pickupOffset<0||(pickupOffset&&(measureStarts.size()<2||pickupOffset>=meters.front().numerator*(Blick*4/meters.front().denominator))))throw Failure("Invalid source measure boundaries");
     }
     double TimeMap::seconds(qint64 pos) const {
         long double result=0;
@@ -60,10 +64,10 @@ namespace chosuta {
         return std::llround(pos);
     }
     QString TimeMap::beatLabel(qint64 pos)const {
-        qint64 base=0;
+        qint64 base=-pickupOffset;
         Meter current=meters.front();
         for(int i=1;i<meters.size();++i) {
-            qint64 next=base+qint64(meters[i].bar-current.bar)*current.numerator*(Blick*4/current.denominator);
+            qint64 next=measureStarts.isEmpty()?base+qint64(meters[i].bar-current.bar)*current.numerator*(Blick*4/current.denominator):measureStarts[meters[i].bar];
             if(pos<next)break;
             base=next;
             current=meters[i];
@@ -81,7 +85,7 @@ namespace chosuta {
     }
     double Project::duration()const {
         if(output.duration>0)return output.duration;
-        double d=std::max(0.,score.time.seconds(score.endPosition));
+        double d=std::max(0.,score.sourceDuration());
         for(const auto&t:score.tracks)for(const auto&n:t.notes)d=std::max(d,score.time.seconds(n.onset+n.duration));
         for(const auto&e:effective())d=std::max(d,e.end);
         d=std::max(.1,d+std::max(0.,output.syncOffset));
@@ -164,6 +168,7 @@ namespace chosuta {
         o.standalone=overrides.contains(e.id)?overrides[e.id].standalone:(e.provenance=="manual/split"||e.provenance=="manual/merge");
         if(!o.event.provenance.startsWith("manual"))o.event.provenance="manual/edit";
         o.locked=locked;
+        if(!score.hasMusic)anchor="seconds";
         o.anchor=anchor;
         if(anchor=="beats") {
             o.startBlick=score.time.blicks(e.start);

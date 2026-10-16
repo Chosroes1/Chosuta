@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original Chosuta regression fixture; no voicebank or third-party song data. -->
+<Scenario Code="7251BC4B6168E7B2992FA620BD3E1E77">
+  <Generation><Author Version="8.5.0.0"/><SVSS Version="1.0"/></Generation>
+  <Sequence><Scene Id="test">
+    <Units>
+      <Unit Id="" Category="SingerSong" Group="lead" StartTime="00:00:00" Duration="00:00:09" Language="Japanese">
+        <Song Version="1.08">
+          <Tempo><Sound Clock="0" Tempo="120"/><Sound Clock="4800" Tempo="60"/></Tempo>
+          <Beat><Time Clock="0" Beats="4" BeatType="4"/><Time Clock="7680" Beats="3" BeatType="4"/></Beat>
+          <Score>
+            <Note Clock="3840" Duration="961" PitchStep="0" PitchOctave="4" Lyric="い" Phonetic="a"/>
+            <Note Clock="4801" Duration="959" PitchStep="2" PitchOctave="4" Lyric="ー"/>
+            <Note Clock="6720" Duration="960" PitchStep="4" PitchOctave="4" Lyric="え" Phonetic="" Breath="true"/>
+            <Note Clock="7680" Duration="960" PitchStep="5" PitchOctave="4" Lyric="お"/>
+          </Score>
+          <Parameter><LogF0 Length="4"><Data Index="0" Repeat="4">6.0</Data></LogF0></Parameter>
+        </Song>
+      </Unit>
+      <Unit Id="" Category="SingerSong" Group="lead" StartTime="00:00:00.0000000" Duration="00:00:09" Language="Japanese">
+        <Song Version="1.07"><Score><Note Clock="8640" Duration="960" PitchStep="7" PitchOctave="4" Lyric="う"/></Score></Song>
+      </Unit>
+      <Unit Id="" Category="SingerSong" Group="other" StartTime="00:00:00" Duration="00:00:09" Language="English">
+        <Song Version="1.02"><Score><Note Clock="3840" Duration="960" PitchStep="0" PitchOctave="4" Lyric="bad" Phonetic="iy1"/></Score></Song>
+      </Unit>
+      <Unit Id="talk" Category="TextVocal" Group="talk"><Talk><Text>not a singing note</Text></Talk></Unit>
+    </Units>
+    <Groups>
+      <Group Id="lead" Category="SingerSong" Name="歌声" IsMuted="false" IsSolo="false"/>
+      <Group Id="other" Category="SingerSong" Name="Muted" IsMuted="true" IsSolo="false"/>
+      <Group Id="talk" Category="TextVocal" Name="Talk"/>
+    </Groups>
+  </Scene></Sequence>
+</Scenario>

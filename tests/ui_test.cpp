@@ -33,6 +33,82 @@ class UiTest:public QObject {
         qInfo().noquote()<<"UI test platform:"<<QGuiApplication::platformName()<<"font:"<<font.familyName();
     }
     void init(){setDefaultFfmpegExecutable({});Preferences p;const auto language=qEnvironmentVariable("CHOSUTA_TEST_UI_LANGUAGE");if(!language.isEmpty())p.language=language;savePreferences(p);}
+    void mxlWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.mxl");QTRY_COMPARE(w.currentProject().score.sourceFormat,QString("mxl"));QTRY_COMPARE(w.currentProject().score.tracks.size(),4);QTRY_VERIFY(!w.currentProject().generated.isEmpty());
+        auto units=w.findChild<QComboBox *>("timelineUnits");QVERIFY(units);units->setCurrentIndex(1);auto timeline=w.findChild<Timeline *>();timeline->setCursorSnap("beat");QCOMPARE(timeline->snappedCursor(4.79),4.75);
+        const auto first=w.currentProject().generated[0];timeline->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("O"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("O"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto saved=dir.filePath("歌.chosuta");saveProject(w.currentProject(),saved);Window reopened;reopened.show();reopened.openPath(saved);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.sourceFormat,QString("mxl"));QCOMPARE(reopened.currentProject().score.raw,w.currentProject().score.raw);QCOMPARE(reopened.currentProject().score.time.measureStarts,w.currentProject().score.time.measureStarts);
+    }
+    void vsqWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vsq");QTRY_COMPARE(w.currentProject().score.sourceFormat,QString("vsq"));QTRY_VERIFY(!w.currentProject().generated.isEmpty());
+        auto timeline=w.findChild<Timeline *>();const auto first=w.currentProject().generated[0];timeline->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("O"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("O"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto saved=dir.filePath("歌.chosuta");saveProject(w.currentProject(),saved);Window reopened;reopened.show();reopened.openPath(saved);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.sourceFormat,QString("vsq"));QCOMPARE(reopened.currentProject().score.raw,w.currentProject().score.raw);
+    }
+    void vprWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vpr");QTRY_COMPARE(w.currentProject().score.sourceFormat,QString("vpr"));QTRY_VERIFY(!w.currentProject().generated.isEmpty());
+        auto timeline=w.findChild<Timeline *>();const auto first=w.currentProject().generated[0];timeline->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("O"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("O"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto saved=dir.filePath("歌.chosuta");saveProject(w.currentProject(),saved);Window reopened;reopened.show();reopened.openPath(saved);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.sourceFormat,QString("vpr"));QCOMPARE(reopened.currentProject().score.raw,w.currentProject().score.raw);
+    }
+    void voicevoxSongWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vvproj");QTRY_COMPARE(w.currentProject().score.sourceFormat,QString("vvproj-song"));QTRY_VERIFY(!w.currentProject().generated.isEmpty());
+        auto timeline=w.findChild<Timeline *>();const auto first=w.currentProject().generated[0];timeline->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("O"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("O"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto saved=dir.filePath("歌.chosuta");saveProject(w.currentProject(),saved);Window reopened;reopened.show();reopened.openPath(saved);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.sourceFormat,QString("vvproj-song"));
+        QFile songFile(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.vvproj"),talkFile(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/timed.vvproj");QVERIFY(songFile.open(QIODevice::ReadOnly));QVERIFY(talkFile.open(QIODevice::ReadOnly));auto root=checkedJson(songFile.readAll()).object();root["talk"]=checkedJson(talkFile.readAll()).object()["talk"];
+        const auto mixed=dir.filePath("混合.vvproj");QFile file(mixed);QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(root).toJson());file.close();
+        Window choice;choice.show();QTimer timer;timer.setInterval(10);int dialogs=0,buttonIndex=0;
+        connect(&timer,&QTimer::timeout,&choice,[&]{auto box=choice.findChild<QMessageBox *>("vvprojSectionDialog");if(!box)return;++dialogs;timer.stop();if(buttonIndex==2)box->reject();else box->findChild<QPushButton *>(buttonIndex==0?"vvprojSong":"vvprojTalk")->click();});
+        timer.start();choice.openPath(mixed);QTRY_COMPARE(choice.currentProject().score.sourceFormat,QString("vvproj-song"));QCOMPARE(dialogs,1);
+        buttonIndex=1;timer.start();choice.openPath(mixed);QTRY_COMPARE(choice.currentProject().score.sourceFormat,QString("vvproj"));QVERIFY(!choice.currentProject().score.hasMusic);QCOMPARE(dialogs,2);
+        const auto before=choice.currentProject().score.raw;buttonIndex=2;timer.start();choice.openPath(mixed);QTRY_COMPARE(dialogs,3);QCOMPARE(choice.currentProject().score.raw,before);QCOMPARE(choice.currentProject().score.sourceFormat,QString("vvproj"));
+    }
+    void ccsWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.ccs");QTRY_COMPARE(w.currentProject().score.tracks.size(),2);QTRY_VERIFY(!w.currentProject().generated.isEmpty());
+        QCOMPARE(w.currentProject().score.sourceFormat,QString("ccs"));auto timeline=w.findChild<Timeline *>();QVERIFY(timeline);
+        const auto first=w.currentProject().generated[0];timeline->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("O"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("O"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto path=dir.filePath("歌.chosuta");saveProject(w.currentProject(),path);Window reopened;reopened.show();reopened.openPath(path);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.raw,w.currentProject().score.raw);
+    }
+    void musicXmlWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.musicxml");QTRY_COMPARE(w.currentProject().score.tracks.size(),4);QTRY_VERIFY(!w.currentProject().generated.isEmpty());
+        QCOMPARE(w.currentProject().score.sourceFormat,QString("musicxml"));auto units=w.findChild<QComboBox *>("timelineUnits");QVERIFY(units);units->setCurrentIndex(1);
+        auto timeline=w.findChild<Timeline *>();QVERIFY(timeline);timeline->setCursorSnap("beat");QCOMPARE(timeline->snappedCursor(4.79),4.75);
+        const auto first=w.currentProject().generated[0];timeline->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("O"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("O"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto path=dir.filePath("score.chosuta");saveProject(w.currentProject(),path);Window reopened;reopened.show();reopened.openPath(path);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.time.measureStarts,w.currentProject().score.time.measureStarts);
+        const auto xml=dir.filePath("譜面.xml");QVERIFY(QFile::copy(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.musicxml",xml));Window alias;alias.show();alias.openPath(xml);QTRY_COMPARE(alias.currentProject().score.tracks.size(),4);QCOMPARE(alias.currentProject().score.sourceFormat,QString("musicxml"));
+    }
+    void ustxWorkflow(){
+        QTemporaryDir dir;Window w;w.show();w.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/score.ustx");QTRY_COMPARE(w.currentProject().generated.size(),3);
+        QCOMPARE(w.currentProject().score.sourceFormat,QString("ustx"));QVERIFY(w.currentProject().score.hasMusic);
+        auto units=w.findChild<QComboBox *>("timelineUnits");QVERIFY(units);QVERIFY(qobject_cast<QStandardItemModel *>(units->model())->item(1)->isEnabled());units->setCurrentIndex(1);
+        const auto first=w.currentProject().generated[0];w.findChild<Timeline *>()->selectIds({first.id});auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("E"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("E"));
+        QAction *undo=nullptr,*redo=nullptr;for(auto a:w.findChildren<QAction *>()){if(a->shortcut()==QKeySequence(QKeySequence::Undo))undo=a;if(a->shortcut()==QKeySequence(QKeySequence::Redo))redo=a;}QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides.size(),1);
+        const auto path=dir.filePath("ustx.chosuta");saveProject(w.currentProject(),path);Window reopened;reopened.show();reopened.openPath(path);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.sourceFormat,QString("ustx"));QCOMPARE(reopened.currentProject().score.raw,w.currentProject().score.raw);
+    }
+    void timedSourceWorkflow(){
+        for(const auto &format:QStringList{"lab","ds","vvproj"}){
+            QTemporaryDir dir;Window w;w.show();const auto source=QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/timed."+format;
+            w.openPath(source,format=="vvproj"?"talk":"auto");QTRY_VERIFY(!w.currentProject().generated.isEmpty());QVERIFY(!w.currentProject().score.hasMusic);
+            auto units=w.findChild<QComboBox *>("timelineUnits");QVERIFY(units);QCOMPARE(units->currentIndex(),0);QVERIFY(!qobject_cast<QStandardItemModel *>(units->model())->item(1)->isEnabled());
+            auto timeline=w.findChild<Timeline *>();auto first=w.currentProject().generated[1];timeline->selectIds({first.id});
+            auto anchor=w.findChild<QComboBox *>("eventAnchor");QCOMPARE(anchor->currentData().toString(),QString("seconds"));QVERIFY(!qobject_cast<QStandardItemModel *>(anchor->model())->item(1)->isEnabled());
+            auto shapes=w.findChild<QComboBox *>("eventShape");shapes->setCurrentIndex(shapes->findData("E"));w.findChild<QPushButton *>("apply")->click();QCOMPARE(w.currentProject().overrides[first.id].event.shape,QString("E"));
+            QAction *undo=nullptr,*redo=nullptr;for(auto action:w.findChildren<QAction *>()){if(action->shortcut()==QKeySequence(QKeySequence::Undo))undo=action;if(action->shortcut()==QKeySequence(QKeySequence::Redo))redo=action;}
+            QVERIFY(undo&&redo);undo->trigger();QVERIFY(w.currentProject().overrides.isEmpty());redo->trigger();QCOMPARE(w.currentProject().overrides[first.id].anchor,QString("seconds"));
+            const auto path=dir.filePath("timed.chosuta");saveProject(w.currentProject(),path);Window reopened;reopened.show();reopened.openPath(path);QTRY_COMPARE(reopened.currentProject().overrides.size(),1);QCOMPARE(reopened.currentProject().score.sourceFormat,format);
+            auto advanced=reopened.findChild<QCheckBox *>("advancedMouthEnabled");QVERIFY(advanced);advanced->setChecked(true);
+            auto performanceAnchor=reopened.findChild<QComboBox *>("performanceAnchor");QVERIFY(performanceAnchor);QCOMPARE(performanceAnchor->currentData().toString(),QString("seconds"));
+            auto generate=reopened.findChild<QPushButton *>("generatePerformance");QVERIFY(generate);QVERIFY(!generate->isEnabled());
+            auto a=reopened.findChild<QDoubleSpinBox *>("performanceStart"),b=reopened.findChild<QDoubleSpinBox *>("performanceEnd");QVERIFY(a&&b);a->setValue(.1);b->setValue(.6);reopened.findChild<QPushButton *>("applyPerformance")->click();QCOMPARE(reopened.currentProject().performance.manual.size(),1);QCOMPARE(reopened.currentProject().performance.manual[0].anchor,QString("seconds"));
+            reopened.findChild<QCheckBox *>("subtitlesEnabled")->setChecked(true);QVERIFY(reopened.currentProject().subtitlesEnabled);
+            // Switching back to a score restores music-dependent controls.
+            reopened.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_VERIFY(reopened.currentProject().score.hasMusic);QVERIFY(qobject_cast<QStandardItemModel *>(reopened.findChild<QComboBox *>("timelineUnits")->model())->item(1)->isEnabled());
+        }
+    }
     void localizedControlsAndErrors(){
         for(const auto &language:QStringList{"zh","en","ja"}){
             auto prefs=loadPreferences();prefs.language=language;savePreferences(prefs);Window w;w.show();
@@ -49,6 +125,7 @@ class UiTest:public QObject {
         }
         const auto message=Message::format("Missing audio: %1",{"名前 %2 <A>"}).withDetail("external stderr");
         QVERIFY(messageText("zh",message,false).contains("名前 %2 <A>"));QVERIFY(!messageText("zh",message,false).contains("external stderr"));QCOMPARE(messageDetails("zh",message),QString("external stderr"));
+        for(const auto &key:QStringList{"Cannot read VSQ data","Unsupported VSQ version","Not a VSQ MIDI project","VSQ requires type 1 MIDI with PPQ timing","No VSQ singing data found","VSQ event type retained without interpretation: %1","Additional VSQ lyric entries are retained; only L0 is interpreted","VSQ note before the source origin was clipped to the playback range","VSQ timing uses notes and explicit phonemes, not rendered phoneme boundaries"}){auto translated=Message::format(key.toUtf8().constData(),{"unknown-event"}).withDetail("CP932 original detail");for(const auto &lang:QStringList{"zh","ja"}){auto text=messageText(lang,translated,false);QVERIFY(text!=key);QVERIFY(!text.contains("Operation failed"));QCOMPARE(messageDetails(lang,translated),QString("CP932 original detail"));}}
         Message unknown("Unrecognized future diagnostic");QCOMPARE(messageDetails("ja",unknown),unknown.text());QVERIFY(messageText("ja",unknown).contains(unknown.key));
     }
     void localizedIdsAndUndo(){
@@ -255,6 +332,31 @@ class UiTest:public QObject {
             QTimer::singleShot(0,&window,[&]{auto dialog=window.findChild<QDialog*>("advancedSettingsDialog");dialog->grab().save(qEnvironmentVariable("CHOSUTA_ADVANCED_SCREENSHOT"));dialog->reject();});
             window.findChild<QAction*>("advancedSettingsAction")->trigger();
         }
+    }
+    void ustAliasPresetWorkflow() {
+        QTemporaryDir dir;const auto path=dir.filePath("aliases.ust");QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QString("[#VERSION]\nUST Version1.2\n[#SETTING]\nTempo=120\n[#0000]\nLength=480\nLyric=a R\nNoteNum=60\n[#0001]\nLength=480\nLyric=- た弱\nNoteNum=62\n[#TRACKEND]\n").toUtf8());file.close();
+        Window w;w.show();w.openPath(path);QTRY_COMPARE(w.currentProject().generated.size(),2);QVERIFY(w.currentProject().generated[0].unknown);
+        const auto defaults=loadPreferences();
+        auto configure=[&](bool save){QTimer::singleShot(0,&w,[&,save]{
+            auto d=w.findChild<QDialog*>("advancedSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{d->reject();});
+            auto add=d->findChild<QPushButton*>("dictionaryUstPreset");QVERIFY(add);QVERIFY(add->isEnabled());
+            auto table=d->findChild<QTableWidget*>("dictionaryTable");
+            if(table->rowCount()==0){d->findChild<QPushButton*>("dictionaryAdd")->click();table->item(0,0)->setData(Qt::UserRole,"ja");table->item(0,1)->setText("a R");table->item(0,2)->setData(Qt::UserRole,"phonemes");table->item(0,3)->setText("cl");}
+            add->click();QCOMPARE(table->rowCount(),68);add->click();QCOMPARE(table->rowCount(),68);
+            bool found=false;for(int i=0;i<table->rowCount();++i)if(table->item(i,1)->text()=="a R"){found=true;QCOMPARE(table->item(i,3)->text(),QString("cl"));}QVERIFY(found);
+            QVERIFY(!d->findChild<QCheckBox*>("japaneseKanji")->isChecked());QVERIFY(!d->findChild<QCheckBox*>("dictionaryDefaults")->isChecked());
+            d->findChild<QDialogButtonBox*>("advancedSettingsButtons")->button(save?QDialogButtonBox::Save:QDialogButtonBox::Cancel)->click();
+        });w.findChild<QAction*>("advancedSettingsAction")->trigger();};
+        configure(false);QVERIFY(w.currentProject().rules.pronunciation.words.isEmpty());
+        configure(true);QCOMPARE(w.currentProject().rules.pronunciation.words["ja"].size(),68);QCOMPARE(loadPreferences().pronunciation,defaults.pronunciation);
+        w.findChild<QPushButton*>("generate")->click();QTRY_VERIFY(!w.currentProject().generated[0].unknown);
+        QCOMPARE(w.currentProject().generated[0].shape,QString("closed"));for(const auto &e:w.currentProject().generated)QVERIFY(!e.unknown);
+        const auto saved=dir.filePath("aliases.chosuta");saveProject(w.currentProject(),saved);Window restored;restored.openPath(saved);QTRY_COMPARE(restored.currentProject().rules.pronunciation,w.currentProject().rules.pronunciation);
+        Window other;other.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(other.currentProject().generated.size(),4);
+        QTimer::singleShot(0,&other,[&]{auto d=other.findChild<QDialog*>("advancedSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{d->reject();});QVERIFY(!d->findChild<QPushButton*>("dictionaryUstPreset")->isEnabled());});
+        other.findChild<QAction*>("advancedSettingsAction")->trigger();
+        for(const auto &language:QStringList{"zh","ja"}){const auto message=messageText(language,Message::format("Unmapped UST alias: %1. Add an alias preset or correct its reading.",{"a R"}));QVERIFY(message.contains("a R"));QVERIFY(!message.contains("Unmapped"));}
     }
     void canvasAndFollow() {
         Window window;window.show();window.openPath(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QTRY_COMPARE(window.currentProject().generated.size(),4);

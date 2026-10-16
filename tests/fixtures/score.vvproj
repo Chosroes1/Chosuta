@@ -1,0 +1,26 @@
+{
+  "appVersion": "0.25.1",
+  "talk": {"audioKeys": [], "audioItems": {}},
+  "song": {
+    "tpqn": 960,
+    "tempos": [{"position": 0, "bpm": 120}, {"position": 960, "bpm": 60}],
+    "timeSignatures": [{"measureNumber": 1, "beats": 4, "beatType": 4}, {"measureNumber": 2, "beats": 3, "beatType": 4}],
+    "tracks": {
+      "a": {"name": "Muted", "notes": [{"id": "same", "position": 0, "duration": 960, "noteNumber": 72, "lyric": "い"}], "solo": false, "mute": true, "gain": 1, "pan": 0, "keyRangeAdjustment": 0, "volumeRangeAdjustment": 0, "pitchEditData": [], "volumeEditData": [], "phonemeTimingEditData": {}},
+      "z": {
+        "name": "歌声",
+        "singer": {"engineId": "074fc39e-678b-4c13-8916-ffca8d505d1d", "styleId": 3003},
+        "keyRangeAdjustment": -2, "volumeRangeAdjustment": 0, "solo": false, "mute": false, "gain": 1, "pan": 0,
+        "notes": [
+          {"id": "same", "position": 0, "duration": 961, "noteNumber": 60, "lyric": "あ"},
+          {"id": "extended", "position": 961, "duration": 959, "noteNumber": 62, "lyric": "ー"},
+          {"id": "gap", "position": 2880, "duration": 960, "noteNumber": 64, "lyric": "ー"},
+          {"id": "end", "position": 3840, "duration": 960, "noteNumber": 65, "lyric": "え"}
+        ],
+        "pitchEditData": [-1, 440], "volumeEditData": [0.8],
+        "phonemeTimingEditData": {"same": [{"phonemeIndexInNote": 0, "offsetSeconds": -0.03}]}
+      }
+    },
+    "trackOrder": ["z", "a"]
+  }
+}

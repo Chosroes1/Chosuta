@@ -4,6 +4,24 @@
 #include <cmath>
 #include <set>
 namespace chosuta {
+QVector<TimedSourceSlice> routeTimedSources(const Project &p,const std::atomic_bool *cancel){
+    struct Source{const TimedPhone *phone;QString track;int priority,order;};QVector<Source> sources;
+    struct Edge{double at;int source;bool start;};QVector<Edge> edges;int primary=-1;
+    for(int ti=0;ti<p.score.tracks.size();++ti){const auto &t=p.score.tracks[ti];if(t.muted||!p.selected.contains(t.id))continue;
+        if(primary<0||p.priorities.value(t.id,ti)<p.priorities.value(p.score.tracks[primary].id,primary))primary=ti;
+        for(const auto &phone:t.timedPhones){if(cancel&&cancel->load())throw Failure("Cancelled");if(phone.end<=phone.start)continue;
+            int i=sources.size();sources.append({&phone,t.id,p.priorities.value(t.id,ti),ti});edges.append({phone.start,i,true});edges.append({phone.end,i,false});}}
+    std::sort(edges.begin(),edges.end(),[](auto a,auto b){return a.at==b.at?a.start<b.start:a.at<b.at;});
+    auto less=[&](int a,int b){const auto &x=sources[a],&y=sources[b];if(x.priority!=y.priority)return x.priority<y.priority;if(x.order!=y.order)return x.order<y.order;if(x.phone->start!=y.phone->start)return x.phone->start>y.phone->start;return x.phone->id==y.phone->id?a<b:x.phone->id<y.phone->id;};
+    std::set<int,decltype(less)> active(less);QVector<TimedSourceSlice> out;
+    for(int i=0;i<edges.size();){if(cancel&&cancel->load())throw Failure("Cancelled");double at=edges[i].at;
+        while(i<edges.size()&&edges[i].at==at){auto edge=edges[i++];if(edge.start)active.insert(edge.source);else active.erase(edge.source);}
+        if(i==edges.size()||active.empty())continue;
+        const auto &s=sources[*active.begin()];if(!p.rules.harmonyTakeover&&s.order!=primary)continue;
+        if(!out.isEmpty()&&out.back().source==s.phone->id&&out.back().end==at)out.back().end=edges[i].at;
+        else out.append({s.phone->id,s.track,at,edges[i].at});
+    }return out;
+}
 QVector<SourceSlice> routeSources(const Project &p,const std::atomic_bool *cancel){
     struct Source{const Note *note;QString track;int priority,order;};QVector<Source> sources;
     struct Edge{qint64 at;int source;bool start;};QVector<Edge> edges;

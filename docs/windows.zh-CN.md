@@ -1,6 +1,6 @@
 # Windows 编译、部署与验证
 
-当前源码版本 **0.10.0**。Windows 脚本仅负责配置、编译、部署及可选 ZIP，不构建/运行测试，也不自动启动 GUI/CLI 验收窗口。使用 `BUILD_TESTING=OFF`，复用旧 BuildDir 时同样更新该配置。
+当前源码版本 **1.0.0**。Windows 脚本仅负责配置、编译、部署及可选 ZIP，不构建/运行测试，也不自动启动 GUI/CLI 验收窗口。使用 `BUILD_TESTING=OFF`，复用旧 BuildDir 时同样更新该配置。
 
 ## 所需已有环境
 
@@ -12,20 +12,20 @@
 - MSVC 构建机器已有官方 **Visual C++ x64 Redistributable**。脚本不会安装它，也不会从 Visual Studio 目录随意复制编译器 DLL；目标机器运行应用需要该运行库。MinGW 使用 windeployqt 部署其对应运行库。
 - FFmpeg/ffprobe 可选。没有音频和编码工具也可运行、导入、预览、编辑与保存；完整视频回归需 libx264、libvpx-vp9、qtrle、AAC/libopus。可在导出设置中指定现有 FFmpeg，或用脚本参数 `-FfmpegDir` 指定现有工具的 `bin` 目录以一起复制。
 
-默认只使用本机已有组件；仅显式传 `-DownloadFfmpeg` 才下载 BtbN。脚本不安装 Qt/ICU/编译器或修改系统配置。Qt 部署使用 [官方 windeployqt 流程](https://doc.qt.io/qt-6.8/windows-deployment.html)；额外复制应用直接依赖的 ICU，因为 windeployqt 不负责收集所有非 Qt 第三方库。ICU 的定位使用 [CMake FindICU](https://cmake.org/cmake/help/latest/module/FindICU.html)。
+默认不联网。VPR的MiniZip/zlib使用完整zlib 1.3.2源码，通过`-ZlibSourceDir`指定；USTX的LibYAML 0.2.5可通过 `-LibYamlSourceDir` 指向已有完整源码，或显式 `-DownloadDependencies` 获取固定官方发布归档并校验SHA-256；使用既有C/C++工具链静态编译，不安装其他SDK。`-DownloadFfmpeg` 独立控制BtbN下载。脚本不安装 Qt/ICU/编译器或修改系统配置。Qt 部署使用 [官方 windeployqt 流程](https://doc.qt.io/qt-6.8/windows-deployment.html)；额外复制应用直接依赖的 ICU，因为 windeployqt 不负责收集所有非 Qt 第三方库。ICU 的定位使用 [CMake FindICU](https://cmake.org/cmake/help/latest/module/FindICU.html)。
 
 ## 一条命令完成构建和部署
 
 把源码包解压到自己拥有的目录，在该目录启动已配置编译器的 PowerShell，将两个占位参数替换为实际 SDK 路径：
 
 ```powershell
-.\scripts\build-windows.ps1 -QtPrefix '<Qt x64 SDK 前缀>' -IcuPrefix '<ICU x64 SDK 前缀>'
+.\scripts\build-windows.ps1 -QtPrefix '<Qt x64 SDK 前缀>' -IcuPrefix '<ICU x64 SDK 前缀>' -DownloadDependencies
 ```
 
 MinGW：
 
 ```powershell
-.\scripts\build-windows.ps1 -Toolchain MinGW -QtPrefix '<Qt MinGW x64 SDK 前缀>' -IcuPrefix '<匹配的 ICU SDK 前缀>'
+.\scripts\build-windows.ps1 -Toolchain MinGW -QtPrefix '<Qt MinGW x64 SDK 前缀>' -IcuPrefix '<匹配的 ICU SDK 前缀>' -DownloadDependencies
 ```
 
 自定义运行库/FFmpeg/输出目录：
@@ -34,6 +34,7 @@ MinGW：
 .\scripts\build-windows.ps1 `
   -QtPrefix '<Qt x64 SDK 前缀>' `
   -IcuPrefix '<ICU x64 SDK 前缀>' `
+  -DownloadDependencies `
   -IcuRuntimeDir '<ICU DLL 目录>' `
   -FfmpegDir '<已安装的 FFmpeg bin 目录>' `
   -BuildDir 'build-windows' `
@@ -42,7 +43,13 @@ MinGW：
 
 相对构建/输出路径按**源码根目录**解析，不依赖当前工作目录；支持空格和 Unicode。默认使用 Ninja/Release，关闭 BUILD_TESTING；编译或部署失败会报告实际失败步骤，成功后显示 Built。
 
-编译器路径由脚本每次运行时从当前终端动态查找，不包含个人电脑路径。配置和编译沿用这次找到的完整路径，并优先使用其所在目录和原有 PATH；Qt/ICU 的 bin 目录追加在后，FFmpeg 目录在部署阶段才加入。结束时恢复原进程环境，不修改永久 PATH。此调整用于避免脚本添加的运行库路径干扰编译器及其配套工具的选择，C1902 是否解决仍需 Windows 实测。
+编译器路径由脚本每次运行时从当前终端动态查找，不包含个人电脑路径。CMake、Ninja和编译器均在修改PATH前解析为完整路径；配置、编译、安装固定调用该CMake，CMAKE_MAKE_PROGRAM固定为该Ninja。配置和编译优先使用编译器所在目录和原有 PATH；Qt/ICU 的 bin 目录追加在后，FFmpeg 目录在部署阶段才加入。结束时恢复原进程环境，不修改永久 PATH。此调整用于避免脚本添加的运行库路径干扰编译器及其配套工具的选择，用户已确认采用该调整后的脚本构建成功；具体冲突的PDB组件没有加载记录。
+
+## USTX的LibYAML依赖
+
+以上例子显式启用 `-DownloadDependencies`，获取MIT LibYAML 0.2.5及含MiniZip的zlib 1.3.2两份源码归档到BuildDir下的 `_deps`；固定URL与SHA-256见 `cmake/LibYaml.cmake` 与 `cmake/Zip.cmake`。已有该BuildDir缓存时复用；下载失败会报告错误，不改用其他安装路线。离线构建同时指定`-ZlibSourceDir '<完整zlib 1.3.2源码目录>'`，并将下载参数换成 `-LibYamlSourceDir '<完整LibYAML 0.2.5源码目录>'`，目录应含include/yaml.h、src、CMakeLists.txt及License。
+
+静态编译使用当前MSVC cl.exe或与MinGW g++.exe同目录的gcc.exe，不下载编译器。部署不增加YAML DLL，完整实际源码附在根下 `dependency-sources/libyaml-0.2.5/`，MIT文本随share下许可目录安装；运行字节统计单独排除该源码目录。CMake构建记录含libyamlProvider。当前Linux已验证系统LibYAML路线。本轮复查官方版本与构建配置后，各尝试下载一次LibYAML/zlib仍遇DNS错误，实际下载0字节；没有安装工具或改用其他来源。真实源码静态编译与Windows1.0.0构建/部署仍需原生验证。
 
 ## 自动下载 BtbN（显式启用）
 
@@ -50,11 +57,12 @@ MinGW：
 .\scripts\build-windows.ps1 `
   -QtPrefix '<Qt x64 SDK 前缀>' `
   -IcuPrefix '<ICU x64 SDK 前缀>' `
+  -DownloadDependencies `
   -DownloadFfmpeg -BothVariants -CreateZip `
   -StageDir 'out/windows/Chosuta-auto'
 ```
 
-自动取得 BtbN 官方 **win64 GPL shared** 的 ffmpeg、ffprobe 和共享 DLL。默认使用 `latest` 发布标签，优先其中编号稳定分支，不再限定 9.0 或日期标签。`-FfmpegRelease` 可指定其他实际发布标签。
+应用编译成功后才自动取得 BtbN 官方 **win64 GPL shared** 的 ffmpeg、ffprobe 和共享 DLL。默认使用 `latest` 发布标签，优先其中编号稳定分支，不再限定 9.0 或日期标签。`-FfmpegRelease` 可指定其他实际发布标签。
 
 缓存默认位于 `out/deps/btbn/`，`-FfmpegCacheDir` 可指定路径。首次下载校验上游 SHA-256 后使用系统 ZIP 库解包；解包后删除本次下载的原 ZIP，保留工具、许可证、来源和校验清单。已有缓存直接离线复用，不逐文件重算哈希、不禁止符号链接或目录嵌套。显式标签不会改变已有默认缓存选择。已有旧缓存中的原 ZIP 不会自动删除。
 
@@ -72,22 +80,23 @@ MinGW：
 .\scripts\build-windows.ps1 `
   -QtPrefix '<Qt x64 SDK 前缀>' `
   -IcuPrefix '<ICU x64 SDK 前缀>' `
+  -DownloadDependencies `
   -FfmpegDir '<BtbN GPL shared 的 bin 目录>' `
   -BothVariants -CreateZip `
-  -StageDir 'out/windows/Chosuta-0.9.3'
+  -StageDir 'out/windows/Chosuta-1.0.0'
 ```
 
 只编译一次，再各自部署两种目录；部署完成后压缩：
 
-- `out/windows/Chosuta-0.9.3/` 和 `.zip`：附带外部工具。
-- `out/windows/Chosuta-0.9.3-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
+- `out/windows/Chosuta-1.0.0/` 和 `.zip`：附带外部工具。
+- `out/windows/Chosuta-1.0.0-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
 
 `-BothVariants` 必须与 `-FfmpegDir` 或 `-DownloadFfmpeg` 一起用；不传 `-CreateZip` 只生成目录。只要 no-ffmpeg 版时，省略 `-FfmpegDir`／`-DownloadFfmpeg`／`-BothVariants`，直接把 `-StageDir` 命名为所需的 no-ffmpeg 名称。目录必须为空，ZIP 必须不存在，不覆盖原产物。
 
 no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.exe`，同目录保留 `ffprobe.exe` 和该构建的共享 DLL，然后“检测媒体工具”，确定保存。检测报告显示实际工具路径、版本及缺失能力；这不能替代实际导出和剪辑软件导入验收。命令行也可检查：
 
 ```powershell
-.\out\windows\Chosuta-0.9.3-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
+.\out\windows\Chosuta-1.0.0-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
 ```
 
 如果手动从完整版复制出 no-ffmpeg 目录，删的是副本中的整个 `tools/ffmpeg/`，而不是只删两个 EXE，更不能删除部署根目录中的 Qt DLL。手动修改会令原来的文件与体积清单过时，正式交付建议直接使用双版本脚本。
@@ -113,11 +122,11 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 .\out\windows\Chosuta\chosuta-cli.exe --version
 ```
 
-从本轮根目录构建得到的 GUI/CLI 直接位于部署目录顶层，无需进入 bin 子目录，也不添加转发启动器。旧包保持原布局，应按其随附 RUN 说明启动。
+当前构建得到的 GUI/CLI 直接位于部署目录顶层，无需进入 bin 子目录，也不添加转发启动器。旧包保持原布局，应按其随附 RUN 说明启动。
 
 必须保留整个 `Chosuta` 目录，不能只拿走 EXE。目录内有 Qt DLL、平台/图像/媒体插件、ICU DLL、`qt.conf`、应用许可与操作说明。GUI 使用 Windows 子系统，启动不附带控制台；CLI 保留控制台输出。
 
-0.9.3 将附带的外部命令行工具放在 `tools/ffmpeg/`，与 Qt 的媒体 DLL 分开。查找顺序为工程路径 → 本机默认 → `tools/ffmpeg/` → 应用 EXE 同目录 → PATH；明确指定的错误路径不会静默换用其他 FFmpeg。ffprobe 先查所选 FFmpeg 同目录，再查附带工具、应用目录、PATH。导出设置提供本机默认路径、工程路径、浏览及后台检测。
+附带的外部命令行工具放在 `tools/ffmpeg/`，与 Qt 的媒体 DLL 分开。查找顺序为工程路径 → 本机默认 → `tools/ffmpeg/` → 应用 EXE 同目录 → PATH；明确指定的错误路径不会静默换用其他 FFmpeg。ffprobe 先查所选 FFmpeg 同目录，再查附带工具、应用目录、PATH。导出设置提供本机默认路径、工程路径、浏览及后台检测。
 
 缺少外部 FFmpeg 时视频导出、波形解码和重新进行波形时间校正不可用；工程生成、编辑、保存仍可用。ffprobe 缺失时音频时长需手动设置。试听依赖 Qt Multimedia，no-ffmpeg 版也必须保留 windeployqt 部署的 Qt 媒体 DLL／插件。
 
@@ -125,7 +134,7 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 
 1. 检查现有 SDK、编译器与 Windows x64 目标，配置 C++20、Qt、ICU 和 `BUILD_TESTING=OFF`。
 2. 编译 GUI/CLI，用 CMake 安装到部署根目录，windeployqt 复制 Qt 依赖，补充 ICU 与 qt.conf。
-3. 选择 `-DownloadFfmpeg` 时取得 BtbN 并校验 SHA-256；选择本地工具时直接使用指定 bin。保留 ffmpeg/ffprobe 的版本与 nonfree 分发配置检查；两工具及 DLL 放在 tools/ffmpeg。
+3. 应用编译成功后，选择 `-DownloadFfmpeg` 时才取得 BtbN 并校验 SHA-256；选择本地工具时直接使用指定 bin。保留 ffmpeg/ffprobe 的版本与 nonfree 分发配置检查；两工具及 DLL 放在 tools/ffmpeg。
 4. 写入版本、来源、文件大小和许可证记录；清单中的测试/启动检查状态明确为未运行。不会启动 Chosuta、调用 CTest 或复制旧测试日志冒充本次结果。
 5. 按 `-CreateZip` 压缩。完成显示 Built；进程环境在结束时恢复。
 
@@ -133,7 +142,7 @@ no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.ex
 
 失败时查看终端报告的配置、编译、下载或部署步骤。Qt/ICU/编译器架构与 ABI 需匹配。编译产物和测试结论分别记录，自动测试不再构成本地打包门槛。
 
-应用采用 GPL-3.0-or-later；第三方版本、原有许可及对应源码说明见 [第三方清单](../THIRD_PARTY_NOTICES.md)。本轮只交付源码，未生成新的 Windows 二进制包，也未替换旧 Release。
+应用采用 GPL-3.0-or-later；第三方版本、原有许可及对应源码说明见 [第三方清单](../THIRD_PARTY_NOTICES.md)。用户已确认Windows构建成功；本地Release目录提供Windows脚本调整源码，没有agent生成的Windows成品或部署/ZIP验收记录。
 
 ## 应用图标与目录布局
 
@@ -156,4 +165,8 @@ Chosuta/
 
 CMake只对Windows将应用安装到前缀根目录，Linux继续使用bin。构建脚本的部署、RUN说明和清单均指向根chosuta.exe；媒体工具仍相对程序目录查找。MSVC的`/utf-8`限定为C++编译，不传给RC；ICO路径通过资源包含目录传递，避免把本机绝对路径或Unicode目录写进RC字符串。
 
-本轮Linux下用已有llvm-rc/llvm-cvtres检查了7张图层及图标组资源，不能替代Windows完整链接、资源管理器显示或PowerShell部署验证。
+Windows构建已由用户确认；资源管理器显示、实际GUI交互及部署ZIP的验收结果分别记录。
+
+VPR/MXL使用传统MiniZip/zlib。静态源码仅编MiniZip读取、zlib inflate及校验部分，NOUNCRYPT，不编写入或其他算法/工具；完整实际源码安装至dependency-sources/zlib-1.3.2，许可随share/chosuta/licenses部署，build-info含zipProvider。固定版本/校验值与来源按[第三方清单](../THIRD_PARTY_NOTICES.md)保留。旧VSQ复用Qt和ICU，不新增SDK或开关。
+
+本次完成脚本/依赖审查，固定构建工具路径，并将可选FFmpeg下载延后至编译成功。本机没有PowerShell、Windows Qt/ICU SDK或macOS SDK；Linux构建、默认离线配置及打包夹具通过，不代替Windows原生编译、DLL部署或ZIP验收。此前用户Windows成功反馈为0.10.0，不能自动延伸为当前1.0.0验收。

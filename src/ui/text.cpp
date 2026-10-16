@@ -9,7 +9,7 @@ namespace chosuta {
             const char*ja;
         };
         static const Entry entries[]= {
-            {"Scores / Chosuta (*.svp *.ust *.vsqx *.chosuta)","乐谱 / Chosuta (*.svp *.ust *.vsqx *.chosuta)","楽譜 / Chosuta (*.svp *.ust *.vsqx *.chosuta)"},
+            {"Sources / Chosuta (*.svp *.ust *.ustx *.vsq *.vsqx *.musicxml *.xml *.mxl *.ccs *.vpr *.lab *.ds *.vvproj *.chosuta)","来源 / Chosuta (*.svp *.ust *.ustx *.vsq *.vsqx *.musicxml *.xml *.mxl *.ccs *.vpr *.lab *.ds *.vvproj *.chosuta)","ソース / Chosuta (*.svp *.ust *.ustx *.vsq *.vsqx *.musicxml *.xml *.mxl *.ccs *.vpr *.lab *.ds *.vvproj *.chosuta)"},
             {"Default FFmpeg (this computer)","默认 FFmpeg（本机）","既定の FFmpeg（このPC）"},
             {"Override for this project","为本工程单独指定","このプロジェクトで個別指定"},
             {"Browse…","浏览…","参照…"},
@@ -83,6 +83,8 @@ namespace chosuta {
             {"Lyric source missing; subtitle text and timing were retained.","歌词来源缺失；已保留字幕文字及时间。","参照歌詞がありません。字幕の文字と時間は保持されています。"},
             {"No nearby lyric; kept the manual interval.","附近无可对齐歌词；保留手动区间。","近くに対応する歌詞がありません。手動の区間を保持します。"},
             {"Advanced settings","高级设置","詳細設定"},
+            {"Add UST alias preset","添加 UST 别名预设","UST エイリアスプリセットを追加"},
+            {"Add editable aliases to this UST project, keeping existing entries. Save and regenerate to apply.","向当前 UST 工程添加可编辑的别名，保留已有词条。保存并重新生成后生效。","現在の UST プロジェクトに編集可能なエイリアスを追加します。既存の項目は保持します。保存して再生成すると適用されます。"},
             {"Language","语言","言語"},
             {"Word / phrase","词 / 词组","単語 / 語句"},
             {"Notation","读音格式","読みの形式"},

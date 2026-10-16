@@ -40,6 +40,7 @@ namespace chosuta {
     void Timeline::setProject(const Project&p,std::shared_ptr<const Evaluation> view) {
         cancelLaneResize();
         evaluation=view?std::move(view):std::make_shared<Evaluation>(p);project=p;appearance=std::make_unique<AppearanceResolver>(evaluation->appearance);performance=evaluation->performance;performanceDrag=false;performanceMarks.clear();QSet<QString> marks;for(const auto &m:p.performance.suggestions)marks.insert(m.source);for(const auto &track:p.score.tracks)for(const auto &note:track.notes)if(marks.contains(note.id))performanceMarks.append(performance->mappedBlick(note.onset,track.id));
+        if(!p.score.hasMusic)beats=false;
         beforeSubtitle.reset();dragging.clear();rulerDragging=false;
         for(auto it=laneHeights.begin();it!=laneHeights.end();) {bool found=false;for(const auto&t:p.subtitles)if(t.id==it.key())found=true;if(!found)it=laneHeights.erase(it);else ++it;}
         events=evaluation->events;
@@ -47,6 +48,7 @@ namespace chosuta {
         for(const auto &track:p.score.tracks)if(p.selected.contains(track.id))for(const auto &span:lyricSpans(p,track.id)){
             for(double t:{performance->mappedBlick(span.start,track.id),performance->mappedBlick(span.end,track.id,true)})if(t>=0&&t<=21600)syllableEdges.append(t);
         }
+        if(!p.score.hasMusic)for(const auto &e:events)for(double t:{e.start+p.output.syncOffset,e.end+p.output.syncOffset})if(t>=0&&t<=21600)syllableEdges.append(t);
         std::sort(syllableEdges.begin(),syllableEdges.end());syllableEdges.erase(std::unique(syllableEdges.begin(),syllableEdges.end()),syllableEdges.end());
 
         lyrics.clear();intervals.clear();availableSources.clear();
@@ -57,7 +59,7 @@ namespace chosuta {
         update();
     }
     void Timeline::setBeats(bool b) {
-        beats=b;
+        beats=b&&project.score.hasMusic;
         updateExtent();
         update();
     }
@@ -81,9 +83,10 @@ namespace chosuta {
             for(auto candidate:{it==syllableEdges.cend()?-1.:*it,it==syllableEdges.cbegin()?-1.:*(it-1)})if(candidate>=0&&std::abs(candidate-seconds)<distance){best=candidate;distance=std::abs(candidate-seconds);}
             return best;
         }
+        if(!project.score.hasMusic)return seconds;
         const auto tick=project.score.time.blicks(seconds-project.output.syncOffset);
-        qint64 base=0,nextBase=MusicLimit;auto meter=project.score.time.meters.front();
-        for(int i=1;i<project.score.time.meters.size();++i){auto next=project.score.time.meters[i];auto at=base+qint64(next.bar-meter.bar)*meter.numerator*(Blick*4/meter.denominator);if(at>tick){nextBase=at;break;}base=at;meter=next;}
+        qint64 base=-project.score.time.pickupOffset,nextBase=MusicLimit;auto meter=project.score.time.meters.front();
+        for(int i=1;i<project.score.time.meters.size();++i){auto next=project.score.time.meters[i];auto at=project.score.time.measureStarts.isEmpty()?base+qint64(next.bar-meter.bar)*meter.numerator*(Blick*4/meter.denominator):project.score.time.measureStarts[next.bar];if(at>tick){nextBase=at;break;}base=at;meter=next;}
         const qint64 unit=Blick*4/meter.denominator;
         auto nearest=base+qint64(std::llround(double(tick-base)/unit))*unit;
         nearest=std::min(nearest,nextBase);

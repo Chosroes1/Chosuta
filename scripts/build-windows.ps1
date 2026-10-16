@@ -9,6 +9,9 @@ param(
     [string]$IcuRuntimeDir = '',
     [string]$FfmpegDir = '',
     [switch]$DownloadFfmpeg,
+    [switch]$DownloadDependencies,
+    [string]$LibYamlSourceDir = '',
+    [string]$ZlibSourceDir = '',
     [string]$FfmpegCacheDir = 'out/deps/btbn',
     [string]$FfmpegRelease = '',
     [switch]$BothVariants,
@@ -79,7 +82,8 @@ $DeployTool = Join-Path $QtBin 'windeployqt.exe'
 Require-File $DeployTool
 Require-File (Join-Path $QtPrefix 'lib/cmake/Qt6/Qt6Config.cmake')
 Require-File (Join-Path $IcuPrefix 'include/unicode/uversion.h')
-foreach ($Tool in @('cmake', 'ninja')) { Get-Command $Tool -CommandType Application -ErrorAction Stop | Out-Null }
+$CmakePath = (Get-Command 'cmake.exe' -CommandType Application -ErrorAction Stop).Source
+$NinjaPath = (Get-Command 'ninja.exe' -CommandType Application -ErrorAction Stop).Source
 if ($Toolchain -eq 'MSVC') { $CompilerPath = (Get-Command 'cl.exe' -CommandType Application -ErrorAction Stop).Source }
 else {
     $CompilerPath = (Get-Command 'g++.exe' -CommandType Application -ErrorAction Stop).Source
@@ -120,12 +124,23 @@ if ($FfmpegDir) {
     Require-File (Join-Path $FfmpegDir 'ffprobe.exe')
 }
 
-# Network access occurs only after local SDK/tool/output preflight succeeds.
-if ($DownloadFfmpeg) {
-    $FfmpegCacheDir = Project-Path $FfmpegCacheDir
-    $DownloadedFfmpeg = Get-BtbnFfmpeg -CacheDir $FfmpegCacheDir -Release $FfmpegRelease
-    $FfmpegDir = $DownloadedFfmpeg.BinDir
+# USTX uses a static library built with the selected native C/C++ toolchain.
+if (-not $DownloadDependencies -and -not $LibYamlSourceDir) { throw 'USTX requires -LibYamlSourceDir (LibYAML 0.2.5), or explicit -DownloadDependencies.' }
+if ($LibYamlSourceDir) {
+    $LibYamlSourceDir = (Resolve-Path -LiteralPath $LibYamlSourceDir).Path
+    Require-File (Join-Path $LibYamlSourceDir 'include/yaml.h')
+    Require-File (Join-Path $LibYamlSourceDir 'License')
 }
+# ZIP uses MiniZip and inflate from the same zlib source archive.
+if (-not $DownloadDependencies -and -not $ZlibSourceDir) { throw 'VPR requires -ZlibSourceDir (complete zlib 1.3.2), or explicit -DownloadDependencies.' }
+if ($ZlibSourceDir) {
+    $ZlibSourceDir = (Resolve-Path -LiteralPath $ZlibSourceDir).Path
+    Require-File (Join-Path $ZlibSourceDir 'zlib.h')
+    Require-File (Join-Path $ZlibSourceDir 'contrib/minizip/unzip.c')
+    Require-File (Join-Path $ZlibSourceDir 'LICENSE')
+}
+if ($Toolchain -eq 'MSVC') { $CCompilerPath = $CompilerPath }
+else { $CCompilerPath = Join-Path $CompilerDir 'gcc.exe'; Require-File $CCompilerPath }
 
 # Environment changes are scoped to this invocation and restored on failure.
 $EnvironmentNames = @('PATH', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QT_QPA_PLATFORM', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH')
@@ -140,21 +155,33 @@ try {
     $ConfigureArgs = @('-S', $ProjectDir, '-B', $BuildDir, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
         '-DBUILD_TESTING=OFF', "-DQt6_DIR=$QtPrefix/lib/cmake/Qt6", "-DCMAKE_PREFIX_PATH=$QtPrefix;$IcuPrefix", "-DICU_ROOT=$IcuPrefix")
     $ConfigureArgs += "-DCMAKE_CXX_COMPILER=$($CompilerPath.Replace('\', '/'))"
-    Invoke-Native 'configure' 'cmake' $ConfigureArgs
+    $ConfigureArgs += "-DCMAKE_C_COMPILER=$($CCompilerPath.Replace('\', '/'))"
+    $ConfigureArgs += "-DCMAKE_MAKE_PROGRAM=$($NinjaPath.Replace('\', '/'))"
+    $ConfigureArgs += "-DCHOSUTA_DOWNLOAD_DEPENDENCIES=$([int][bool]$DownloadDependencies)"
+    $ConfigureArgs += "-DCHOSUTA_LIBYAML_SOURCE_DIR=$($LibYamlSourceDir.Replace('\', '/'))"
+    $ConfigureArgs += "-DCHOSUTA_ZLIB_SOURCE_DIR=$($ZlibSourceDir.Replace('\', '/'))"
+    Invoke-Native 'configure' $CmakePath $ConfigureArgs
     $BuildInfo = Get-Content -LiteralPath (Join-Path $BuildDir 'build-info.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($BuildInfo.systemName -ne 'Windows' -or $BuildInfo.pointerBytes -ne 8) { throw 'This deployment script requires a native Windows x64 target.' }
     if ($Toolchain -eq 'MSVC' -and $BuildInfo.compilerArchitecture -notin @('x64', 'X64', 'AMD64')) { throw 'Use an x64 MSVC developer shell.' }
     if (($Toolchain -eq 'MSVC' -and $BuildInfo.compilerID -ne 'MSVC') -or ($Toolchain -eq 'MinGW' -and $BuildInfo.compilerID -ne 'GNU')) {
         throw 'Compiler mismatch. Use a fresh BuildDir and matching Qt/ICU/toolchain.'
     }
-    Invoke-Native 'build' 'cmake' @('--build', $BuildDir, '--parallel', "$Jobs")
+    Invoke-Native 'build' $CmakePath @('--build', $BuildDir, '--parallel', "$Jobs")
+    # Only fetch the optional media archive after the application builds.
+    # Parser dependency downloads still happen during the explicit configure step.
+    if ($DownloadFfmpeg) {
+        $FfmpegCacheDir = Project-Path $FfmpegCacheDir
+        $DownloadedFfmpeg = Get-BtbnFfmpeg -CacheDir $FfmpegCacheDir -Release $FfmpegRelease
+        $FfmpegDir = $DownloadedFfmpeg.BinDir
+    }
     foreach ($Stage in $Stages) {
         $StageDir = $Stage.Path
         $BundleMedia = $Stage.Bundled
         foreach ($Name in $EnvironmentNames) { [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], 'Process') }
         $env:PATH = "$QtBin;$IcuRuntimeDir;$FfmpegDir;$($SavedEnvironment['PATH'])"
         $env:QT_PLUGIN_PATH = Join-Path $QtPrefix 'plugins'
-        Invoke-Native 'install application and notices' 'cmake' @('--install', $BuildDir, '--prefix', $StageDir)
+        Invoke-Native 'install application and notices' $CmakePath @('--install', $BuildDir, '--prefix', $StageDir)
         $AppDir = $StageDir
         Require-File (Join-Path $AppDir 'chosuta.exe')
         Require-File (Join-Path $AppDir 'chosuta-cli.exe')
@@ -203,7 +230,7 @@ try {
         # documentation and notices from the runtime byte total.
         $Files = @(Get-ChildItem -LiteralPath $AppDir -File -Recurse | Where-Object {
             $Relative = $_.FullName.Substring($AppDir.Length + 1).Replace('\', '/')
-            $Relative -notmatch '^(validation|dependency-notices|share)/'
+            $Relative -notmatch '^(validation|dependency-notices|dependency-sources|share)/'
         } | Sort-Object FullName | ForEach-Object {
             [ordered]@{
                 path = $_.FullName.Substring($AppDir.Length + 1).Replace('\', '/')

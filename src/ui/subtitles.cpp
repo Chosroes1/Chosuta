@@ -94,6 +94,8 @@ void Window::refreshSubtitles() {
     subtitleTrackChoice->setCurrentIndex(subtitleTrackChoice->findData(subtitleTrackId));
     subtitlePage->setEnabled(!busy);subtitleName->setEnabled(t);subtitleTrackEnabled->setEnabled(t);subtitleAlign->setEnabled(t);subtitleSource->setEnabled(t);
     subtitleSource->clear();subtitleSource->addItem(trText("Choose a lyric source"),QString{});for(const auto&row:project.score.tracks)subtitleSource->addItem(row.name,row.id);
+    if(auto model=qobject_cast<QStandardItemModel *>(subtitleAnchor->model()))model->item(subtitleAnchor->findData("beats"))->setEnabled(project.score.hasMusic);
+    if(!project.score.hasMusic){subtitleAnchor->setCurrentIndex(subtitleAnchor->findData("seconds"));subtitleAlign->setEnabled(false);subtitleSource->setEnabled(false);}
     if(!t){subtitleCuePanel->hide();updateLayoutTarget();return;}
     subtitleName->setText(t->name);subtitleTrackEnabled->setChecked(t->enabled);subtitleAlign->setChecked(t->alignLyrics);subtitleSource->setCurrentIndex(std::max(0,subtitleSource->findData(t->sourceTrack)));
     auto cue=findCue(*t,subtitleCueId);subtitleCuePanel->setVisible(cue);

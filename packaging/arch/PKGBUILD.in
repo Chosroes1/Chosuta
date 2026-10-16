@@ -4,10 +4,10 @@
 pkgname=chosuta
 pkgver=@VERSION@
 pkgrel=2
-pkgdesc='Score-driven lip animation editor with SVP, UST and VSQX import'
+pkgdesc='Score-driven lip animation editor with SVP, UST, USTX, VSQX, MusicXML and VPR import'
 arch=('x86_64')
 license=('GPL-3.0-or-later')
-depends=('glibc' 'gcc-libs' 'qt6-base>=6.4' 'qt6-multimedia>=6.4' 'icu>=67')
+depends=('glibc' 'gcc-libs' 'qt6-base>=6.4' 'qt6-multimedia>=6.4' 'icu>=67' 'libyaml>=0.2.5' 'minizip' 'zlib')
 makedepends=('cmake>=3.24' 'ninja')
 optdepends=('ffmpeg: video export and attached audio duration detection')
 options=('!debug')

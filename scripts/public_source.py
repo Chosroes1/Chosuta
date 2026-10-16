@@ -7,7 +7,7 @@ ROOT_FILES = (
     "THIRD_PARTY_NOTICES.md", ".gitignore",
 )
 DOC_FILES = (
-    "building.zh-CN.md", "user-guide.zh-CN.md", "windows.zh-CN.md",
+    "building.zh-CN.md", "user-guide.zh-CN.md", "windows.zh-CN.md", "macos.zh-CN.md",
     "packaging.zh-CN.md", "license-review.zh-CN.md", "publication.zh-CN.md",
 )
 
@@ -19,14 +19,14 @@ def public_files(root: Path) -> list[Path]:
     paths.extend(root / name for name in ("README.en.md", "README.ja.md")
                  if (root / name).exists() or (root / name).is_symlink())
     paths.extend(root / "docs" / name for name in DOC_FILES)
-    paths.extend(root / "tests" / name for name in ("core_test.cpp", "ui_test.cpp", "packaging_test.py", "fixtures/basic.svp"))
+    paths.extend(root / "tests" / name for name in ("core_test.cpp", "ui_test.cpp", "packaging_test.py", "fixtures/basic.svp", "fixtures/timed.lab", "fixtures/timed.ds", "fixtures/timed.vvproj", "fixtures/score.ustx", "fixtures/score.musicxml", "fixtures/score.ccs", "fixtures/score.vvproj", "fixtures/score.vpr", "fixtures/score.mxl", "fixtures/score.vsq"))
     paths.extend(root / "resources" / name for name in (
-        "data.qrc", "icons.qrc", "english.tsv", "japanese.tsv", "chinese.tsv",
-        "icons/chosuta.png", "icons/chosuta.ico", "icons/chosuta.rc", "licenses/ICU.txt",
+        "data.qrc", "icons.qrc", "english.tsv", "japanese.tsv", "chinese.tsv", "presets/ust-aliases.json",
+        "icons/chosuta.png", "icons/chosuta.ico", "icons/chosuta.rc", "licenses/ICU.txt", "licenses/LibYAML.txt", "licenses/zlib.txt", "licenses/MiniZip.txt",
         "licenses/Qt-GPL-3.0.txt", "licenses/Qt-LGPL-3.0.txt",
     ))
     for directory, suffixes in (
-        ("src", {".cpp", ".h"}), ("cmake", {".in"}),
+        ("src", {".cpp", ".h"}), ("cmake", {".in", ".cmake"}),
         ("packaging", {".in", ".desktop"}), ("scripts", {".py", ".ps1", ".sh"}),
     ):
         paths.extend(p for p in (root / directory).rglob("*")

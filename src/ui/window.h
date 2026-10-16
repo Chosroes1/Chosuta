@@ -22,7 +22,7 @@ namespace chosuta {
         public:
         explicit Window();
         ~Window()override;
-        void openPath(const QString &path);
+        void openPath(const QString &path,const QString &vvprojSection="auto");
         void attachAudioPath(const QString &path);
         const Project &currentProject() const {
             return project;

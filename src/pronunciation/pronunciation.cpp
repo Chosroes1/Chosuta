@@ -150,6 +150,9 @@ namespace chosuta {
                 r.syllables.last().append(pending);r.roles.last()+=QVector<SegmentRole>(pending.size(),SegmentRole::Consonant);r.phones.last()+=keys;pending.clear();keys.clear();continue;
             }
             if(language=="en")token.remove(QRegularExpression("[012]$"));
+            // Chinese front rounded vowel spellings share the existing U mouth;
+            // retain the supplied phone key and distinguish English/Japanese v.
+            const bool rounded=language=="zh"&&QStringList{"ü","v","u:"}.contains(token.toLower());
             QStringList shape;
             if(vocaloidExtension&&token=="-")shape={"extend"};
             else if(token=="br"||token=="breath")shape= {
@@ -161,6 +164,7 @@ namespace chosuta {
             else if(token=="sil"||token=="pau")shape= {
                 "rest"
             };
+            else if(rounded)shape={"U"};
             else if(language=="en"&&vowels.contains(token.toUpper()))shape=vowels[token.toUpper()];
             else if(language!="en"&&QStringList {
                 "a","i","u","e","o"
@@ -182,7 +186,7 @@ namespace chosuta {
             r.syllables.append(pending+shape);
             r.phones.append(keys+QStringList(shape.size(),phoneKey(language,token)));
             QVector<SegmentRole> roles(pending.size(),SegmentRole::Consonant);
-            const bool vowel=(vocaloidExtension&&token=="-")||(language=="en"?vowels.contains(token.toUpper()):QStringList{"a","i","u","e","o"}.contains(token.toLower()));
+            const bool vowel=rounded||(vocaloidExtension&&token=="-")||(language=="en"?vowels.contains(token.toUpper()):QStringList{"a","i","u","e","o"}.contains(token.toLower()));
             roles+=QVector<SegmentRole>(shape.size(),vowel?SegmentRole::Vowel:SegmentRole::Special);
             r.roles.append(roles);
             pending.clear();keys.clear();

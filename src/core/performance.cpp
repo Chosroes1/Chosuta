@@ -89,6 +89,7 @@ double PerformanceResolver::mappedBlick(qint64 tick,const QString &track,bool en
     return raw+project.output.syncOffset;
 }
 SubtitleInterval PerformanceResolver::interval(const PerformanceSegment &s)const{
+    if(!project.score.hasMusic)return {s.start,s.end,s.anchor!="seconds"};
     const bool orphan=sourceTimes.ambiguous(s.firstSource,project.score.time.seconds(s.startBlick))||sourceTimes.ambiguous(s.lastSource,project.score.time.seconds(s.endBlick),true)||(!s.firstSource.isEmpty()&&(!notes.contains(s.firstSource)||!sourceTimes.contains(s.firstSource)))||(!s.lastSource.isEmpty()&&(!notes.contains(s.lastSource)||!sourceTimes.contains(s.lastSource)));
     if(s.anchor=="seconds"||orphan)return {s.start,s.end,orphan};
     double a=mappedBlick(s.startBlick,sourceTracks.value(s.firstSource,s.track)),b=mappedBlick(s.endBlick,sourceTracks.value(s.lastSource,s.track),true);
@@ -103,6 +104,7 @@ QString PerformanceResolver::groupAt(double time)const{const auto s=at(time);ret
 void setPerformanceTime(const Project &p,PerformanceSegment &s,double a,double b,bool beats){
     if(!std::isfinite(a)||!std::isfinite(b)||a<0||b<=a||b>21600)throw Failure("Invalid performance interval");
     s.start=a;s.end=b;s.anchor=beats?"beats":"seconds";
+    if(!p.score.hasMusic){s.anchor="seconds";s.startBlick=s.endBlick=0;s.track.clear();s.firstSource.clear();s.lastSource.clear();return;}
     s.startBlick=p.score.time.blicks(a-p.output.syncOffset);s.endBlick=p.score.time.blicks(b-p.output.syncOffset);
     s.track.clear();s.firstSource.clear();s.lastSource.clear();
     // Select actual routed sources; map corrected boundaries back to the original score.

@@ -75,7 +75,7 @@ WaveCorrectionResult correctWaveform(const Project &p,const Waveform &wave,const
         for(const auto &e:p.generated){if(cancel.load())throw Failure("Cancelled");eventSources[e.id]=e.source;if(selectedEvents.contains(e.id))chosen.insert(e.source);
             if(!groups.contains(e.source))groups[e.source]={e.source,e.start,e.end,false,false};
             auto &g=groups[e.source];g.a=std::min(g.a,e.start);g.b=std::max(g.b,e.end);
-            if(e.unknown||e.provenance.startsWith("special/")||e.articulation=="br")g.skip=true;
+            if(e.unknown||e.provenance.startsWith("special/")||e.articulation=="br"||(!p.score.hasMusic&&QStringList{"rest","cl","nasal"}.contains(e.articulation)))g.skip=true;
         }
         for(const auto &track:p.score.tracks)for(const auto &note:track.notes){if(cancel.load())throw Failure("Cancelled");
             QString control=p.rules.readings.value(note.id).trimmed();if(control.isEmpty())control=note.phonemes.trimmed();
