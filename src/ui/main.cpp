@@ -4,6 +4,9 @@
 #include <QTimer>
 int main(int argc,char**argv) {
     QApplication app(argc,argv);
+#ifdef Q_OS_WIN
+    QApplication::setStyle("Fusion");
+#endif
     QCoreApplication::setOrganizationName("Chosuta");
     QCoreApplication::setApplicationName("Chosuta");
     QCoreApplication::setApplicationVersion(CHOSUTA_VERSION);
