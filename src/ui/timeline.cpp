@@ -63,9 +63,21 @@ namespace chosuta {
         updateExtent();
         update();
     }
-    void Timeline::setZoom(double zoom) {
+    void Timeline::setZoom(double zoom,std::optional<double> anchorX) {
+        auto area=parentWidget()?qobject_cast<QScrollArea*>(parentWidget()->parentWidget()):nullptr;
+        auto bar=area?area->horizontalScrollBar():nullptr;
+        double anchorTime=0,viewportX=0;
+        if(bar) {
+            const double left=bar->value(),viewportWidth=area->viewport()->width();
+            const double cursorX=xAtTime(cursor)-left;
+            // Explicit anchors use timeline coordinates (e.g. the wheel pointer).
+            // The slider keeps a visible playhead in place, or the view centre.
+            viewportX=anchorX?*anchorX-left:cursorX>=0&&cursorX<viewportWidth?cursorX:viewportWidth/2;
+            anchorTime=timeAtX(left+viewportX);
+        }
         scale=std::clamp(zoom,5.,1000.);
         updateExtent();
+        if(bar)bar->setValue(qRound(xAtTime(anchorTime)-viewportX));
         update();
     }
     void Timeline::setCursor(double t) {
@@ -437,7 +449,7 @@ namespace chosuta {
     }
     void Timeline::wheelEvent(QWheelEvent*e) {
         if(e->modifiers()&Qt::ControlModifier) {
-            setZoom(scale*(e->angleDelta().y()>0?1.2:1/1.2));
+            setZoom(scale*(e->angleDelta().y()>0?1.2:1/1.2),e->position().x());
             e->accept();
         }
         else QWidget::wheelEvent(e);

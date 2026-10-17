@@ -467,6 +467,53 @@ class UiTest:public QObject {
         QPoint start(qRound(t->xAtTime(.5)),15),end(qRound(t->xAtTime(1)),15);QTest::mousePress(t,Qt::LeftButton,Qt::NoModifier,start);QTest::mouseMove(t,end);QTest::mouseRelease(t,Qt::LeftButton,Qt::NoModifier,end);QCOMPARE(position->value(),1.);
         if(qEnvironmentVariableIsSet("CHOSUTA_INTERACTION_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_INTERACTION_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(w.grab().save(out.filePath("interaction-ui.png")));QTest::mouseDClick(t,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(t->xAtTime(.3)),row));QVERIFY(t->editingText());QCoreApplication::processEvents();QVERIFY(w.grab().save(out.filePath("inline-editor.png")));}
     }
+    void timelineZoomAnchors() {
+        for(bool beats:{false,true}) {
+            auto p=mouthUiProject();p.output.duration=120;p.output.syncOffset=.37;
+            p.score.time.tempos={{0,120},{8*Blick,90}};
+            QScrollArea area;area.resize(500,220);
+            auto timeline=new Timeline;timeline->setProject(p);timeline->setBeats(beats);timeline->setCursor(30);
+            area.setWidget(timeline);area.show();QCoreApplication::processEvents();
+            auto bar=area.horizontalScrollBar();
+            const auto selected=QStringList{p.generated[0].id};timeline->selectIds(selected);
+            QSignalSpy seeks(timeline,&Timeline::seek),edits(timeline,&Timeline::edited),selection(timeline,&Timeline::selectionChanged);
+            timeline->setZoom(120);bar->setValue(qRound(timeline->xAtTime(30))-130);
+            const double cursorX=timeline->xAtTime(30)-bar->value();
+            for(double zoom:{240.,90.,120.}) {
+                timeline->setZoom(zoom);QCoreApplication::processEvents();
+                QVERIFY(std::abs(timeline->xAtTime(30)-bar->value()-cursorX)<=1);
+            }
+            // Wheel zoom stays at the pointer, even when it differs from the playhead.
+            const int pointerX=300;const double pointerTime=timeline->timeAtX(bar->value()+pointerX);
+            for(int delta:{120,-120}) {
+                auto point=timeline->mapFromGlobal(area.viewport()->mapToGlobal(QPoint(pointerX,60)));
+                QWheelEvent wheel(QPointF(point),QPointF(timeline->mapToGlobal(point)),QPoint(),QPoint(0,delta),Qt::NoButton,Qt::ControlModifier,Qt::NoScrollPhase,false);
+                QApplication::sendEvent(timeline,&wheel);QCoreApplication::processEvents();
+                QVERIFY(std::abs(timeline->xAtTime(pointerTime)-bar->value()-pointerX)<=1);
+            }
+            // If the playhead is off screen, retain the area being inspected.
+            timeline->setCursor(0);timeline->setZoom(120);
+            const int centre=area.viewport()->width()/2;
+            bar->setValue(qRound(timeline->xAtTime(30))-centre);
+            const double centreTime=timeline->timeAtX(bar->value()+centre);
+            for(double zoom:{240.,90.,120.}) {
+                timeline->setZoom(zoom);QCoreApplication::processEvents();
+                QVERIFY(std::abs(timeline->xAtTime(centreTime)-bar->value()-centre)<=1);
+            }
+            // Respect both scroll limits and the effective zoom of a long project.
+            bar->setValue(0);timeline->setZoom(5);QCOMPARE(bar->value(),0);
+            timeline->setZoom(120);bar->setValue(bar->maximum());timeline->setZoom(5);
+            QCOMPARE(bar->value(),bar->maximum());
+            p.output.duration=21600;timeline->setProject(p);timeline->setZoom(120);
+            bar->setValue(qRound(timeline->xAtTime(30))-centre);
+            const double longAnchor=timeline->timeAtX(bar->value()+centre);
+            timeline->setZoom(1000);QCoreApplication::processEvents();
+            QVERIFY(std::abs(timeline->xAtTime(longAnchor)-bar->value()-centre)<=1);
+            QVERIFY(timeline->width()<=16000000);
+            QCOMPARE(timeline->cursorTime(),0.);QCOMPARE(timeline->selectedIds(),selected);
+            QCOMPARE(seeks.size(),0);QCOMPARE(edits.size(),0);QCOMPARE(selection.size(),0);
+        }
+    }
     void timelineMiddlePan() {
         auto p=mouthUiProject();p.output.duration=60;p.subtitlesEnabled=true;
         for(int i=0;i<5;++i) {SubtitleTrack track;track.id=QString("track%1").arg(i);p.subtitles.append(track);}

@@ -14,7 +14,7 @@ namespace chosuta {
         explicit Timeline(QWidget *parent=nullptr);
         void setProject(const Project &p,std::shared_ptr<const Evaluation> view={});
         void setBeats(bool beats);
-        void setZoom(double zoom);
+        void setZoom(double zoom,std::optional<double> anchorX={});
         void setCursor(double time);
         void setReturnPosition(double time);
         void setCursorSnap(const QString &mode){cursorSnap=mode;}

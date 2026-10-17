@@ -1,6 +1,6 @@
 # Linux 发行版打包
 
-当前源码为 Chosuta 1.0.0，本轮本地交付位于 `out/release/1.0.0-20261017/`（应用版本保持1.0.0，Arch包修订号为3；此前交付保留），包含Linux ZIP、Arch安装包与对应源码；Windows成品未生成。`apt` 是包管理工具，其本地安装文件是 `.deb`。当前宿主是 Arch Linux：可以本地构建 Arch 包，不能把宿主的 Qt/ICU 二进制换个扩展名当作 Debian/Fedora 可运行包。
+当前源码为 Chosuta 1.0.0，本轮本地交付位于 `out/release/1.0.0-20261017-r4/`（应用版本保持1.0.0，Arch包修订号为4；此前交付保留），包含Linux ZIP、Arch安装包与对应源码；Windows成品未生成。`apt` 是包管理工具，其本地安装文件是 `.deb`。当前宿主是 Arch Linux：可以本地构建 Arch 包，不能把宿主的 Qt/ICU 二进制换个扩展名当作 Debian/Fedora 可运行包。
 
 打包脚本只使用已有工具，不安装依赖、不启动容器拉取镜像、不上传源码或发布仓库。依赖缺失时明确失败。安装工具与系统环境准备由维护者自行按目标发行版的规范完成。
 
@@ -14,7 +14,7 @@ python3 scripts/package-arch.py out/arch/1.0.0-new
 
 上述命令输出到新的 `out/arch/1.0.0-new/`（建议显式指定尚不存在的新目录）：
 
-- `chosuta-1.0.0-3-x86_64.pkg.tar.zst`：本机 Arch 安装包。
+- `chosuta-1.0.0-4-x86_64.pkg.tar.zst`：本机 Arch 安装包。
 - `Chosuta-1.0.0-source.zip`：对应源码、原创夹具、打包模板和许可，不包含用户材料。
 - `PKGBUILD`：从 `packaging/arch/PKGBUILD.in` 生成的实际配方，带源码 SHA-256。
 - `.SRCINFO`：由 `makepkg --printsrcinfo` 生成的包元数据。
@@ -24,7 +24,7 @@ python3 scripts/package-arch.py out/arch/1.0.0-new
 本轮不向系统安装。用户决定安装时可自行执行：
 
 ```sh
-sudo pacman -U out/arch/1.0.0-20261017/chosuta-1.0.0-3-x86_64.pkg.tar.zst
+sudo pacman -U out/arch/1.0.0-20261017-r4/chosuta-1.0.0-4-x86_64.pkg.tar.zst
 ```
 
 安装后运行 `chosuta` 或桌面菜单中的 Chosuta；CLI 为 `chosuta-cli`。卸载由包管理器管理，工程和个人设置不属于包文件。图标与桌面项在标准 `/usr/share` 目录中。
