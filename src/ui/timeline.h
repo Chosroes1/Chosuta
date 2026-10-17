@@ -96,6 +96,8 @@ namespace chosuta {
         QMap<QString,SubtitleInterval> intervals;
         QSet<QString> availableSources;
         bool editable=true,rulerDragging=false,dragActive=false;
+        bool panning=false;
+        QPointF panPosition;
         QPointF pressPoint;
         static constexpr int RulerHeight=32;
         int mouthHeight=96,defaultSubtitleHeight=60,resizeRow=-1,resizeBefore=0;

@@ -111,6 +111,8 @@ bash scripts/build-macos.sh --qt-prefix '<Qt macOS SDK 前缀>' --icu-prefix '<I
 
 ## 6. 实现原理
 
+本轮维护：无显式音素或人工读音时，空歌词默认使用 rest；已有工程保留保存的特殊项策略。时间轴支持按住鼠标中键拖动视野，松开或按 Esc 结束，不改变事件或播放位置。Linux构建及相关3组CTest通过（核心66项、UI39项及启动冒烟）；Windows实际交互尚未验证。应用版本仍为1.0.0/schema14。
+
 Chosuta 使用 C++20 与 Qt 6 Widgets；核心模型独立于 GUI 控件。自动口形由工程文件中的乐谱、显式音素和歌词通过确定性规则生成，音频可用于试听、配音及用户主动触发的有界时间校正，不决定口形内容。
 
 1. **导入乐谱**：0.10.0新增UST与VSQX源码接入，复用现有Qt/ICU，详见[格式范围](docs/user-guide.zh-CN.md)。UST处理CP932/UTF-8、逐音速度及休止，VSQX处理part与前置小节、原始resolution和显式音素。读取 SVP 实际引用的 mainGroup/mainRef 与 library 分组，展开引用实例并应用时间/音高偏移。保留整数音乐位置，SV 每四分音符为 705,600,000 blick；根据分段 BPM 换算秒数，拍号用于小节/拍显示。

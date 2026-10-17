@@ -488,6 +488,29 @@ class CoreTest:public QObject {
         QSKIP("Private regression data is not distributed");
 #endif
     }
+    void emptyLyricDefault() {
+        auto root=checkedJson(fixture()).object();
+        auto track=root["tracks"].toArray()[0].toObject();auto group=track["mainGroup"].toObject();auto notes=group["notes"].toArray();
+        for(int i=0;i<notes.size();++i) {
+            auto note=notes[i].toObject();note["lyrics"]=i==1?" \t ":i==3?"sil":"";note["phonemes"]=i==2?"u":"";notes[i]=note;
+        }
+        group["notes"]=notes;track["mainGroup"]=group;root["tracks"]=QJsonArray{track};
+        Project p;p.score=parseSvp(QJsonDocument(root).toJson());p.selected={p.score.tracks[0].id};p.regenerate();
+        QCOMPARE(p.generated.size(),4);
+        for(int i:{0,1}) {
+            QCOMPARE(p.generated[i].shape,QString("rest"));QVERIFY(!p.generated[i].unknown);
+            QCOMPARE(p.generated[i].provenance,QString("special/empty/estimated"));
+        }
+        QCOMPARE(p.generated[2].shape,QString("U"));QVERIFY(!p.generated[2].unknown);
+        QVERIFY(p.generated[3].unknown); // Literal lyrics still use ordinary reading rules.
+        const auto source=p.generated[0].source;
+        p.rules.readings[source]="i";p.regenerate();QCOMPARE(p.generated[0].shape,QString("I"));
+        p.rules.readings.clear();p.rules.special["empty"].shape="unknown";p.regenerate();QVERIFY(p.generated[0].unknown);
+        QTemporaryDir dir;const auto path=dir.filePath("empty.chosuta");saveProject(p,path);
+        auto restored=loadProject(path);restored.regenerate();
+        QCOMPARE(restored.rules.special["empty"].shape,QString("unknown"));QVERIFY(restored.generated[0].unknown);
+        QCOMPARE(restored.score.raw,p.score.raw);
+    }
     void language() {
         QVERIFY(!pronounce("きょ","ja").unknown);
         QCOMPARE(pronounce("きょ","ja").syllables[0].last(),QString("O"));

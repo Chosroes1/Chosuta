@@ -122,7 +122,7 @@ namespace chosuta {
                 }
             }, {
                 "empty", {
-                    "shape","unknown",.12
+                    "shape","rest",.12
                 }
             },
             {

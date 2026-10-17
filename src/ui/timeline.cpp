@@ -298,7 +298,15 @@ namespace chosuta {
         painter.drawLine(QPointF(x,0),QPointF(x,height()));
     }
     void Timeline::mousePressEvent(QMouseEvent*e) {
-        if(e->button()!=Qt::LeftButton)return;
+        if(e->button()==Qt::MiddleButton) {
+            if(rulerDragging||resizeRow!=-1||performanceDrag||beforeSubtitle||!dragging.isEmpty())return;
+            if(parentWidget()&&qobject_cast<QScrollArea*>(parentWidget()->parentWidget())) {
+                panning=true;panPosition=e->globalPosition();
+                setFocus();QWidget::setCursor(Qt::ClosedHandCursor);e->accept();
+            }
+            return;
+        }
+        if(panning||e->button()!=Qt::LeftButton)return;
         finishSubtitleEditing(false);setFocus();pressPoint=e->position();dragActive=false;
         if(rulerRect().contains(e->position())){rulerDragging=true;emit seek(snappedCursor(timeAtX(e->position().x()),e->modifiers()&Qt::AltModifier));return;}
         resizeRow=resizeHit(e->position().y());if(resizeRow!=-1){resizeBefore=resizeRow==-2?mouthHeight:resizeRow==-3?waveformHeight:resizeRow==-4?performanceHeight:subtitleHeight(resizeRow);QWidget::setCursor(Qt::SizeVerCursor);return;}
@@ -348,6 +356,15 @@ namespace chosuta {
         int i=subtitleHit(row,e->position().x(),e->position().y());if(i<0&&subtitleHit(row,e->position().x(),subtitleLaneRect(row).top()+4)>=0)return;if(i<0)emit subtitleCreated(row,std::clamp(timeAtX(e->position().x()),0.,21599.999));else emit subtitleSelected(project.subtitles[row].id,project.subtitles[row].cues[i].id,true);
     }
     void Timeline::mouseMoveEvent(QMouseEvent*e) {
+        if(panning) {
+            if(parentWidget())if(auto area=qobject_cast<QScrollArea*>(parentWidget()->parentWidget())) {
+                const auto delta=e->globalPosition()-panPosition;panPosition=e->globalPosition();
+                auto horizontal=area->horizontalScrollBar(),vertical=area->verticalScrollBar();
+                horizontal->setValue(horizontal->value()-qRound(delta.x()));
+                vertical->setValue(vertical->value()-qRound(delta.y()));
+            }
+            e->accept();return;
+        }
         if(rulerDragging){emit seek(snappedCursor(timeAtX(e->position().x()),e->modifiers()&Qt::AltModifier));return;}
         if(resizeRow!=-1){int h=resizeBefore+qRound(e->position().y()-pressPoint.y());if(resizeRow==-2)mouthHeight=std::clamp(h,96,360);else if(resizeRow==-3)waveformHeight=std::clamp(h,40,200);else if(resizeRow==-4)performanceHeight=std::clamp(h,40,120);else laneHeights[project.subtitles[resizeRow].id]=std::clamp(h,48,240);updateExtent();positionEditor();update();return;}
         if(performanceDrag){
@@ -398,6 +415,7 @@ namespace chosuta {
         update();
     }
     void Timeline::mouseReleaseEvent(QMouseEvent*e) {
+        if(e->button()==Qt::MiddleButton&&panning){panning=false;unsetCursor();e->accept();return;}
         if(e->button()==Qt::LeftButton&&rulerDragging){rulerDragging=false;return;}
         if(e->button()==Qt::LeftButton&&resizeRow!=-1){auto id=resizeRow==-2?QString{}:resizeRow==-3?QString("@waveform"):resizeRow==-4?QString("@performance"):project.subtitles[resizeRow].id;int h=resizeRow==-2?mouthHeight:resizeRow==-3?waveformHeight:resizeRow==-4?performanceHeight:subtitleHeight(resizeRow);resizeRow=-1;unsetCursor();emit laneHeightChanged(id,h);return;}
         if(e->button()==Qt::LeftButton&&performanceDrag){performanceDrag=false;if(performanceManual&&(performanceStart!=performanceOldStart||performanceEnd!=performanceOldEnd))emit performanceEdited(performanceId,performanceStart,performanceEnd);update();return;}
@@ -412,6 +430,7 @@ namespace chosuta {
         update();
     }
     void Timeline::keyPressEvent(QKeyEvent*e) {
+        if(e->key()==Qt::Key_Escape&&panning){panning=false;unsetCursor();e->accept();return;}
         if(editable&&(e->key()==Qt::Key_Delete||e->key()==Qt::Key_Backspace)){emit deleteRequested();e->accept();return;}
         if(editable&&e->key()==Qt::Key_F2&&!subtitleCue.isEmpty()){emit subtitleSelected(subtitleTrack,subtitleCue,true);e->accept();return;}
         if(e->key()==Qt::Key_Escape){performanceDrag=false;performanceStart=performanceOldStart;performanceEnd=performanceOldEnd;update();rulerDragging=false;cancelLaneResize();if(beforeSubtitle){for(auto&t:project.subtitles)for(auto&c:t.cues)if(c.id==subtitleCue){c=*beforeSubtitle;intervals[c.id]=subtitleInterval(project,c,&availableSources);}beforeSubtitle.reset();update();}if(!dragging.isEmpty()){events=beforeDrag;dragging.clear();update();}e->accept();return;}QWidget::keyPressEvent(e);

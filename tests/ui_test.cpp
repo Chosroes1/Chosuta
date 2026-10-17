@@ -467,6 +467,54 @@ class UiTest:public QObject {
         QPoint start(qRound(t->xAtTime(.5)),15),end(qRound(t->xAtTime(1)),15);QTest::mousePress(t,Qt::LeftButton,Qt::NoModifier,start);QTest::mouseMove(t,end);QTest::mouseRelease(t,Qt::LeftButton,Qt::NoModifier,end);QCOMPARE(position->value(),1.);
         if(qEnvironmentVariableIsSet("CHOSUTA_INTERACTION_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_INTERACTION_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(w.grab().save(out.filePath("interaction-ui.png")));QTest::mouseDClick(t,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(t->xAtTime(.3)),row));QVERIFY(t->editingText());QCoreApplication::processEvents();QVERIFY(w.grab().save(out.filePath("inline-editor.png")));}
     }
+    void timelineMiddlePan() {
+        auto p=mouthUiProject();p.output.duration=60;p.subtitlesEnabled=true;
+        for(int i=0;i<5;++i) {SubtitleTrack track;track.id=QString("track%1").arg(i);p.subtitles.append(track);}
+        QScrollArea area;area.resize(450,200);
+        auto timeline=new Timeline;timeline->setProject(p);timeline->setCursor(.25);area.setWidget(timeline);area.show();
+        QCoreApplication::processEvents();
+        auto horizontal=area.horizontalScrollBar(),vertical=area.verticalScrollBar();
+        QVERIFY(horizontal->maximum()>200);QVERIFY(vertical->maximum()>80);
+        const auto selected=QStringList{p.generated[0].id};timeline->selectIds(selected);
+        QSignalSpy seeks(timeline,&Timeline::seek),edits(timeline,&Timeline::edited),selection(timeline,&Timeline::selectionChanged);
+        QSignalSpy subtitles(timeline,&Timeline::subtitleEdited),performance(timeline,&Timeline::performanceEdited);
+        auto mouse=[&](QEvent::Type type,QPoint point,Qt::MouseButton button,Qt::MouseButtons buttons) {
+            const auto global=area.viewport()->mapToGlobal(point);
+            QMouseEvent event(type,QPointF(timeline->mapFromGlobal(global)),QPointF(global),button,buttons,Qt::NoModifier);
+            QApplication::sendEvent(timeline,&event);
+        };
+        mouse(QEvent::MouseButtonPress,{180,70},Qt::MiddleButton,Qt::MiddleButton);
+        QCOMPARE(timeline->QWidget::cursor().shape(),Qt::ClosedHandCursor);
+        mouse(QEvent::MouseMove,{140,50},Qt::NoButton,Qt::MiddleButton);
+        QCOMPARE(horizontal->value(),40);QCOMPARE(vertical->value(),20);
+        mouse(QEvent::MouseMove,{110,30},Qt::NoButton,Qt::MiddleButton);
+        QCOMPARE(horizontal->value(),70);QCOMPARE(vertical->value(),40);
+        mouse(QEvent::MouseButtonRelease,{110,30},Qt::MiddleButton,Qt::NoButton);
+        QCOMPARE(timeline->QWidget::cursor().shape(),Qt::ArrowCursor);
+        mouse(QEvent::MouseMove,{100,20},Qt::NoButton,Qt::NoButton);
+        QCOMPARE(horizontal->value(),70);QCOMPARE(vertical->value(),40);
+        // Scroll limits clamp normally; reversing direction responds immediately.
+        horizontal->setValue(horizontal->maximum()-5);vertical->setValue(vertical->maximum()-5);
+        mouse(QEvent::MouseButtonPress,{180,70},Qt::MiddleButton,Qt::MiddleButton);
+        mouse(QEvent::MouseMove,{130,20},Qt::NoButton,Qt::MiddleButton);
+        QCOMPARE(horizontal->value(),horizontal->maximum());QCOMPARE(vertical->value(),vertical->maximum());
+        mouse(QEvent::MouseMove,{140,30},Qt::NoButton,Qt::MiddleButton);
+        QCOMPARE(horizontal->value(),horizontal->maximum()-10);QCOMPARE(vertical->value(),vertical->maximum()-10);
+        QTest::keyClick(timeline,Qt::Key_Escape);
+        QCOMPARE(timeline->QWidget::cursor().shape(),Qt::ArrowCursor);
+        mouse(QEvent::MouseMove,{150,40},Qt::NoButton,Qt::MiddleButton);
+        QCOMPARE(horizontal->value(),horizontal->maximum()-10);
+        mouse(QEvent::MouseButtonRelease,{150,40},Qt::MiddleButton,Qt::NoButton);
+        // Ruler panning also leaves the playhead and selection intact.
+        horizontal->setValue(5);vertical->setValue(5);
+        mouse(QEvent::MouseButtonPress,{180,15},Qt::MiddleButton,Qt::MiddleButton);
+        mouse(QEvent::MouseMove,{230,65},Qt::NoButton,Qt::MiddleButton);
+        QCOMPARE(horizontal->value(),0);QCOMPARE(vertical->value(),0);
+        mouse(QEvent::MouseButtonRelease,{230,65},Qt::MiddleButton,Qt::NoButton);
+        QCOMPARE(timeline->cursorTime(),.25);QCOMPARE(timeline->selectedIds(),selected);
+        QCOMPARE(seeks.size(),0);QCOMPARE(edits.size(),0);QCOMPARE(selection.size(),0);
+        QCOMPARE(subtitles.size(),0);QCOMPARE(performance.size(),0);
+    }
     void timelineHeightsAndEditorGeometry() {
         QTemporaryDir dir;Project p;QFile input(QString(CHOSUTA_SOURCE_DIR)+"/tests/fixtures/basic.svp");QVERIFY(input.open(QIODevice::ReadOnly));p.score=parseSvp(input.readAll());p.selected={p.score.tracks[0].id};p.regenerate();p.subtitlesEnabled=true;
         for(int i=0;i<4;++i){SubtitleTrack t;t.id=QString("track%1").arg(i);t.name=t.id;SubtitleCue c;c.id=QString("cue%1").arg(i);c.text="Hello 中文 かな";c.start=.1;c.end=.8;t.cues={c};p.subtitles.append(t);}auto path=dir.filePath("heights.chosuta");saveProject(p,path);Window w;w.resize(1200,1100);w.show();w.openPath(path);QTRY_COMPARE(w.currentProject().subtitles.size(),4);QTest::qWait(30);

@@ -6,7 +6,7 @@
 
 README.md 主体为中文，链接到 README.ja.md 和 README.en.md。作者填写项目的一句话简介及 1、2、5、9、10；系统要求、下载/源码安装、实现原理、结构、组件和 GPLv3 已按当前实现填写。英文/日文使用相同章节分工。作者补写中文后，应同步另两种语言或明确其更新状态。
 
-当前根源码为1.0.0/schema14。2026-10-16按用户要求更新系统要求、构建和依赖说明，同步本地GitHub公开源码目录，并生成新的Linux交付目录out/release/1.0.0/。本次只替换目标中文README的3/4/8章节，作者区、其他原文、英文/日文短占位页和.git保持；根目录三语README对应技术章节同步维护。发行包以该公开目录的白名单源码归档为依据独立编译，实际文件与验证结果以交付目录RUN.txt及SHA256SUMS为准。
+当前根源码为1.0.0/schema14。2026-10-17将空歌词默认rest、中键平移及相关测试/操作说明同步到本地GitHub目录，中文README仅在第6节补充这两项维护；其他原文、作者区、英文/日文短占位页和.git保持。Linux修订交付另存out/release/1.0.0-20261017/，应用仍为1.0.0，Arch包修订号为3；旧交付保留。发行包以该公开目录的白名单源码归档为依据独立编译，实际文件与验证结果以交付目录RUN.txt及SHA256SUMS为准。
 
 操作仅限本地，不提交或上传GitHub、不安装系统包、不覆盖旧Release。Windows1.0.0、macOS、DEB/RPM、AUR公开发布与真实桌面验收仍未完成。
 
@@ -47,7 +47,7 @@ makepkg 默认的 `.BUILDINFO` 会记录开发者构建路径和本机全部已�
 从本次新构建的原始包创建新的公开副本：
 
 ```sh
-python3 scripts/sanitize-arch-package.py out/arch/1.0.0-new/chosuta-1.0.0-2-x86_64.pkg.tar.zst out/release/1.0.0-new/chosuta-1.0.0-2-x86_64.pkg.tar.zst
+python3 scripts/sanitize-arch-package.py out/arch/1.0.0-new/chosuta-1.0.0-3-x86_64.pkg.tar.zst out/release/1.0.0-new/chosuta-1.0.0-3-x86_64.pkg.tar.zst
 ```
 
 这个副本不提供本机完整环境的 `.BUILDINFO` 复现记录；对应源码、配方和实际 CMake 组件版本另行保留，不伪造构建环境。它是标准 pacman 应用安装包，不是已签名或已经上传的 AUR 条目。
