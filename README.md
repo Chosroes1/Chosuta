@@ -107,7 +107,14 @@ bash scripts/build-macos.sh --qt-prefix '<Qt macOS SDK 前缀>' --icu-prefix '<I
 
 ## 5. 使用说明
 
-可参考 [使用说明](docs/user-guide.zh-CN.md)。
+可参考 [使用说明](docs/user-guide.zh-CN.md)。  
+### 快速开始：  
+点击“文件”→“打开乐谱/工程”，导入工程，也可直接将工程拖入窗口。Chosuta将自动识别工程并生成时间轴。  
+<img width="1280" height="930" alt="image" src="https://github.com/user-attachments/assets/0e13acc1-31c7-41af-a8e0-2174131c41f9" />  
+将编辑项切换到PNG差分，导入不同口型的差分。  
+<img width="1923" height="1397" alt="image" src="https://github.com/user-attachments/assets/e9d76976-e94d-44a9-8988-8de95fbf1ab4" />  
+<sub>示例立绘：[宮舞モカ立ち絵](https://commons.nicovideo.jp/works/im11390154)。</sub>  
+点击播放，即可让你的歌姬开口。  
 
 ## 6. 实现原理
 
