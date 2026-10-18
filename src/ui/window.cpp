@@ -506,7 +506,7 @@ namespace chosuta {
         timelineScroll=new QScrollArea;
         timelineScroll->setObjectName("timelineScroll");
         auto scroll=timelineScroll;
-        scroll->setWidgetResizable(false);
+        scroll->setWidgetResizable(true);
         scroll->setMinimumHeight(185);
         timeline=new Timeline;timeline->setCursorSnap(preferences.cursorSnap);
         scroll->setWidget(timeline);

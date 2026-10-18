@@ -467,6 +467,37 @@ class UiTest:public QObject {
         QPoint start(qRound(t->xAtTime(.5)),15),end(qRound(t->xAtTime(1)),15);QTest::mousePress(t,Qt::LeftButton,Qt::NoModifier,start);QTest::mouseMove(t,end);QTest::mouseRelease(t,Qt::LeftButton,Qt::NoModifier,end);QCOMPARE(position->value(),1.);
         if(qEnvironmentVariableIsSet("CHOSUTA_INTERACTION_ARTIFACTS")){QDir out(qEnvironmentVariable("CHOSUTA_INTERACTION_ARTIFACTS"));QVERIFY(out.mkpath("."));QVERIFY(w.grab().save(out.filePath("interaction-ui.png")));QTest::mouseDClick(t,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(t->xAtTime(.3)),row));QVERIFY(t->editingText());QCoreApplication::processEvents();QVERIFY(w.grab().save(out.filePath("inline-editor.png")));}
     }
+    void timelineFillsViewport() {
+        QTemporaryDir dir;auto p=mouthUiProject();p.output.duration=2;
+        const auto path=dir.filePath("width.chosuta");saveProject(p,path);
+        Window w;w.resize(1200,850);w.show();w.openPath(path);QTRY_COMPARE(w.currentProject().generated.size(),4);
+        auto timeline=w.findChild<Timeline*>("timeline");auto area=w.findChild<QScrollArea*>("timelineScroll");
+        timeline->setZoom(5);timeline->setCursor(.5);timeline->selectIds({p.generated[0].id});
+        const auto selected=timeline->selectedIds();const auto height=timeline->height();
+        const double cursorX=timeline->xAtTime(.5);
+        QSignalSpy seeks(timeline,&Timeline::seek),edits(timeline,&Timeline::edited),selection(timeline,&Timeline::selectionChanged);
+        for(bool beats:{false,true}) {
+            timeline->setBeats(beats);
+            for(int width:{1200,1900,1000,2200,1200}) {
+                w.resize(width,850);
+                QTRY_COMPARE(timeline->width(),std::max(timeline->minimumWidth(),area->viewport()->width()));
+                QCOMPARE(area->horizontalScrollBar()->maximum(),0);
+                QCOMPARE(timeline->height(),height);
+            }
+            timeline->setZoom(1000);
+            QTRY_VERIFY(area->horizontalScrollBar()->maximum()>0);
+            QVERIFY(timeline->xAtTime(2)<timeline->width());
+            area->horizontalScrollBar()->setValue(area->horizontalScrollBar()->maximum());
+            w.resize(1900,850);
+            QTRY_VERIFY(timeline->width()>=area->viewport()->width());
+            QVERIFY(area->horizontalScrollBar()->value()<=area->horizontalScrollBar()->maximum());
+            timeline->setZoom(5);
+            QTRY_COMPARE(timeline->width(),std::max(timeline->minimumWidth(),area->viewport()->width()));
+        }
+        timeline->setBeats(false);QCOMPARE(timeline->xAtTime(.5),cursorX);
+        QCOMPARE(timeline->cursorTime(),.5);QCOMPARE(timeline->selectedIds(),selected);
+        QCOMPARE(seeks.size(),0);QCOMPARE(edits.size(),0);QCOMPARE(selection.size(),0);
+    }
     void timelineZoomAnchors() {
         for(bool beats:{false,true}) {
             auto p=mouthUiProject();p.output.duration=120;p.output.syncOffset=.37;
@@ -673,7 +704,15 @@ class UiTest:public QObject {
         auto drop=[](QWidget *target,const QStringList &paths){QMimeData mime;QList<QUrl> urls;for(const auto &path:paths)urls.append(QUrl::fromLocalFile(path));mime.setUrls(urls);QDragEnterEvent enter(DropPoint(10,10),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(target,&enter);if(!enter.isAccepted())return false;QDropEvent event({10,10},Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(target,&event);return event.isAccepted();};
         QTimer::singleShot(0,&w,[&]{auto d=w.findChild<QDialog *>("mouthSettingsDialog");QVERIFY(d);auto guard=qScopeGuard([d]{if(d->isVisible())d->reject();});auto slot=d->findChild<QToolButton *>("mouthSlotA");QVERIFY(drop(slot,{one}));QCOMPARE(d->findChild<QLineEdit *>("mouthImagePath")->text(),one);
             auto table=d->findChild<QTableWidget *>("mouthImportTable");QVERIFY(drop(table->viewport(),{one,two}));QTRY_COMPARE(table->rowCount(),2);
-            for(int row=0;row<2;++row){auto group=qobject_cast<QComboBox *>(table->cellWidget(row,1));group->setCurrentIndex(group->findData("power"));auto mouth=qobject_cast<QComboBox *>(table->cellWidget(row,2));mouth->setCurrentIndex(mouth->findData("A"));}
+            table->item(0,0)->setCheckState(Qt::Unchecked);
+            d->findChild<QPushButton *>("importSelectAll")->click();QCOMPARE(table->selectionModel()->selectedRows().size(),2);
+            QCOMPARE(table->item(0,0)->checkState(),Qt::Unchecked);
+            auto target=d->findChild<QComboBox *>("importTargetGroup");target->setCurrentIndex(target->findData("power"));
+            d->findChild<QPushButton *>("importMapSelected")->click();
+            for(int row=0;row<2;++row){auto group=qobject_cast<QComboBox *>(table->cellWidget(row,1));QCOMPARE(group->currentData().toString(),QString("power"));auto mouth=qobject_cast<QComboBox *>(table->cellWidget(row,2));mouth->setCurrentIndex(mouth->findData("A"));}
+            d->findChild<QPushButton *>("importClearSelection")->click();QVERIFY(table->selectionModel()->selectedRows().isEmpty());
+            target->setCurrentIndex(target->findData("base"));d->findChild<QPushButton *>("importMapSelected")->click();
+            for(int row=0;row<2;++row)QCOMPARE(qobject_cast<QComboBox *>(table->cellWidget(row,1))->currentData().toString(),QString("power"));
             // Same destination is allowed: the last checked valid row wins in the draft.
             table->item(0,0)->setCheckState(Qt::Checked);table->item(1,0)->setCheckState(Qt::Checked);
             d->findChild<QPushButton *>("mouthApplyImport")->click();QVERIFY(w.currentProject().assets.isEmpty());

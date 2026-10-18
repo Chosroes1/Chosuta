@@ -6,9 +6,11 @@
 
 README.md 主体为中文，链接到 README.ja.md 和 README.en.md。作者填写项目的一句话简介及 1、2、5、9、10；系统要求、下载/源码安装、实现原理、结构、组件和 GPLv3 已按当前实现填写。英文/日文使用相同章节分工。作者补写中文后，应同步另两种语言或明确其更新状态。
 
-当前根源码为1.0.0/schema14。2026-10-17将时间轴缩放保持视野的修复、测试及相关操作说明同步到本地GitHub目录；中文README只更新第6节中的维护说明，其他原文/作者区、英文/日文短占位页和.git保持。Linux修订交付另存out/release/1.0.0-20261017-r4/，应用仍为1.0.0，Arch包修订号为4；旧交付保留。发行包以该公开目录的白名单源码归档为依据独立编译，实际文件与验证结果以交付目录RUN.txt及SHA256SUMS为准。
+当前根源码为1.0.1/schema14。2026-10-18按用户要求同步批量素材导入全选行/取消选择、时间轴宽度适配、版本与相关测试/说明到本地GitHub目录；以作者在该目录补写的中文README为主稿，增加顶部语言导航、按功能合并实现原理，并对照软件实际中英日文本完成英文/日文全文。保留截图、署名和作者叙述，按实际行为修正菜单名、字幕双击添加及更换音频后校正失效的说明。项目结构补齐现有导入器/夹具范围，没有新增依赖。
 
-操作仅限本地，不提交或上传GitHub、不安装系统包、不覆盖旧Release。Windows1.0.0、macOS、DEB/RPM、AUR公开发布与真实桌面验收仍未完成。
+Linux交付另存out/release/1.0.1/，应用1.0.1/schema14、Arch1.0.1-1；旧交付保留。发行包从该公开目录的白名单源码ZIP独立Release编译，实际附件与验证以交付目录RUN.txt、validation.json和SHA256SUMS为准。白名单不扩大，不包含AGENTS、技能、本地开发交接或用户材料。
+
+操作仅限本地同步与打包，保留.git，不提交或上传GitHub、不安装系统包、不覆盖旧Release。Windows1.0.1、macOS、DEB/RPM、AUR公开发布与真实桌面验收仍未完成。
 
 ## 整理源码
 
@@ -47,7 +49,7 @@ makepkg 默认的 `.BUILDINFO` 会记录开发者构建路径和本机全部已�
 从本次新构建的原始包创建新的公开副本：
 
 ```sh
-python3 scripts/sanitize-arch-package.py out/arch/1.0.0-new/chosuta-1.0.0-4-x86_64.pkg.tar.zst out/release/1.0.0-new/chosuta-1.0.0-4-x86_64.pkg.tar.zst
+python3 scripts/sanitize-arch-package.py out/arch/1.0.1-new/chosuta-1.0.1-1-x86_64.pkg.tar.zst out/release/1.0.1-new/chosuta-1.0.1-1-x86_64.pkg.tar.zst
 ```
 
 这个副本不提供本机完整环境的 `.BUILDINFO` 复现记录；对应源码、配方和实际 CMake 组件版本另行保留，不伪造构建环境。它是标准 pacman 应用安装包，不是已签名或已经上传的 AUR 条目。

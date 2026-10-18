@@ -1,6 +1,6 @@
 # Windows 编译、部署与验证
 
-当前源码版本 **1.0.0**。Windows 脚本仅负责配置、编译、部署及可选 ZIP，不构建/运行测试，也不自动启动 GUI/CLI 验收窗口。使用 `BUILD_TESTING=OFF`，复用旧 BuildDir 时同样更新该配置。
+当前源码版本 **1.0.1**。Windows 脚本仅负责配置、编译、部署及可选 ZIP，不构建/运行测试，也不自动启动 GUI/CLI 验收窗口。使用 `BUILD_TESTING=OFF`，复用旧 BuildDir 时同样更新该配置。
 
 ## 所需已有环境
 
@@ -49,7 +49,7 @@ MinGW：
 
 以上例子显式启用 `-DownloadDependencies`，获取MIT LibYAML 0.2.5及含MiniZip的zlib 1.3.2两份源码归档到BuildDir下的 `_deps`；固定URL与SHA-256见 `cmake/LibYaml.cmake` 与 `cmake/Zip.cmake`。已有该BuildDir缓存时复用；下载失败会报告错误，不改用其他安装路线。离线构建同时指定`-ZlibSourceDir '<完整zlib 1.3.2源码目录>'`，并将下载参数换成 `-LibYamlSourceDir '<完整LibYAML 0.2.5源码目录>'`，目录应含include/yaml.h、src、CMakeLists.txt及License。
 
-静态编译使用当前MSVC cl.exe或与MinGW g++.exe同目录的gcc.exe，不下载编译器。部署不增加YAML DLL，完整实际源码附在根下 `dependency-sources/libyaml-0.2.5/`，MIT文本随share下许可目录安装；运行字节统计单独排除该源码目录。CMake构建记录含libyamlProvider。当前Linux已验证系统LibYAML路线。本轮复查官方版本与构建配置后，各尝试下载一次LibYAML/zlib仍遇DNS错误，实际下载0字节；没有安装工具或改用其他来源。真实源码静态编译与Windows1.0.0构建/部署仍需原生验证。
+静态编译使用当前MSVC cl.exe或与MinGW g++.exe同目录的gcc.exe，不下载编译器。部署不增加YAML DLL，完整实际源码附在根下 `dependency-sources/libyaml-0.2.5/`，MIT文本随share下许可目录安装；运行字节统计单独排除该源码目录。CMake构建记录含libyamlProvider。当前Linux已验证系统LibYAML路线。本轮复查官方版本与构建配置后，各尝试下载一次LibYAML/zlib仍遇DNS错误，实际下载0字节；没有安装工具或改用其他来源。真实源码静态编译与Windows1.0.1构建/部署仍需原生验证。
 
 ## 自动下载 BtbN（显式启用）
 
@@ -83,20 +83,20 @@ MinGW：
   -DownloadDependencies `
   -FfmpegDir '<BtbN GPL shared 的 bin 目录>' `
   -BothVariants -CreateZip `
-  -StageDir 'out/windows/Chosuta-1.0.0'
+  -StageDir 'out/windows/Chosuta-1.0.1'
 ```
 
 只编译一次，再各自部署两种目录；部署完成后压缩：
 
-- `out/windows/Chosuta-1.0.0/` 和 `.zip`：附带外部工具。
-- `out/windows/Chosuta-1.0.0-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
+- `out/windows/Chosuta-1.0.1/` 和 `.zip`：附带外部工具。
+- `out/windows/Chosuta-1.0.1-no-ffmpeg/` 和 `.zip`：不附带外部工具，保留 Qt／ICU 和 Qt 媒体后端。
 
 `-BothVariants` 必须与 `-FfmpegDir` 或 `-DownloadFfmpeg` 一起用；不传 `-CreateZip` 只生成目录。只要 no-ffmpeg 版时，省略 `-FfmpegDir`／`-DownloadFfmpeg`／`-BothVariants`，直接把 `-StageDir` 命名为所需的 no-ffmpeg 名称。目录必须为空，ZIP 必须不存在，不覆盖原产物。
 
 no-ffmpeg 用户在“文件 → 导出设置”选择本机已有的 `ffmpeg.exe`，同目录保留 `ffprobe.exe` 和该构建的共享 DLL，然后“检测媒体工具”，确定保存。检测报告显示实际工具路径、版本及缺失能力；这不能替代实际导出和剪辑软件导入验收。命令行也可检查：
 
 ```powershell
-.\out\windows\Chosuta-1.0.0-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
+.\out\windows\Chosuta-1.0.1-no-ffmpeg\chosuta-cli.exe --check-media-tools --ffmpeg '<现有 ffmpeg.exe 完整路径>'
 ```
 
 如果手动从完整版复制出 no-ffmpeg 目录，删的是副本中的整个 `tools/ffmpeg/`，而不是只删两个 EXE，更不能删除部署根目录中的 Qt DLL。手动修改会令原来的文件与体积清单过时，正式交付建议直接使用双版本脚本。
@@ -169,4 +169,4 @@ Windows构建已由用户确认；资源管理器显示、实际GUI交互及部�
 
 VPR/MXL使用传统MiniZip/zlib。静态源码仅编MiniZip读取、zlib inflate及校验部分，NOUNCRYPT，不编写入或其他算法/工具；完整实际源码安装至dependency-sources/zlib-1.3.2，许可随share/chosuta/licenses部署，build-info含zipProvider。固定版本/校验值与来源按[第三方清单](../THIRD_PARTY_NOTICES.md)保留。旧VSQ复用Qt和ICU，不新增SDK或开关。
 
-本次完成脚本/依赖审查，固定构建工具路径，并将可选FFmpeg下载延后至编译成功。本机没有PowerShell、Windows Qt/ICU SDK或macOS SDK；Linux构建、默认离线配置及打包夹具通过，不代替Windows原生编译、DLL部署或ZIP验收。此前用户Windows成功反馈为0.10.0，不能自动延伸为当前1.0.0验收。
+本次完成脚本/依赖审查，固定构建工具路径，并将可选FFmpeg下载延后至编译成功。本机没有PowerShell、Windows Qt/ICU SDK或macOS SDK；Linux构建、默认离线配置及打包夹具通过，不代替Windows原生编译、DLL部署或ZIP验收。此前用户Windows成功反馈为0.10.0，不能自动延伸为当前1.0.1验收。

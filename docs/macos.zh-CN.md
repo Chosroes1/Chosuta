@@ -1,6 +1,6 @@
 # macOS 本地构建（实验性）
 
-提供本机构建入口，尚未在 macOS 实机编译或运行验证，不作为正式支持平台或可分发成品的保证。当前版本1.0.0/schema14。
+提供本机构建入口，尚未在 macOS 实机编译或运行验证，不作为正式支持平台或可分发成品的保证。当前版本1.0.1/schema14。
 
 需要已经可用的 Xcode Command Line Tools（clang/clang++、macOS SDK、xcrun）、CMake ≥3.24、Ninja，以及架构匹配的 Qt ≥6.4 动态 SDK 和 ICU ≥67 开发库。Qt 需包含 Core、Gui、Widgets、Concurrent、Multimedia；普通构建不需要 Qt Test。脚本不会安装这些工具或修改系统配置。
 

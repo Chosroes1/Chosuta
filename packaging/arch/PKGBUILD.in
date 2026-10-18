@@ -3,7 +3,7 @@
 # replace the local source with its public release URL and add a Maintainer line.
 pkgname=chosuta
 pkgver=@VERSION@
-pkgrel=4
+pkgrel=1
 pkgdesc='Score-driven lip animation editor with SVP, UST, USTX, VSQX, MusicXML and VPR import'
 arch=('x86_64')
 license=('GPL-3.0-or-later')

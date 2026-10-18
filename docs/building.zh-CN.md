@@ -1,10 +1,10 @@
 # 构建、验证与本地打包
 
-当前根源码为 1.0.0/schema14。C++20、CMake ≥3.24、Qt ≥6.4、ICU ≥67、LibYAML ≥0.2.5、传统MiniZip/zlib；使用已经安装且状态一致的开发环境，不自动下载依赖。Linux 构建结果不能代替 Windows 原生验证。另有实验性macOS本地构建入口，不作为正式平台保证。
+当前根源码为 1.0.1/schema14。C++20、CMake ≥3.24、Qt ≥6.4、ICU ≥67、LibYAML ≥0.2.5、传统MiniZip/zlib；使用已经安装且状态一致的开发环境，不自动下载依赖。Linux 构建结果不能代替 Windows 原生验证。另有实验性macOS本地构建入口，不作为正式平台保证。
 
 0.19.1的UST别名预设由Qt资源内嵌，并安装到share/chosuta/presets/ust-aliases.json；数据5,602字节，无新依赖、下载或构建开关。中文显式ü/v/u:复用已有口形规则；Linux构建与CTest 4/4通过（核心65项/UI38项）；相对0.19.0同配置去符号Debug的GUI增8,192字节、CLI文件大小不变，另随安装提供上述JSON。不是Windows/Release包体承诺。
 
-1.0.0在既有0.19.1范围完成全流程复查后迭代版本；Linux Debug构建成功、CTest 4/4（核心65/UI38无跳过）通过，最终45组旧工程重生成保持。版本变更未增加依赖或改变schema14；Windows和原软件/声学边界仍未验证。未重新打包既有交付。
+1.0.1包含批量素材导入全选行/取消选择、时间轴随窗口宽度铺满可视区域，以及README整理和完整中英日翻译。功能改动已通过Linux构建、GUI工作流41项与启动冒烟；schema14及依赖不变。Linux交付使用本地GitHub目录对应源码独立Release构建，BUILD_TESTING=OFF，不下载/安装依赖。Windows与原软件/声学验证边界仍保留。
 
 ## Linux
 
@@ -69,4 +69,4 @@ bash scripts/package-linux.sh build-release out/linux-new
 
 当前Linux采用已安装LibYAML 0.2.5及传统MiniZip/zlib 1.3.2，无需新增安装。VPR/MXL使用MiniZip读取及DEFLATE；Windows静态路线用完整zlib 1.3.2（含contrib/minizip），只编读取/解压和校验部分，NOUNCRYPT，不新增ZIP DLL。完整实际源码随Windows安装到dependency-sources/zlib-1.3.2，其他平台到share/chosuta/dependency-sources/zlib-1.3.2。固定归档和SHA-256见cmake/Zip.cmake及第三方清单；build-info含zipProvider与libyamlProvider。
 
-本次Linux构建、默认离线且关闭测试的独立配置和打包夹具通过。两份依赖的实际下载各尝试一次均因DNS失败，0字节，未反复重试或安装其他工具。没有PowerShell/Windows SDK，Windows1.0.0及真实依赖源码静态构建/部署尚未验证；此前Windows成功反馈对应0.10.0。macOS仅作实验入口。普通构建仍不联网，FFmpeg显式下载与解析依赖开关独立。
+本次Linux构建、默认离线且关闭测试的独立配置和打包夹具通过。两份依赖的实际下载各尝试一次均因DNS失败，0字节，未反复重试或安装其他工具。没有PowerShell/Windows SDK，Windows1.0.1及真实依赖源码静态构建/部署尚未验证；此前Windows成功反馈对应0.10.0。macOS仅作实验入口。普通构建仍不联网，FFmpeg显式下载与解析依赖开关独立。

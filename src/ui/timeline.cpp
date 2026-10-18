@@ -204,7 +204,8 @@ namespace chosuta {
         // QWidget has a finite maximum size. Reduce zoom for long animations
         // so their end and cursor remain reachable instead of clipping time.
         if(width>16000000){scale*=15999980/(width-20);width=xAtTime(end+10);}
-        setFixedWidth(int(std::clamp(width,900.,16000000.)));
+        const int contentWidth=int(std::clamp(width,900.,16000000.));
+        setMinimumWidth(contentWidth);resize(contentWidth,height());
         int h=baseHeight();if(project.subtitlesEnabled){h+=4;for(int row=0;row<project.subtitles.size();++row)h+=subtitleHeight(row);}setFixedHeight(h);positionEditor();
     }
     int Timeline::hit(double x,double y)const {
