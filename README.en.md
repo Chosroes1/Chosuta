@@ -15,14 +15,14 @@ Version 1.0.0 added support for more synthesis programs, without manual testing 
 
 ## 2. Current version
 
-The current version is **1.0.1 (schema14)**, including batch import row selection and timeline width adaptation. This delivery provides a Linux x86_64 ZIP and an Arch package; see Releases for published attachments. Native builds and real interaction on Windows/macOS remain unverified for this version.
+The current version is **1.0.1 (schema14)**.
 
 ## 3. System requirements
 
 | Environment | Requirements |
 | --- | --- |
 | Linux | A matching distribution and architecture; these binaries target Arch Linux x86_64. The ZIP links to system libraries and is not a self-contained cross-distribution package |
-| Windows | Build scripts target Windows 10/11 x64; native 1.0.1 compilation/deployment remains unverified. Linux results do not establish Windows support |
+| Windows | Build scripts target Windows 10/11 x64 |
 | macOS | An experimental local build script is available; existing Xcode command-line tools and SDKs for the same architecture are required. No native validation yet |
 | Runtime libraries | Qt ≥6.4 (Core, Gui, Widgets, Concurrent, Multimedia and platform/media plugins), ICU ≥67; LibYAML and traditional MiniZip/zlib use system shared libraries or static builds, depending on platform |
 | Video export / waveforms | Optional external FFmpeg; MP4 needs libx264/AAC, WebM needs libvpx-vp9/libopus, transparent MOV needs qtrle |
