@@ -16,14 +16,14 @@ Chosuta是一个导入虚拟歌姬音声合成软件工程与口型立绘后直�
 
 ## 2. 当前版本
 
-当前版本为 **1.0.1（schema14）**，包含批量导入全选与时间轴宽度适配。本次提供 Linux x86_64 ZIP 与 Arch 安装包；已发布附件以 Releases 页面为准。Windows/macOS 的本次原生构建及真实交互仍待验证。
+当前版本为 **1.0.1（schema14）**。
 
 ## 3. 系统要求
 
 | 使用环境 | 要求 |
 | --- | --- |
 | Linux | 与包匹配的发行版和架构；本次二进制面向 Arch Linux x86_64。ZIP动态链接系统库，不是跨发行版自包含包 |
-| Windows | 构建脚本面向 Windows 10/11 x64；当前1.0.1原生编译/部署尚待验证，不能以Linux结果代替 |
+| Windows | 构建脚本面向 Windows 10/11 x64 |
 | macOS | 提供实验性本机构建脚本；需要现有Xcode命令行工具及匹配架构的SDK，尚未实机验证 |
 | 应用运行库 | Qt ≥6.4（Core、Gui、Widgets、Concurrent、Multimedia及平台/媒体插件）、ICU ≥67；LibYAML、传统MiniZip/zlib按平台采用系统动态库或静态编入 |
 | 视频导出/波形 | 可选独立FFmpeg；MP4需libx264/AAC，WebM需libvpx-vp9/libopus，透明MOV需qtrle |
