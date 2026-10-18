@@ -45,7 +45,7 @@ Windows的Qt、ICU与编译器须架构/ABI匹配；MSVC在x64开发者终端执
 
 ### 直接下载
 
-在本仓库的 **Releases** 页面选择与系统和架构匹配的附件；是否已经发布、验证和捆绑依赖，以该Release说明为准。GitHub自动生成的Source code归档是源码，需要编译。
+在本仓库的 [Releases](https://github.com/Chosroes1/Chosuta/releases) 页面选择与系统和架构匹配的附件；是否已经发布、验证和捆绑依赖，以该Release说明为准。GitHub自动生成的Source code归档是源码，需要编译。
 
 - **Arch Linux**：安装`chosuta-<版本>-<修订>-x86_64.pkg.tar.zst`后运行`chosuta`或桌面菜单入口；系统包管理器提供运行库。
 - **Linux ZIP**：完整解压后运行`bin/chosuta`，CLI为`bin/chosuta-cli`；需要匹配的系统ABI及Qt平台/媒体插件。
